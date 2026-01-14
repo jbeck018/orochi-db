@@ -27,6 +27,9 @@
 /* Previous planner hook */
 static planner_hook_type prev_planner_hook = NULL;
 
+/* Recursion guard to prevent infinite loops when querying catalog tables */
+static int planner_recursion_depth = 0;
+
 /* Custom scan methods */
 CustomScanMethods orochi_scan_methods = {
     "OrochiScan",
@@ -56,9 +59,29 @@ orochi_planner_hook(Query *parse, const char *query_string, int cursorOptions,
 {
     PlannedStmt *result;
     DistributedPlan *dplan;
+    bool is_distributed;
+
+    /*
+     * Prevent infinite recursion when querying catalog tables.
+     * When we check if a table is distributed, we query orochi.orochi_tables,
+     * which would trigger this hook again.
+     */
+    if (planner_recursion_depth > 0)
+    {
+        if (prev_planner_hook)
+            return prev_planner_hook(parse, query_string, cursorOptions, boundParams);
+        else
+            return standard_planner(parse, query_string, cursorOptions, boundParams);
+    }
+
+    planner_recursion_depth++;
 
     /* Check if query involves distributed tables */
-    if (!contains_distributed_table(parse))
+    is_distributed = contains_distributed_table(parse);
+
+    planner_recursion_depth--;
+
+    if (!is_distributed)
     {
         /* Use standard planner for local queries */
         if (prev_planner_hook)
