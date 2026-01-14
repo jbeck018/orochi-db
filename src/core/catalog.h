@@ -137,6 +137,23 @@ extern void orochi_catalog_update_shard_stats(int64 shard_id, int64 row_count,
  */
 extern void orochi_catalog_record_shard_access(int64 shard_id);
 
+/*
+ * Create a single shard
+ */
+extern int64 orochi_catalog_create_shard(Oid table_oid, int32 hash_min,
+                                         int32 hash_max, int32 node_id);
+
+/*
+ * Update shard hash range
+ */
+extern void orochi_catalog_update_shard_range(int64 shard_id, int32 hash_min,
+                                              int32 hash_max);
+
+/*
+ * Delete a shard
+ */
+extern void orochi_catalog_delete_shard(int64 shard_id);
+
 /* ============================================================
  * Chunk Operations (Time-series)
  * ============================================================ */

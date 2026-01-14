@@ -1030,6 +1030,69 @@ orochi_catalog_record_shard_access(int64 shard_id)
     pfree(query.data);
 }
 
+int64
+orochi_catalog_create_shard(Oid table_oid, int32 hash_min, int32 hash_max, int32 node_id)
+{
+    StringInfoData query;
+    int ret;
+    int64 shard_id = -1;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "INSERT INTO orochi.orochi_shards "
+        "(table_oid, hash_min, hash_max, node_id, storage_tier) "
+        "VALUES (%u, %d, %d, %d, 0) "
+        "RETURNING shard_id",
+        table_oid, hash_min, hash_max, node_id);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, false, 1);
+
+    if (ret == SPI_OK_INSERT_RETURNING && SPI_processed > 0)
+    {
+        bool isnull;
+        shard_id = DatumGetInt64(SPI_getbinval(SPI_tuptable->vals[0],
+                                               SPI_tuptable->tupdesc, 1, &isnull));
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
+    return shard_id;
+}
+
+void
+orochi_catalog_update_shard_range(int64 shard_id, int32 hash_min, int32 hash_max)
+{
+    StringInfoData query;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "UPDATE orochi.orochi_shards SET hash_min = %d, hash_max = %d "
+        "WHERE shard_id = %ld",
+        hash_min, hash_max, shard_id);
+
+    SPI_connect();
+    SPI_execute(query.data, false, 0);
+    SPI_finish();
+    pfree(query.data);
+}
+
+void
+orochi_catalog_delete_shard(int64 shard_id)
+{
+    StringInfoData query;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "DELETE FROM orochi.orochi_shards WHERE shard_id = %ld", shard_id);
+
+    SPI_connect();
+    SPI_execute(query.data, false, 0);
+    SPI_finish();
+    pfree(query.data);
+}
+
 void
 orochi_catalog_update_node_stats(int32 node_id, int64 shard_count, int64 total_size,
                                  double cpu_usage, double memory_usage)

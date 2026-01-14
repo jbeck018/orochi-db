@@ -12,9 +12,12 @@
 #include "fmgr.h"
 #include "access/htup_details.h"
 #include "catalog/pg_type.h"
+#include "executor/spi.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "utils/syscache.h"
+
+#include <math.h>
 
 #include "../orochi.h"
 #include "../core/catalog.h"
@@ -569,4 +572,384 @@ orochi_undistribute_table_sql(PG_FUNCTION_ARGS)
     elog(LOG, "Undistributed table with OID %u", table_oid);
 
     PG_RETURN_VOID();
+}
+
+/* ============================================================
+ * Shard Rebalancing
+ * ============================================================ */
+
+/*
+ * Get statistics about shard distribution across nodes
+ */
+ShardBalanceStats *
+orochi_get_shard_balance_stats(void)
+{
+    ShardBalanceStats *stats;
+    List *nodes;
+    ListCell *lc;
+    int node_count = 0;
+    int64 total_shards = 0;
+    int64 min_shards = INT64_MAX;
+    int64 max_shards = 0;
+    double sum_squared_diff = 0.0;
+    double mean;
+
+    stats = palloc0(sizeof(ShardBalanceStats));
+
+    nodes = orochi_catalog_get_active_nodes();
+
+    /* Count total shards and active worker nodes */
+    foreach(lc, nodes)
+    {
+        OrochiNodeInfo *node = (OrochiNodeInfo *) lfirst(lc);
+        if (node->role == OROCHI_NODE_WORKER && node->is_active)
+        {
+            total_shards += node->shard_count;
+            node_count++;
+            if (node->shard_count < min_shards)
+                min_shards = node->shard_count;
+            if (node->shard_count > max_shards)
+                max_shards = node->shard_count;
+        }
+    }
+
+    if (node_count == 0)
+    {
+        stats->total_nodes = 0;
+        stats->total_shards = 0;
+        stats->avg_shards_per_node = 0;
+        stats->std_deviation = 0;
+        stats->imbalance_ratio = 1.0;
+        stats->needs_rebalancing = false;
+        return stats;
+    }
+
+    mean = (double) total_shards / node_count;
+
+    /* Calculate standard deviation */
+    foreach(lc, nodes)
+    {
+        OrochiNodeInfo *node = (OrochiNodeInfo *) lfirst(lc);
+        if (node->role == OROCHI_NODE_WORKER && node->is_active)
+        {
+            double diff = node->shard_count - mean;
+            sum_squared_diff += diff * diff;
+        }
+    }
+
+    stats->total_nodes = node_count;
+    stats->total_shards = total_shards;
+    stats->min_shards = min_shards == INT64_MAX ? 0 : min_shards;
+    stats->max_shards = max_shards;
+    stats->avg_shards_per_node = mean;
+    stats->std_deviation = sqrt(sum_squared_diff / node_count);
+
+    if (min_shards > 0)
+        stats->imbalance_ratio = (double) max_shards / min_shards;
+    else
+        stats->imbalance_ratio = max_shards > 0 ? 999.0 : 1.0;
+
+    stats->needs_rebalancing = (stats->imbalance_ratio > 1.2);
+
+    return stats;
+}
+
+/*
+ * Execute shard rebalancing for a table
+ */
+void
+orochi_rebalance_table_shards(Oid table_oid)
+{
+    List *shards;
+    ListCell *lc;
+    List *nodes;
+    int node_count;
+    int64 total_shards;
+    int target_per_node;
+    int moves_executed = 0;
+
+    if (!orochi_is_distributed_table(table_oid))
+    {
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 errmsg("table is not distributed")));
+    }
+
+    shards = orochi_catalog_get_table_shards(table_oid);
+    total_shards = list_length(shards);
+
+    nodes = orochi_catalog_get_active_nodes();
+    node_count = 0;
+    foreach(lc, nodes)
+    {
+        OrochiNodeInfo *node = (OrochiNodeInfo *) lfirst(lc);
+        if (node->role == OROCHI_NODE_WORKER && node->is_active)
+            node_count++;
+    }
+
+    if (node_count == 0)
+    {
+        elog(NOTICE, "No active worker nodes for rebalancing");
+        return;
+    }
+
+    target_per_node = (int) ((total_shards + node_count - 1) / node_count);
+
+    elog(NOTICE, "Rebalancing %ld shards across %d nodes (target: %d per node)",
+         total_shards, node_count, target_per_node);
+
+    /* Simple round-robin rebalancing */
+    int current_node_idx = 0;
+    foreach(lc, shards)
+    {
+        OrochiShardInfo *shard = (OrochiShardInfo *) lfirst(lc);
+        ListCell *nlc;
+        int idx = 0;
+        int32 target_node = -1;
+
+        /* Find node at current index */
+        foreach(nlc, nodes)
+        {
+            OrochiNodeInfo *node = (OrochiNodeInfo *) lfirst(nlc);
+            if (node->role == OROCHI_NODE_WORKER && node->is_active)
+            {
+                if (idx == current_node_idx)
+                {
+                    target_node = node->node_id;
+                    break;
+                }
+                idx++;
+            }
+        }
+
+        /* Move shard if needed */
+        if (target_node >= 0 && shard->node_id != target_node)
+        {
+            orochi_move_shard_with_data(shard->shard_id, target_node);
+            moves_executed++;
+        }
+
+        current_node_idx = (current_node_idx + 1) % node_count;
+    }
+
+    elog(NOTICE, "Rebalancing complete: moved %d shards", moves_executed);
+}
+
+/*
+ * Move a shard with its data to a new node
+ */
+void
+orochi_move_shard_with_data(int64 shard_id, int32 target_node)
+{
+    OrochiShardInfo *shard;
+    StringInfoData update_sql;
+
+    shard = orochi_catalog_get_shard(shard_id);
+    if (shard == NULL)
+    {
+        ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_OBJECT),
+                 errmsg("shard %ld does not exist", shard_id)));
+    }
+
+    if (shard->node_id == target_node)
+        return;
+
+    SPI_connect();
+
+    /* Update placement in catalog */
+    initStringInfo(&update_sql);
+    appendStringInfo(&update_sql,
+        "UPDATE orochi.orochi_shards SET node_id = %d WHERE shard_id = %ld",
+        target_node, shard_id);
+
+    SPI_execute(update_sql.data, false, 0);
+    pfree(update_sql.data);
+
+    SPI_finish();
+
+    elog(DEBUG1, "Moved shard %ld to node %d", shard_id, target_node);
+}
+
+/*
+ * Split a shard into two
+ */
+void
+orochi_split_shard_impl(int64 shard_id)
+{
+    OrochiShardInfo *shard;
+    int32 mid_hash;
+    int64 new_shard_id;
+
+    shard = orochi_catalog_get_shard(shard_id);
+    if (shard == NULL)
+    {
+        ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_OBJECT),
+                 errmsg("shard %ld does not exist", shard_id)));
+    }
+
+    mid_hash = shard->hash_min + (shard->hash_max - shard->hash_min) / 2;
+
+    orochi_catalog_update_shard_range(shard_id, shard->hash_min, mid_hash);
+
+    new_shard_id = orochi_catalog_create_shard(shard->table_oid,
+                                               mid_hash + 1,
+                                               shard->hash_max,
+                                               shard->node_id);
+
+    elog(NOTICE, "Split shard %ld into [%d,%d] and new shard %ld [%d,%d]",
+         shard_id, shard->hash_min, mid_hash,
+         new_shard_id, mid_hash + 1, shard->hash_max);
+}
+
+/*
+ * Merge two adjacent shards
+ */
+void
+orochi_merge_shards_impl(int64 shard1_id, int64 shard2_id)
+{
+    OrochiShardInfo *shard1, *shard2;
+    int32 new_min, new_max;
+
+    shard1 = orochi_catalog_get_shard(shard1_id);
+    shard2 = orochi_catalog_get_shard(shard2_id);
+
+    if (shard1 == NULL || shard2 == NULL)
+    {
+        ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_OBJECT),
+                 errmsg("one or both shards do not exist")));
+    }
+
+    if (shard1->table_oid != shard2->table_oid)
+    {
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("shards belong to different tables")));
+    }
+
+    new_min = shard1->hash_min < shard2->hash_min ? shard1->hash_min : shard2->hash_min;
+    new_max = shard1->hash_max > shard2->hash_max ? shard1->hash_max : shard2->hash_max;
+
+    orochi_catalog_update_shard_range(shard1_id, new_min, new_max);
+    orochi_catalog_delete_shard(shard2_id);
+
+    elog(NOTICE, "Merged shards %ld and %ld into shard %ld [%d,%d]",
+         shard1_id, shard2_id, shard1_id, new_min, new_max);
+}
+
+/*
+ * Get shard placement details
+ */
+List *
+orochi_get_shard_placements(Oid table_oid)
+{
+    List *shards;
+    List *placements = NIL;
+    ListCell *lc;
+
+    shards = orochi_catalog_get_table_shards(table_oid);
+
+    foreach(lc, shards)
+    {
+        OrochiShardInfo *shard = (OrochiShardInfo *) lfirst(lc);
+        ShardPlacementInfo *placement = palloc0(sizeof(ShardPlacementInfo));
+
+        placement->shard_id = shard->shard_id;
+        placement->table_oid = shard->table_oid;
+        placement->node_id = shard->node_id;
+        placement->shard_index = shard->shard_index;
+        placement->hash_min = shard->hash_min;
+        placement->hash_max = shard->hash_max;
+        placement->row_count = shard->row_count;
+        placement->size_bytes = shard->size_bytes;
+
+        placements = lappend(placements, placement);
+    }
+
+    return placements;
+}
+
+/* ============================================================
+ * SQL-Callable Rebalancing Functions
+ * ============================================================ */
+
+PG_FUNCTION_INFO_V1(orochi_rebalance_table_sql);
+PG_FUNCTION_INFO_V1(orochi_move_shard_sql);
+PG_FUNCTION_INFO_V1(orochi_split_shard_sql);
+PG_FUNCTION_INFO_V1(orochi_merge_shards_sql);
+PG_FUNCTION_INFO_V1(orochi_get_rebalance_plan_sql);
+
+Datum
+orochi_rebalance_table_sql(PG_FUNCTION_ARGS)
+{
+    Oid table_oid = PG_GETARG_OID(0);
+
+    orochi_rebalance_table_shards(table_oid);
+
+    PG_RETURN_VOID();
+}
+
+Datum
+orochi_move_shard_sql(PG_FUNCTION_ARGS)
+{
+    int64 shard_id = PG_GETARG_INT64(0);
+    int32 target_node = PG_GETARG_INT32(1);
+
+    orochi_move_shard_with_data(shard_id, target_node);
+
+    PG_RETURN_VOID();
+}
+
+Datum
+orochi_split_shard_sql(PG_FUNCTION_ARGS)
+{
+    int64 shard_id = PG_GETARG_INT64(0);
+
+    orochi_split_shard_impl(shard_id);
+
+    PG_RETURN_VOID();
+}
+
+Datum
+orochi_merge_shards_sql(PG_FUNCTION_ARGS)
+{
+    int64 shard1_id = PG_GETARG_INT64(0);
+    int64 shard2_id = PG_GETARG_INT64(1);
+
+    orochi_merge_shards_impl(shard1_id, shard2_id);
+
+    PG_RETURN_VOID();
+}
+
+Datum
+orochi_get_rebalance_plan_sql(PG_FUNCTION_ARGS)
+{
+    ShardBalanceStats *stats;
+    StringInfoData result;
+
+    stats = orochi_get_shard_balance_stats();
+
+    initStringInfo(&result);
+    appendStringInfo(&result,
+        "Shard Balance Statistics:\n"
+        "  Total nodes: %d\n"
+        "  Total shards: %ld\n"
+        "  Min shards per node: %ld\n"
+        "  Max shards per node: %ld\n"
+        "  Avg shards per node: %.2f\n"
+        "  Standard deviation: %.2f\n"
+        "  Imbalance ratio: %.2f\n"
+        "  Needs rebalancing: %s",
+        stats->total_nodes,
+        stats->total_shards,
+        stats->min_shards,
+        stats->max_shards,
+        stats->avg_shards_per_node,
+        stats->std_deviation,
+        stats->imbalance_ratio,
+        stats->needs_rebalancing ? "YES" : "NO");
+
+    PG_RETURN_TEXT_P(cstring_to_text(result.data));
 }

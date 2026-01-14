@@ -815,3 +815,123 @@ FROM orochi.orochi_continuous_aggregates ca
 JOIN pg_class v ON ca.view_oid = v.oid
 JOIN pg_namespace ns ON v.relnamespace = ns.oid
 LEFT JOIN orochi.orochi_tables t ON ca.source_table_oid = t.table_oid;
+
+-- ============================================================
+-- Shard Rebalancing Functions
+-- ============================================================
+
+-- Rebalance shards for a distributed table
+CREATE FUNCTION rebalance_table_shards(
+    relation regclass
+) RETURNS void AS $$
+BEGIN
+    PERFORM orochi._rebalance_table(relation);
+    RAISE NOTICE 'Rebalanced shards for table %', relation;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE FUNCTION orochi._rebalance_table(relation oid)
+RETURNS void
+    AS 'MODULE_PATHNAME', 'orochi_rebalance_table_sql'
+    LANGUAGE C STRICT;
+
+-- Move a specific shard to a different node
+CREATE FUNCTION move_shard(
+    shard_id bigint,
+    target_node_id integer
+) RETURNS void AS $$
+BEGIN
+    PERFORM orochi._move_shard(shard_id, target_node_id);
+    RAISE NOTICE 'Moved shard % to node %', shard_id, target_node_id;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE FUNCTION orochi._move_shard(shard_id bigint, target_node integer)
+RETURNS void
+    AS 'MODULE_PATHNAME', 'orochi_move_shard_sql'
+    LANGUAGE C STRICT;
+
+-- Split a shard into two
+CREATE FUNCTION split_shard(
+    shard_id bigint
+) RETURNS void AS $$
+BEGIN
+    PERFORM orochi._split_shard(shard_id);
+    RAISE NOTICE 'Split shard %', shard_id;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE FUNCTION orochi._split_shard(shard_id bigint)
+RETURNS void
+    AS 'MODULE_PATHNAME', 'orochi_split_shard_sql'
+    LANGUAGE C STRICT;
+
+-- Merge two adjacent shards
+CREATE FUNCTION merge_shards(
+    shard1_id bigint,
+    shard2_id bigint
+) RETURNS void AS $$
+BEGIN
+    PERFORM orochi._merge_shards(shard1_id, shard2_id);
+    RAISE NOTICE 'Merged shards % and %', shard1_id, shard2_id;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE FUNCTION orochi._merge_shards(shard1_id bigint, shard2_id bigint)
+RETURNS void
+    AS 'MODULE_PATHNAME', 'orochi_merge_shards_sql'
+    LANGUAGE C STRICT;
+
+-- Get shard balance statistics and rebalance plan
+CREATE FUNCTION get_rebalance_plan()
+RETURNS text AS $$
+    SELECT orochi._get_rebalance_plan();
+$$ LANGUAGE sql;
+
+CREATE FUNCTION orochi._get_rebalance_plan()
+RETURNS text
+    AS 'MODULE_PATHNAME', 'orochi_get_rebalance_plan_sql'
+    LANGUAGE C STRICT;
+
+-- View showing shard distribution across nodes
+CREATE VIEW orochi.shard_distribution AS
+SELECT
+    n.node_id,
+    n.hostname,
+    n.port,
+    CASE n.role
+        WHEN 0 THEN 'coordinator'
+        WHEN 1 THEN 'worker'
+        WHEN 2 THEN 'replica'
+    END as role,
+    n.is_active,
+    COUNT(s.shard_id) as shard_count,
+    COALESCE(SUM(s.size_bytes), 0) as total_size_bytes,
+    COALESCE(SUM(s.row_count), 0) as total_row_count
+FROM orochi.orochi_nodes n
+LEFT JOIN orochi.orochi_shards s ON n.node_id = s.node_id
+GROUP BY n.node_id, n.hostname, n.port, n.role, n.is_active
+ORDER BY n.node_id;
+
+-- View showing detailed shard placements
+CREATE VIEW orochi.shard_placements AS
+SELECT
+    s.shard_id,
+    t.schema_name || '.' || t.table_name as table_name,
+    s.shard_index,
+    s.hash_min,
+    s.hash_max,
+    s.node_id,
+    n.hostname as node_hostname,
+    s.row_count,
+    s.size_bytes,
+    CASE s.storage_tier
+        WHEN 0 THEN 'hot'
+        WHEN 1 THEN 'warm'
+        WHEN 2 THEN 'cold'
+        WHEN 3 THEN 'frozen'
+    END as storage_tier
+FROM orochi.orochi_shards s
+JOIN orochi.orochi_tables t ON s.table_oid = t.table_oid
+LEFT JOIN orochi.orochi_nodes n ON s.node_id = n.node_id
+ORDER BY t.table_name, s.shard_index;
