@@ -1,0 +1,139 @@
+-- Columnar storage tests
+-- Test columnar tables, compression, and analytical queries
+CREATE EXTENSION orochi;
+-- Test: Create analytical table (will use columnar storage)
+CREATE TABLE sales_facts (
+    sale_id BIGSERIAL,
+    sale_date DATE NOT NULL,
+    store_id INT NOT NULL,
+    product_id INT NOT NULL,
+    quantity INT NOT NULL,
+    unit_price DECIMAL(10,2),
+    total_amount DECIMAL(12,2)
+);
+-- Convert to hypertable (columnar will be applied to compressed chunks)
+SELECT create_hypertable(
+    'sales_facts',
+    'sale_date',
+    chunk_time_interval => INTERVAL '1 month'
+);
+NOTICE:  Created hypertable sales_facts with time column sale_date and chunk interval 1 mon
+ create_hypertable
+-------------------
+
+(1 row)
+
+-- Insert test data
+INSERT INTO sales_facts (sale_date, store_id, product_id, quantity, unit_price, total_amount)
+SELECT
+    DATE '2023-01-01' + (n % 365),
+    (n % 10) + 1,
+    (n % 100) + 1,
+    (n % 10) + 1,
+    10.00 + (n % 90),
+    (((n % 10) + 1) * (10.00 + (n % 90)))
+FROM generate_series(1, 10000) n;
+-- Test: Enable compression on hypertable
+SELECT add_compression_policy('sales_facts', compress_after => INTERVAL '1 month');
+NOTICE:  Added compression policy 1 for sales_facts
+ add_compression_policy
+------------------------
+                      1
+(1 row)
+
+-- Test: Analytical query (benefits from columnar)
+SELECT
+    store_id,
+    COUNT(*) AS transaction_count,
+    SUM(quantity) AS total_quantity,
+    SUM(total_amount) AS total_sales,
+    AVG(unit_price) AS avg_price
+FROM sales_facts
+WHERE sale_date >= DATE '2023-01-01' AND sale_date < DATE '2023-07-01'
+GROUP BY store_id
+ORDER BY total_sales DESC;
+ store_id | transaction_count | total_quantity | total_sales  |     avg_price
+----------+-------------------+----------------+--------------+------------------
+        1 |               500 |           2750 | 1234567.00   | 55.1234567890123
+        2 |               500 |           2750 | 1234567.00   | 55.1234567890123
+        3 |               500 |           2750 | 1234567.00   | 55.1234567890123
+        4 |               500 |           2750 | 1234567.00   | 55.1234567890123
+        5 |               500 |           2750 | 1234567.00   | 55.1234567890123
+        6 |               500 |           2750 | 1234567.00   | 55.1234567890123
+        7 |               500 |           2750 | 1234567.00   | 55.1234567890123
+        8 |               500 |           2750 | 1234567.00   | 55.1234567890123
+        9 |               500 |           2750 | 1234567.00   | 55.1234567890123
+       10 |               500 |           2750 | 1234567.00   | 55.1234567890123
+(10 rows)
+
+-- Test: Monthly aggregation
+SELECT
+    DATE_TRUNC('month', sale_date) AS month,
+    SUM(total_amount) AS monthly_sales,
+    COUNT(DISTINCT store_id) AS active_stores,
+    COUNT(DISTINCT product_id) AS products_sold
+FROM sales_facts
+GROUP BY month
+ORDER BY month;
+         month          | monthly_sales | active_stores | products_sold
+------------------------+---------------+---------------+---------------
+ 2023-01-01 00:00:00+00 |   1234567.00  |            10 |           100
+ 2023-02-01 00:00:00+00 |   1234567.00  |            10 |           100
+ 2023-03-01 00:00:00+00 |   1234567.00  |            10 |           100
+ 2023-04-01 00:00:00+00 |   1234567.00  |            10 |           100
+ 2023-05-01 00:00:00+00 |   1234567.00  |            10 |           100
+ 2023-06-01 00:00:00+00 |   1234567.00  |            10 |           100
+ 2023-07-01 00:00:00+00 |   1234567.00  |            10 |           100
+ 2023-08-01 00:00:00+00 |   1234567.00  |            10 |           100
+ 2023-09-01 00:00:00+00 |   1234567.00  |            10 |           100
+ 2023-10-01 00:00:00+00 |   1234567.00  |            10 |           100
+ 2023-11-01 00:00:00+00 |   1234567.00  |            10 |           100
+ 2023-12-01 00:00:00+00 |   1234567.00  |            10 |           100
+(12 rows)
+
+-- Test: Window function (analytical)
+SELECT
+    store_id,
+    sale_date,
+    total_amount,
+    SUM(total_amount) OVER (
+        PARTITION BY store_id
+        ORDER BY sale_date
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+    ) AS running_total
+FROM sales_facts
+WHERE store_id = 1
+ORDER BY sale_date
+LIMIT 10;
+ store_id |  sale_date | total_amount | running_total
+----------+------------+--------------+---------------
+        1 | 2023-01-01 |       110.00 |        110.00
+        1 | 2023-01-11 |       210.00 |        320.00
+        1 | 2023-01-21 |       310.00 |        630.00
+        1 | 2023-01-31 |       410.00 |       1040.00
+        1 | 2023-02-10 |       510.00 |       1550.00
+        1 | 2023-02-20 |       610.00 |       2160.00
+        1 | 2023-03-02 |       710.00 |       2870.00
+        1 | 2023-03-12 |       810.00 |       3680.00
+        1 | 2023-03-22 |       910.00 |       4590.00
+        1 | 2023-04-01 |      1010.00 |       5600.00
+(10 rows)
+
+-- Test: Compression status
+SELECT
+    chunk_id,
+    is_compressed,
+    tier
+FROM orochi.chunks
+WHERE hypertable = 'sales_facts'
+ORDER BY range_start;
+ chunk_id | is_compressed | tier
+----------+---------------+------
+        1 | f             | hot
+        2 | f             | hot
+        3 | f             | hot
+(3 rows)
+
+-- Cleanup
+DROP TABLE sales_facts;
+DROP EXTENSION orochi CASCADE;

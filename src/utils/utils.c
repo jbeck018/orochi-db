@@ -13,6 +13,7 @@
 #include "utils/builtins.h"
 
 #include "../orochi.h"
+#include "../sharding/distribution.h"
 
 /*
  * orochi_compression_type_name
@@ -55,10 +56,10 @@ orochi_storage_tier_name(OrochiStorageTier tier)
 /*
  * orochi_hash_value
  *    Calculate hash value for distribution key
+ *    This is a wrapper that calls the implementation in distribution.c
  */
 int32
 orochi_hash_value(Datum value, Oid type_oid)
 {
-    /* Implementation in distribution.c */
-    return 0;
+    return orochi_hash_datum(value, type_oid);
 }

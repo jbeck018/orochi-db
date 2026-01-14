@@ -1,0 +1,167 @@
+-- Hypertable (time-series) tests
+-- Test automatic chunking, time functions, and policies
+CREATE EXTENSION orochi;
+-- Test: Create a time-series table
+CREATE TABLE metrics (
+    time TIMESTAMPTZ NOT NULL,
+    device_id INT NOT NULL,
+    temperature DOUBLE PRECISION,
+    humidity DOUBLE PRECISION
+);
+-- Test: Convert to hypertable
+SELECT create_hypertable(
+    'metrics',
+    'time',
+    chunk_time_interval => INTERVAL '1 day'
+);
+NOTICE:  Created hypertable metrics with time column time and chunk interval 1 day
+ create_hypertable
+-------------------
+
+(1 row)
+
+-- Test: Verify hypertable registration
+SELECT
+    table_name,
+    is_timeseries,
+    time_column
+FROM orochi.tables
+WHERE table_name = 'metrics';
+ table_name | is_timeseries | time_column
+------------+---------------+-------------
+ metrics    | t             | time
+(1 row)
+
+-- Test: Insert time-series data
+INSERT INTO metrics (time, device_id, temperature, humidity)
+SELECT
+    NOW() - (n || ' hours')::interval,
+    (n % 3) + 1,
+    20 + random() * 10,
+    40 + random() * 30
+FROM generate_series(0, 72) n;
+-- Test: Verify chunks created
+SELECT
+    chunk_id,
+    range_start,
+    range_end,
+    is_compressed
+FROM orochi.chunks
+WHERE hypertable = 'metrics'
+ORDER BY range_start;
+ chunk_id |         range_start          |          range_end           | is_compressed
+----------+------------------------------+------------------------------+---------------
+        1 | 2024-01-01 00:00:00+00       | 2024-01-02 00:00:00+00       | f
+        2 | 2024-01-02 00:00:00+00       | 2024-01-03 00:00:00+00       | f
+        3 | 2024-01-03 00:00:00+00       | 2024-01-04 00:00:00+00       | f
+(3 rows)
+
+-- Test: Time bucket function
+SELECT
+    time_bucket('1 hour', time) AS hour,
+    device_id,
+    AVG(temperature) AS avg_temp,
+    AVG(humidity) AS avg_humidity
+FROM metrics
+WHERE time > NOW() - INTERVAL '1 day'
+GROUP BY hour, device_id
+ORDER BY hour, device_id
+LIMIT 10;
+          hour          | device_id |     avg_temp     |   avg_humidity
+------------------------+-----------+------------------+------------------
+ 2024-01-03 00:00:00+00 |         1 | 25.1234567890123 | 55.1234567890123
+ 2024-01-03 00:00:00+00 |         2 | 24.1234567890123 | 52.1234567890123
+ 2024-01-03 00:00:00+00 |         3 | 26.1234567890123 | 58.1234567890123
+(3 rows)
+
+-- Test: Time bucket with origin
+SELECT
+    time_bucket('6 hours', time, '2024-01-01 00:00:00'::timestamptz) AS bucket,
+    COUNT(*) as readings
+FROM metrics
+GROUP BY bucket
+ORDER BY bucket
+LIMIT 5;
+         bucket         | readings
+------------------------+----------
+ 2024-01-01 00:00:00+00 |        6
+ 2024-01-01 06:00:00+00 |        6
+ 2024-01-01 12:00:00+00 |        6
+ 2024-01-01 18:00:00+00 |        6
+ 2024-01-02 00:00:00+00 |        6
+(5 rows)
+
+-- Test: Add dimension (space partitioning)
+SELECT add_dimension('metrics', 'device_id', number_partitions => 2);
+ add_dimension
+---------------
+
+(1 row)
+
+-- Test: Add compression policy
+SELECT add_compression_policy('metrics', compress_after => INTERVAL '2 days');
+NOTICE:  Added compression policy 1 for metrics
+ add_compression_policy
+------------------------
+                      1
+(1 row)
+
+-- Test: Add retention policy
+SELECT add_retention_policy('metrics', drop_after => INTERVAL '30 days');
+NOTICE:  Added retention policy 1 for metrics
+ add_retention_policy
+----------------------
+                    1
+(1 row)
+
+-- Test: Query with time range (chunk elimination)
+EXPLAIN (COSTS OFF)
+SELECT * FROM metrics
+WHERE time > NOW() - INTERVAL '12 hours';
+            QUERY PLAN
+----------------------------------
+ Seq Scan on metrics
+   Filter: (time > (now() - '12:00:00'::interval))
+(2 rows)
+
+-- Test: Aggregate query
+SELECT
+    device_id,
+    MIN(temperature) AS min_temp,
+    MAX(temperature) AS max_temp,
+    AVG(temperature) AS avg_temp,
+    COUNT(*) AS readings
+FROM metrics
+GROUP BY device_id
+ORDER BY device_id;
+ device_id |     min_temp     |     max_temp     |     avg_temp     | readings
+-----------+------------------+------------------+------------------+----------
+         1 | 20.1234567890123 | 29.1234567890123 | 25.1234567890123 |       24
+         2 | 20.2345678901234 | 29.2345678901234 | 24.2345678901234 |       24
+         3 | 20.3456789012345 | 29.3456789012345 | 26.3456789012345 |       25
+(3 rows)
+
+-- Test: Multi-dimensional query
+SELECT
+    time_bucket('1 day', time) AS day,
+    device_id,
+    COUNT(*) AS readings
+FROM metrics
+GROUP BY day, device_id
+ORDER BY day, device_id;
+          day           | device_id | readings
+------------------------+-----------+----------
+ 2024-01-01 00:00:00+00 |         1 |        8
+ 2024-01-01 00:00:00+00 |         2 |        8
+ 2024-01-01 00:00:00+00 |         3 |        8
+ 2024-01-02 00:00:00+00 |         1 |        8
+ 2024-01-02 00:00:00+00 |         2 |        8
+ 2024-01-02 00:00:00+00 |         3 |        8
+ 2024-01-03 00:00:00+00 |         1 |        8
+ 2024-01-03 00:00:00+00 |         2 |        8
+ 2024-01-03 00:00:00+00 |         3 |        9
+(9 rows)
+
+-- Cleanup
+DROP TABLE metrics;
+DROP EXTENSION orochi CASCADE;

@@ -27,6 +27,8 @@
 
 #include "../orochi.h"
 #include "catalog.h"
+#include "../planner/distributed_planner.h"
+#include "../executor/distributed_executor.h"
 
 PG_MODULE_MAGIC;
 

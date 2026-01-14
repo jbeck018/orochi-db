@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  orochi-db:
+    build:
+      context: ../..
+      dockerfile: contrib/docker/Dockerfile
+    container_name: orochi-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: orochi_test
+    ports:
+      - "5432:5432"
+    volumes:
+      - orochi_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Additional worker nodes for distributed testing
+  orochi-worker-1:
+    build:
+      context: ../..
+      dockerfile: contrib/docker/Dockerfile
+    container_name: orochi-worker-1
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: orochi_test
+    ports:
+      - "5433:5432"
+    volumes:
+      - orochi_worker1_data:/var/lib/postgresql/data
+
+  orochi-worker-2:
+    build:
+      context: ../..
+      dockerfile: contrib/docker/Dockerfile
+    container_name: orochi-worker-2
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: orochi_test
+    ports:
+      - "5434:5432"
+    volumes:
+      - orochi_worker2_data:/var/lib/postgresql/data
+
+volumes:
+  orochi_data:
+  orochi_worker1_data:
+  orochi_worker2_data:
