@@ -98,6 +98,47 @@ typedef struct ResultMergerState
     TupleDesc           result_tupdesc;
 } ResultMergerState;
 
+/* Aggregate types for pushdown */
+#define AGG_TYPE_COUNT  1
+#define AGG_TYPE_SUM    2
+#define AGG_TYPE_MIN    3
+#define AGG_TYPE_MAX    4
+#define AGG_TYPE_AVG    5
+
+/*
+ * Partial aggregation result from worker
+ */
+typedef struct PartialAggResult
+{
+    int64               shard_id;
+    int64               count;
+    int64               sum;
+    int64               min_val;
+    int64               max_val;
+} PartialAggResult;
+
+/*
+ * Aggregate pushdown plan
+ */
+typedef struct AggPushdownPlan
+{
+    int                 agg_type;           /* AGG_TYPE_* */
+    List               *worker_queries;     /* Partial aggregate queries */
+    Datum               combined_result;    /* Combined final result */
+} AggPushdownPlan;
+
+/*
+ * Streaming result state for large results
+ */
+typedef struct StreamingResultState
+{
+    DistributedExecutorState *executor_state;
+    int                 current_shard;
+    int64               rows_processed;
+    int                 batch_size;
+    bool                is_complete;
+} StreamingResultState;
+
 /* ============================================================
  * Executor Hook Functions
  * ============================================================ */
@@ -268,5 +309,78 @@ extern void orochi_record_execution_stats(DistributedExecutorState *state);
  * Get execution summary
  */
 extern char *orochi_get_execution_summary(DistributedExecutorState *state);
+
+/* ============================================================
+ * Parallel Execution
+ * ============================================================ */
+
+/*
+ * Execute with parallel shard access
+ */
+extern void orochi_parallel_execute(DistributedExecutorState *state, int parallelism);
+
+/*
+ * Start async task
+ */
+extern void orochi_start_async_task(RemoteTask *task);
+
+/*
+ * Check task completion
+ */
+extern bool orochi_check_task_completion(RemoteTask *task);
+
+/* ============================================================
+ * Aggregate Pushdown
+ * ============================================================ */
+
+/*
+ * Execute aggregate with pushdown
+ */
+extern void orochi_execute_aggregate_pushdown(DistributedExecutorState *state,
+                                              AggPushdownPlan *agg_plan);
+
+/*
+ * Combine partial aggregates
+ */
+extern Datum orochi_combine_partial_aggregates(List *partials, int agg_type);
+
+/* ============================================================
+ * Query Result Caching
+ * ============================================================ */
+
+/*
+ * Initialize query cache
+ */
+extern void orochi_init_query_cache(void);
+
+/*
+ * Store result in cache
+ */
+extern void orochi_cache_store(const char *query_string, const char *result_data,
+                               int64 result_size);
+
+/*
+ * Invalidate cache for table
+ */
+extern void orochi_cache_invalidate(Oid table_oid);
+
+/* ============================================================
+ * Streaming Results
+ * ============================================================ */
+
+/*
+ * Initialize streaming result processor
+ */
+extern StreamingResultState *orochi_init_streaming_result(DistributedExecutorState *state);
+
+/*
+ * Get next batch of rows
+ */
+extern List *orochi_get_next_batch(StreamingResultState *stream);
+
+/*
+ * Cleanup streaming state
+ */
+extern void orochi_cleanup_streaming_result(StreamingResultState *stream);
 
 #endif /* OROCHI_DISTRIBUTED_EXECUTOR_H */
