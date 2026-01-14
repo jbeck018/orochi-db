@@ -1,0 +1,7 @@
+# Orochi DB extension
+comment = 'Orochi DB - Modern HTAP PostgreSQL Extension'
+default_version = '1.0'
+module_pathname = '$libdir/orochi'
+relocatable = false
+superuser = true
+schema = orochi
