@@ -1,0 +1,25 @@
+# Build artifacts
+*.o
+*.bc
+*.so
+*.a
+
+# PostgreSQL extension build
+regression.diffs
+regression.out
+results/
+tmp_check/
+tmp_check_iso/
+log/
+output_iso/
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
