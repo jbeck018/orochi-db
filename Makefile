@@ -45,8 +45,8 @@ endif
 # Warnings
 PG_CFLAGS += -Wall -Wextra -Wno-unused-parameter
 
-# Link against compression libraries
-SHLIB_LINK = -llz4 -lzstd -lcurl
+# Link against compression libraries and OpenSSL (for S3 signing)
+SHLIB_LINK = -llz4 -lzstd -lcurl -lssl -lcrypto
 
 # Regression tests
 REGRESS = basic distributed hypertable columnar vector tiering

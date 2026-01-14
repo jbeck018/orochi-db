@@ -21,6 +21,11 @@
 #include "utils/memutils.h"
 #include "utils/timestamp.h"
 
+#include <curl/curl.h>
+#include <openssl/hmac.h>
+#include <openssl/sha.h>
+#include <time.h>
+
 #include "../orochi.h"
 #include "../core/catalog.h"
 #include "../storage/columnar.h"
@@ -50,6 +55,198 @@ static void tiering_sighup_handler(SIGNAL_ARGS);
 static void tiering_sigterm_handler(SIGNAL_ARGS);
 static void process_tiering_queue(void);
 static bool do_tier_transition(int64 chunk_id, OrochiStorageTier to_tier);
+
+/* ============================================================
+ * AWS Signature V4 Helper Functions
+ * ============================================================ */
+
+/* Buffer for CURL response */
+typedef struct {
+    char *data;
+    size_t size;
+    size_t capacity;
+} CurlBuffer;
+
+static size_t
+orochi_curl_write_cb(void *contents, size_t size, size_t nmemb, void *userp)
+{
+    size_t realsize = size * nmemb;
+    CurlBuffer *buf = (CurlBuffer *)userp;
+
+    if (buf->size + realsize + 1 > buf->capacity)
+    {
+        size_t new_capacity = buf->capacity * 2;
+        if (new_capacity < buf->size + realsize + 1)
+            new_capacity = buf->size + realsize + 1 + 1024;
+        buf->data = repalloc(buf->data, new_capacity);
+        buf->capacity = new_capacity;
+    }
+
+    memcpy(&(buf->data[buf->size]), contents, realsize);
+    buf->size += realsize;
+    buf->data[buf->size] = 0;
+
+    return realsize;
+}
+
+/* Convert bytes to hex string */
+static void
+bytes_to_hex(const unsigned char *bytes, size_t len, char *hex)
+{
+    static const char hex_chars[] = "0123456789abcdef";
+    size_t i;
+    for (i = 0; i < len; i++)
+    {
+        hex[i * 2] = hex_chars[(bytes[i] >> 4) & 0x0F];
+        hex[i * 2 + 1] = hex_chars[bytes[i] & 0x0F];
+    }
+    hex[len * 2] = '\0';
+}
+
+/* SHA256 hash */
+static void
+sha256_hash(const char *data, size_t len, unsigned char *hash)
+{
+    SHA256_CTX ctx;
+    SHA256_Init(&ctx);
+    SHA256_Update(&ctx, data, len);
+    SHA256_Final(hash, &ctx);
+}
+
+/* HMAC-SHA256 */
+static void
+hmac_sha256(const unsigned char *key, size_t key_len,
+            const unsigned char *data, size_t data_len,
+            unsigned char *result)
+{
+    unsigned int result_len = 32;
+    HMAC(EVP_sha256(), key, key_len, data, data_len, result, &result_len);
+}
+
+/* URL encode a string */
+static char *
+url_encode(const char *str)
+{
+    StringInfoData buf;
+    const char *p;
+
+    initStringInfo(&buf);
+    for (p = str; *p; p++)
+    {
+        if ((*p >= 'A' && *p <= 'Z') ||
+            (*p >= 'a' && *p <= 'z') ||
+            (*p >= '0' && *p <= '9') ||
+            *p == '-' || *p == '_' || *p == '.' || *p == '~')
+        {
+            appendStringInfoChar(&buf, *p);
+        }
+        else if (*p == '/')
+        {
+            appendStringInfoChar(&buf, '/');  /* Don't encode path separators */
+        }
+        else
+        {
+            appendStringInfo(&buf, "%%%02X", (unsigned char)*p);
+        }
+    }
+    return buf.data;
+}
+
+/* Generate AWS Signature V4 */
+static char *
+generate_aws_signature_v4(S3Client *client, const char *method,
+                          const char *uri, const char *query_string,
+                          const char *payload, size_t payload_len,
+                          const char *date_stamp, const char *amz_date,
+                          char **out_authorization)
+{
+    unsigned char payload_hash[32];
+    char payload_hash_hex[65];
+    unsigned char date_key[32], date_region_key[32], date_region_service_key[32], signing_key[32];
+    unsigned char signature_bytes[32];
+    char signature_hex[65];
+    StringInfoData canonical_request, string_to_sign, auth_header;
+    char *canonical_uri;
+    char scope[128];
+
+    /* Hash the payload */
+    sha256_hash(payload ? payload : "", payload_len, payload_hash);
+    bytes_to_hex(payload_hash, 32, payload_hash_hex);
+
+    /* URL encode the URI */
+    canonical_uri = url_encode(uri);
+
+    /* Build canonical request */
+    initStringInfo(&canonical_request);
+    appendStringInfo(&canonical_request,
+        "%s\n"          /* HTTP method */
+        "%s\n"          /* Canonical URI */
+        "%s\n"          /* Canonical query string */
+        "host:%s\n"     /* Canonical headers */
+        "x-amz-content-sha256:%s\n"
+        "x-amz-date:%s\n"
+        "\n"            /* End of headers */
+        "host;x-amz-content-sha256;x-amz-date\n"  /* Signed headers */
+        "%s",           /* Payload hash */
+        method,
+        canonical_uri,
+        query_string ? query_string : "",
+        client->endpoint,
+        payload_hash_hex,
+        amz_date,
+        payload_hash_hex);
+
+    pfree(canonical_uri);
+
+    /* Hash the canonical request */
+    unsigned char canonical_request_hash[32];
+    char canonical_request_hash_hex[65];
+    sha256_hash(canonical_request.data, canonical_request.len, canonical_request_hash);
+    bytes_to_hex(canonical_request_hash, 32, canonical_request_hash_hex);
+    pfree(canonical_request.data);
+
+    /* Build scope */
+    snprintf(scope, sizeof(scope), "%s/%s/s3/aws4_request",
+             date_stamp, client->region);
+
+    /* Build string to sign */
+    initStringInfo(&string_to_sign);
+    appendStringInfo(&string_to_sign,
+        "AWS4-HMAC-SHA256\n"
+        "%s\n"
+        "%s\n"
+        "%s",
+        amz_date,
+        scope,
+        canonical_request_hash_hex);
+
+    /* Calculate signing key */
+    char aws4_key[256];
+    snprintf(aws4_key, sizeof(aws4_key), "AWS4%s", client->secret_key);
+    hmac_sha256((unsigned char *)aws4_key, strlen(aws4_key),
+                (unsigned char *)date_stamp, strlen(date_stamp), date_key);
+    hmac_sha256(date_key, 32,
+                (unsigned char *)client->region, strlen(client->region), date_region_key);
+    hmac_sha256(date_region_key, 32,
+                (unsigned char *)"s3", 2, date_region_service_key);
+    hmac_sha256(date_region_service_key, 32,
+                (unsigned char *)"aws4_request", 12, signing_key);
+
+    /* Calculate signature */
+    hmac_sha256(signing_key, 32,
+                (unsigned char *)string_to_sign.data, string_to_sign.len, signature_bytes);
+    bytes_to_hex(signature_bytes, 32, signature_hex);
+    pfree(string_to_sign.data);
+
+    /* Build authorization header */
+    initStringInfo(&auth_header);
+    appendStringInfo(&auth_header,
+        "AWS4-HMAC-SHA256 Credential=%s/%s, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=%s",
+        client->access_key, scope, signature_hex);
+
+    *out_authorization = auth_header.data;
+    return pstrdup(payload_hash_hex);
+}
 
 /* ============================================================
  * S3 Client Implementation
@@ -116,6 +313,20 @@ s3_upload(S3Client *client, const char *key, const char *data,
           int64 size, const char *content_type)
 {
     S3UploadResult *result;
+    CURL *curl;
+    CURLcode res;
+    struct curl_slist *headers = NULL;
+    CurlBuffer response_buf;
+    char url[1024];
+    char uri[512];
+    char date_stamp[16];
+    char amz_date[32];
+    char *authorization;
+    char *payload_hash;
+    char header_buf[512];
+    time_t now;
+    struct tm *tm_info;
+    long http_code;
 
     result = palloc0(sizeof(S3UploadResult));
 
@@ -126,20 +337,103 @@ s3_upload(S3Client *client, const char *key, const char *data,
         return result;
     }
 
-    /* TODO: Implement actual S3 upload using CURL
-     *
-     * 1. Build AWS Signature V4
-     * 2. Create PUT request to s3://bucket/key
-     * 3. Set Content-Type and Content-Length headers
-     * 4. Send data
-     * 5. Handle response
-     */
+    /* Initialize response buffer */
+    response_buf.data = palloc(1024);
+    response_buf.size = 0;
+    response_buf.capacity = 1024;
 
-    elog(DEBUG1, "S3 Upload: %s/%s (%ld bytes)", client->bucket, key, size);
+    /* Get current time for signing */
+    now = time(NULL);
+    tm_info = gmtime(&now);
+    strftime(date_stamp, sizeof(date_stamp), "%Y%m%d", tm_info);
+    strftime(amz_date, sizeof(amz_date), "%Y%m%dT%H%M%SZ", tm_info);
 
-    result->success = true;
-    result->etag = pstrdup("mock-etag");
-    result->http_status = 200;
+    /* Build URI and URL */
+    snprintf(uri, sizeof(uri), "/%s/%s", client->bucket, key);
+    if (client->use_ssl)
+        snprintf(url, sizeof(url), "https://%s%s", client->endpoint, uri);
+    else
+        snprintf(url, sizeof(url), "http://%s%s", client->endpoint, uri);
+
+    /* Generate AWS Signature V4 */
+    payload_hash = generate_aws_signature_v4(client, "PUT", uri, NULL,
+                                              data, size, date_stamp, amz_date,
+                                              &authorization);
+
+    /* Initialize CURL */
+    curl = curl_easy_init();
+    if (!curl)
+    {
+        result->success = false;
+        result->error_message = pstrdup("Failed to initialize CURL");
+        pfree(response_buf.data);
+        return result;
+    }
+
+    /* Set up headers */
+    snprintf(header_buf, sizeof(header_buf), "Host: %s", client->endpoint);
+    headers = curl_slist_append(headers, header_buf);
+
+    snprintf(header_buf, sizeof(header_buf), "x-amz-date: %s", amz_date);
+    headers = curl_slist_append(headers, header_buf);
+
+    snprintf(header_buf, sizeof(header_buf), "x-amz-content-sha256: %s", payload_hash);
+    headers = curl_slist_append(headers, header_buf);
+
+    snprintf(header_buf, sizeof(header_buf), "Authorization: %s", authorization);
+    headers = curl_slist_append(headers, header_buf);
+
+    snprintf(header_buf, sizeof(header_buf), "Content-Type: %s",
+             content_type ? content_type : "application/octet-stream");
+    headers = curl_slist_append(headers, header_buf);
+
+    snprintf(header_buf, sizeof(header_buf), "Content-Length: %ld", size);
+    headers = curl_slist_append(headers, header_buf);
+
+    /* Configure CURL */
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, data);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, size);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, orochi_curl_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_buf);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, client->timeout_ms / 1000);
+    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
+
+    /* Perform request */
+    res = curl_easy_perform(curl);
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+    if (res != CURLE_OK)
+    {
+        result->success = false;
+        result->error_message = pstrdup(curl_easy_strerror(res));
+        result->http_status = 0;
+    }
+    else
+    {
+        result->http_status = (int)http_code;
+        if (http_code >= 200 && http_code < 300)
+        {
+            result->success = true;
+            result->etag = pstrdup("uploaded");
+            elog(LOG, "S3 Upload successful: %s/%s (%ld bytes)", client->bucket, key, size);
+        }
+        else
+        {
+            result->success = false;
+            result->error_message = pstrdup(response_buf.data);
+            elog(WARNING, "S3 Upload failed: HTTP %ld - %s", http_code, response_buf.data);
+        }
+    }
+
+    /* Cleanup */
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+    pfree(response_buf.data);
+    pfree(authorization);
+    pfree(payload_hash);
 
     return result;
 }
@@ -148,6 +442,20 @@ S3DownloadResult *
 s3_download(S3Client *client, const char *key)
 {
     S3DownloadResult *result;
+    CURL *curl;
+    CURLcode res;
+    struct curl_slist *headers = NULL;
+    CurlBuffer response_buf;
+    char url[1024];
+    char uri[512];
+    char date_stamp[16];
+    char amz_date[32];
+    char *authorization;
+    char *payload_hash;
+    char header_buf[512];
+    time_t now;
+    struct tm *tm_info;
+    long http_code;
 
     result = palloc0(sizeof(S3DownloadResult));
 
@@ -158,18 +466,95 @@ s3_download(S3Client *client, const char *key)
         return result;
     }
 
-    /* TODO: Implement actual S3 download using CURL
-     *
-     * 1. Build AWS Signature V4
-     * 2. Create GET request to s3://bucket/key
-     * 3. Download data
-     * 4. Return buffer
-     */
+    /* Initialize response buffer */
+    response_buf.data = palloc(4096);
+    response_buf.size = 0;
+    response_buf.capacity = 4096;
 
-    elog(DEBUG1, "S3 Download: %s/%s", client->bucket, key);
+    /* Get current time for signing */
+    now = time(NULL);
+    tm_info = gmtime(&now);
+    strftime(date_stamp, sizeof(date_stamp), "%Y%m%d", tm_info);
+    strftime(amz_date, sizeof(amz_date), "%Y%m%dT%H%M%SZ", tm_info);
 
-    result->success = false;
-    result->error_message = pstrdup("Not implemented");
+    /* Build URI and URL */
+    snprintf(uri, sizeof(uri), "/%s/%s", client->bucket, key);
+    if (client->use_ssl)
+        snprintf(url, sizeof(url), "https://%s%s", client->endpoint, uri);
+    else
+        snprintf(url, sizeof(url), "http://%s%s", client->endpoint, uri);
+
+    /* Generate AWS Signature V4 (empty payload for GET) */
+    payload_hash = generate_aws_signature_v4(client, "GET", uri, NULL,
+                                              "", 0, date_stamp, amz_date,
+                                              &authorization);
+
+    /* Initialize CURL */
+    curl = curl_easy_init();
+    if (!curl)
+    {
+        result->success = false;
+        result->error_message = pstrdup("Failed to initialize CURL");
+        pfree(response_buf.data);
+        return result;
+    }
+
+    /* Set up headers */
+    snprintf(header_buf, sizeof(header_buf), "Host: %s", client->endpoint);
+    headers = curl_slist_append(headers, header_buf);
+
+    snprintf(header_buf, sizeof(header_buf), "x-amz-date: %s", amz_date);
+    headers = curl_slist_append(headers, header_buf);
+
+    snprintf(header_buf, sizeof(header_buf), "x-amz-content-sha256: %s", payload_hash);
+    headers = curl_slist_append(headers, header_buf);
+
+    snprintf(header_buf, sizeof(header_buf), "Authorization: %s", authorization);
+    headers = curl_slist_append(headers, header_buf);
+
+    /* Configure CURL */
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, orochi_curl_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_buf);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, client->timeout_ms / 1000);
+
+    /* Perform request */
+    res = curl_easy_perform(curl);
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+    if (res != CURLE_OK)
+    {
+        result->success = false;
+        result->error_message = pstrdup(curl_easy_strerror(res));
+        result->http_status = 0;
+        pfree(response_buf.data);
+    }
+    else
+    {
+        result->http_status = (int)http_code;
+        if (http_code >= 200 && http_code < 300)
+        {
+            result->success = true;
+            result->data = response_buf.data;  /* Transfer ownership */
+            result->size = response_buf.size;
+            elog(LOG, "S3 Download successful: %s/%s (%zu bytes)", client->bucket, key, response_buf.size);
+        }
+        else
+        {
+            result->success = false;
+            result->error_message = pstrdup(response_buf.data);
+            elog(WARNING, "S3 Download failed: HTTP %ld - %s", http_code, response_buf.data);
+            pfree(response_buf.data);
+        }
+    }
+
+    /* Cleanup */
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+    pfree(authorization);
+    pfree(payload_hash);
 
     return result;
 }
@@ -177,23 +562,180 @@ s3_download(S3Client *client, const char *key)
 bool
 s3_delete(S3Client *client, const char *key)
 {
+    CURL *curl;
+    CURLcode res;
+    struct curl_slist *headers = NULL;
+    CurlBuffer response_buf;
+    char url[1024];
+    char uri[512];
+    char date_stamp[16];
+    char amz_date[32];
+    char *authorization;
+    char *payload_hash;
+    char header_buf[512];
+    time_t now;
+    struct tm *tm_info;
+    long http_code;
+    bool success = false;
+
     if (client == NULL || key == NULL)
         return false;
 
-    /* TODO: Implement S3 DELETE */
-    elog(DEBUG1, "S3 Delete: %s/%s", client->bucket, key);
+    /* Initialize response buffer */
+    response_buf.data = palloc(1024);
+    response_buf.size = 0;
+    response_buf.capacity = 1024;
 
-    return true;
+    /* Get current time for signing */
+    now = time(NULL);
+    tm_info = gmtime(&now);
+    strftime(date_stamp, sizeof(date_stamp), "%Y%m%d", tm_info);
+    strftime(amz_date, sizeof(amz_date), "%Y%m%dT%H%M%SZ", tm_info);
+
+    /* Build URI and URL */
+    snprintf(uri, sizeof(uri), "/%s/%s", client->bucket, key);
+    if (client->use_ssl)
+        snprintf(url, sizeof(url), "https://%s%s", client->endpoint, uri);
+    else
+        snprintf(url, sizeof(url), "http://%s%s", client->endpoint, uri);
+
+    /* Generate AWS Signature V4 */
+    payload_hash = generate_aws_signature_v4(client, "DELETE", uri, NULL,
+                                              "", 0, date_stamp, amz_date,
+                                              &authorization);
+
+    /* Initialize CURL */
+    curl = curl_easy_init();
+    if (!curl)
+    {
+        pfree(response_buf.data);
+        return false;
+    }
+
+    /* Set up headers */
+    snprintf(header_buf, sizeof(header_buf), "Host: %s", client->endpoint);
+    headers = curl_slist_append(headers, header_buf);
+
+    snprintf(header_buf, sizeof(header_buf), "x-amz-date: %s", amz_date);
+    headers = curl_slist_append(headers, header_buf);
+
+    snprintf(header_buf, sizeof(header_buf), "x-amz-content-sha256: %s", payload_hash);
+    headers = curl_slist_append(headers, header_buf);
+
+    snprintf(header_buf, sizeof(header_buf), "Authorization: %s", authorization);
+    headers = curl_slist_append(headers, header_buf);
+
+    /* Configure CURL */
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, orochi_curl_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_buf);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, client->timeout_ms / 1000);
+
+    /* Perform request */
+    res = curl_easy_perform(curl);
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+    if (res == CURLE_OK && http_code >= 200 && http_code < 300)
+    {
+        success = true;
+        elog(LOG, "S3 Delete successful: %s/%s", client->bucket, key);
+    }
+    else
+    {
+        elog(WARNING, "S3 Delete failed: %s/%s - HTTP %ld", client->bucket, key, http_code);
+    }
+
+    /* Cleanup */
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+    pfree(response_buf.data);
+    pfree(authorization);
+    pfree(payload_hash);
+
+    return success;
 }
 
 bool
 s3_object_exists(S3Client *client, const char *key)
 {
+    CURL *curl;
+    CURLcode res;
+    struct curl_slist *headers = NULL;
+    char url[1024];
+    char uri[512];
+    char date_stamp[16];
+    char amz_date[32];
+    char *authorization;
+    char *payload_hash;
+    char header_buf[512];
+    time_t now;
+    struct tm *tm_info;
+    long http_code;
+    bool exists = false;
+
     if (client == NULL || key == NULL)
         return false;
 
-    /* TODO: Implement S3 HEAD */
-    return false;
+    /* Get current time for signing */
+    now = time(NULL);
+    tm_info = gmtime(&now);
+    strftime(date_stamp, sizeof(date_stamp), "%Y%m%d", tm_info);
+    strftime(amz_date, sizeof(amz_date), "%Y%m%dT%H%M%SZ", tm_info);
+
+    /* Build URI and URL */
+    snprintf(uri, sizeof(uri), "/%s/%s", client->bucket, key);
+    if (client->use_ssl)
+        snprintf(url, sizeof(url), "https://%s%s", client->endpoint, uri);
+    else
+        snprintf(url, sizeof(url), "http://%s%s", client->endpoint, uri);
+
+    /* Generate AWS Signature V4 */
+    payload_hash = generate_aws_signature_v4(client, "HEAD", uri, NULL,
+                                              "", 0, date_stamp, amz_date,
+                                              &authorization);
+
+    /* Initialize CURL */
+    curl = curl_easy_init();
+    if (!curl)
+        return false;
+
+    /* Set up headers */
+    snprintf(header_buf, sizeof(header_buf), "Host: %s", client->endpoint);
+    headers = curl_slist_append(headers, header_buf);
+
+    snprintf(header_buf, sizeof(header_buf), "x-amz-date: %s", amz_date);
+    headers = curl_slist_append(headers, header_buf);
+
+    snprintf(header_buf, sizeof(header_buf), "x-amz-content-sha256: %s", payload_hash);
+    headers = curl_slist_append(headers, header_buf);
+
+    snprintf(header_buf, sizeof(header_buf), "Authorization: %s", authorization);
+    headers = curl_slist_append(headers, header_buf);
+
+    /* Configure CURL */
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_NOBODY, 1L);  /* HEAD request */
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, client->timeout_ms / 1000);
+
+    /* Perform request */
+    res = curl_easy_perform(curl);
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+    if (res == CURLE_OK && http_code == 200)
+    {
+        exists = true;
+    }
+
+    /* Cleanup */
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+    pfree(authorization);
+    pfree(payload_hash);
+
+    return exists;
 }
 
 char *
