@@ -112,6 +112,11 @@ BEGIN
     -- Use default if not specified
     v_shard_count := COALESCE(shard_count, current_setting('orochi.default_shard_count')::integer);
 
+    -- Validate shard count
+    IF v_shard_count IS NULL OR v_shard_count <= 0 THEN
+        RAISE EXCEPTION 'shard_count must be a positive integer, got %', v_shard_count;
+    END IF;
+
     -- Register table as distributed
     PERFORM orochi._create_distributed_table(table_name, distribution_column, 0, v_shard_count);
 

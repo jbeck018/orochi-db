@@ -10,6 +10,8 @@
 
 #include "postgres.h"
 #include "fmgr.h"
+#include "access/htup_details.h"
+#include "catalog/pg_attribute.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "optimizer/optimizer.h"
@@ -18,6 +20,7 @@
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
+#include "utils/syscache.h"
 
 #include "../orochi.h"
 #include "../core/catalog.h"
@@ -155,18 +158,15 @@ orochi_planner_hook(Query *parse, const char *query_string, int cursorOptions,
     }
 
     /*
-     * For SELECT queries on distributed tables, rewrite to use the union view.
+     * For SELECT queries on distributed tables, we no longer rewrite at the
+     * planner level since the union view with INSTEAD OF triggers provides
+     * transparent access. Users should query the _all_shards view for reads.
+     *
      * For INSERT/UPDATE/DELETE, let them go through - triggers handle routing.
+     *
+     * The query rewriting was causing issues with permission info mismatch.
      */
-    if (parse->commandType == CMD_SELECT)
-    {
-        rewritten_query = rewrite_query_for_shards(parse);
-    }
-    else
-    {
-        /* INSERT/UPDATE/DELETE go to parent table, triggers route them */
-        rewritten_query = parse;
-    }
+    rewritten_query = parse;
 
     planner_recursion_depth--;
 
@@ -292,6 +292,124 @@ orochi_analyze_query(Query *parse)
  * Predicate Analysis for Shard Pruning
  * ============================================================ */
 
+/*
+ * Check if a Var node references the distribution column
+ */
+static bool
+var_is_distribution_column(Var *var, Oid table_oid, const char *dist_column)
+{
+    HeapTuple tp;
+    char *attname;
+    bool result = false;
+
+    /* Get attribute name from the table */
+    tp = SearchSysCacheAttNum(table_oid, var->varattno);
+    if (HeapTupleIsValid(tp))
+    {
+        Form_pg_attribute att = (Form_pg_attribute) GETSTRUCT(tp);
+        attname = NameStr(att->attname);
+        result = (strcmp(attname, dist_column) == 0);
+        ReleaseSysCache(tp);
+    }
+
+    return result;
+}
+
+/*
+ * Extract constant value from an expression
+ */
+static bool
+extract_const_value(Node *node, Datum *value, Oid *type_oid)
+{
+    if (IsA(node, Const))
+    {
+        Const *c = (Const *) node;
+        if (!c->constisnull)
+        {
+            *value = c->constvalue;
+            *type_oid = c->consttype;
+            return true;
+        }
+    }
+    return false;
+}
+
+/*
+ * Recursively analyze WHERE clause to find equality predicates on distribution column
+ */
+static void
+analyze_qual_node(Node *node, Oid table_oid, const char *dist_column,
+                  ShardRestriction *restriction)
+{
+    if (node == NULL)
+        return;
+
+    if (IsA(node, OpExpr))
+    {
+        OpExpr *opexpr = (OpExpr *) node;
+
+        /* Check if this is an equality operator */
+        if (list_length(opexpr->args) == 2)
+        {
+            Node *left = (Node *) linitial(opexpr->args);
+            Node *right = (Node *) lsecond(opexpr->args);
+            Var *var_node = NULL;
+            Node *const_node = NULL;
+
+            /* Check for Var = Const or Const = Var patterns */
+            if (IsA(left, Var) && IsA(right, Const))
+            {
+                var_node = (Var *) left;
+                const_node = right;
+            }
+            else if (IsA(left, Const) && IsA(right, Var))
+            {
+                var_node = (Var *) right;
+                const_node = left;
+            }
+
+            if (var_node != NULL && const_node != NULL)
+            {
+                /* Check if this is an equality operator (= operator has oid around 96-98) */
+                char *opname = get_opname(opexpr->opno);
+                bool is_equality = (opname != NULL && strcmp(opname, "=") == 0);
+
+                if (is_equality && var_is_distribution_column(var_node, table_oid, dist_column))
+                {
+                    Datum value;
+                    Oid type_oid;
+
+                    if (extract_const_value(const_node, &value, &type_oid))
+                    {
+                        restriction->is_equality = true;
+                        restriction->equality_value = value;
+                        /* Store type for later hash computation */
+                        restriction->shard_ids = list_make1_oid(type_oid);
+                    }
+                }
+            }
+        }
+    }
+    else if (IsA(node, BoolExpr))
+    {
+        BoolExpr *boolexpr = (BoolExpr *) node;
+
+        /* For AND expressions, check all clauses */
+        if (boolexpr->boolop == AND_EXPR)
+        {
+            ListCell *lc;
+            foreach(lc, boolexpr->args)
+            {
+                analyze_qual_node((Node *) lfirst(lc), table_oid, dist_column, restriction);
+                /* Stop if we found an equality predicate */
+                if (restriction->is_equality)
+                    break;
+            }
+        }
+        /* For OR expressions, we can't prune (would need all branches to target same shard) */
+    }
+}
+
 static ShardRestriction *
 analyze_where_clause(Node *quals, Oid table_oid)
 {
@@ -306,10 +424,11 @@ analyze_where_clause(Node *quals, Oid table_oid)
         return NULL;
 
     restriction->distribution_column = table_info->distribution_column;
-
-    /* TODO: Walk expression tree to find equality predicates on distribution column */
     restriction->shard_ids = NIL;
     restriction->is_equality = false;
+
+    /* Walk the expression tree to find equality predicates */
+    analyze_qual_node(quals, table_oid, table_info->distribution_column, restriction);
 
     return restriction;
 }
@@ -466,21 +585,76 @@ orochi_prune_shards(Oid table_oid, List *predicates)
     List *all_shards;
     List *pruned_shards = NIL;
     ListCell *lc;
+    ListCell *plc;
+    OrochiTableInfo *table_info;
+    bool found_equality = false;
+    int32 target_shard_index = -1;
 
     all_shards = orochi_catalog_get_table_shards(table_oid);
 
     if (list_length(predicates) == 0)
         return all_shards;
 
-    /* TODO: Implement actual pruning based on predicates */
-    /* For now, return all shards */
-    foreach(lc, all_shards)
+    table_info = orochi_catalog_get_table(table_oid);
+    if (table_info == NULL)
+        return all_shards;
+
+    /* Check predicates for equality on distribution column */
+    foreach(plc, predicates)
     {
-        OrochiShardInfo *shard = (OrochiShardInfo *) lfirst(lc);
-        pruned_shards = lappend(pruned_shards, shard);
+        ShardRestriction *restriction = (ShardRestriction *) lfirst(plc);
+
+        if (restriction->is_equality)
+        {
+            /* We have an equality predicate - compute target shard */
+            Oid type_oid = InvalidOid;
+            int32 hash_value;
+
+            /* Type OID was stored in shard_ids list */
+            if (list_length(restriction->shard_ids) > 0)
+                type_oid = linitial_oid(restriction->shard_ids);
+
+            if (OidIsValid(type_oid))
+            {
+                hash_value = orochi_hash_datum(restriction->equality_value, type_oid);
+                target_shard_index = orochi_get_shard_index(hash_value, table_info->shard_count);
+                found_equality = true;
+
+                elog(DEBUG1, "Shard pruning: equality on %s, hash=%d, target_shard=%d",
+                     restriction->distribution_column, hash_value, target_shard_index);
+                break;
+            }
+        }
     }
 
-    return pruned_shards;
+    /* If we found an equality predicate, return only the target shard */
+    if (found_equality && target_shard_index >= 0)
+    {
+        foreach(lc, all_shards)
+        {
+            OrochiShardInfo *shard = (OrochiShardInfo *) lfirst(lc);
+
+            if (shard->shard_index == target_shard_index)
+            {
+                pruned_shards = lappend(pruned_shards, shard);
+                elog(DEBUG1, "Shard pruning: selected shard %d (id=%ld)",
+                     shard->shard_index, shard->shard_id);
+                break;
+            }
+        }
+
+        /* If we found a target but no matching shard, return empty (shouldn't happen) */
+        if (list_length(pruned_shards) == 0)
+        {
+            elog(WARNING, "Shard pruning: target shard %d not found", target_shard_index);
+            return all_shards;
+        }
+
+        return pruned_shards;
+    }
+
+    /* No equality predicate found - return all shards */
+    return all_shards;
 }
 
 /* ============================================================

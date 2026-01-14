@@ -517,13 +517,13 @@ orochi_create_distributed_table_sql(PG_FUNCTION_ARGS)
     orochi_create_physical_shards(table_oid, shard_count, dist_col);
 
     /* Install routing triggers for INSERT/UPDATE/DELETE */
-    orochi_install_routing_trigger(table_oid, dist_col);
+    orochi_install_routing_trigger(table_oid, dist_col, shard_count);
 
     /* Move existing data to shards (if any) */
     orochi_redistribute_data(table_oid);
 
     /* Create union view for easy querying */
-    orochi_create_union_view(table_oid);
+    orochi_create_union_view(table_oid, dist_col, shard_count);
 
     elog(LOG, "Created distributed table %s.%s with %d physical shards on column %s",
          info.schema_name, info.table_name, shard_count, dist_col);

@@ -275,16 +275,14 @@ orochi_compute_shard_for_value(Datum value, Oid type_oid, int32 shard_count)
  * 3. INSTEAD OF triggers on the union view for full transparency
  */
 void
-orochi_install_routing_trigger(Oid table_oid, const char *dist_column)
+orochi_install_routing_trigger(Oid table_oid, const char *dist_column, int32 shard_count)
 {
     StringInfoData query;
-    OrochiTableInfo *info;
     char *schema_name;
     char *table_name;
     int ret;
 
-    info = orochi_catalog_get_table(table_oid);
-    if (info == NULL)
+    if (shard_count <= 0)
         return;
 
     schema_name = get_namespace_name(get_rel_namespace(table_oid));
@@ -308,7 +306,7 @@ orochi_install_routing_trigger(Oid table_oid, const char *dist_column)
         quote_identifier(schema_name),
         table_name,
         quote_identifier(dist_column),
-        info->shard_count,
+        shard_count,
         schema_name,
         table_name);
 
@@ -331,7 +329,7 @@ orochi_install_routing_trigger(Oid table_oid, const char *dist_column)
         "END; "
         "$orochi_trigger$ LANGUAGE plpgsql",
         quote_identifier(schema_name), table_name,
-        quote_identifier(dist_column), info->shard_count,
+        quote_identifier(dist_column), shard_count,
         schema_name, table_name, schema_name, table_name, dist_column, dist_column);
 
     ret = SPI_execute(query.data, false, 0);
@@ -461,23 +459,19 @@ orochi_remove_routing_trigger(Oid table_oid)
  * Also creates INSTEAD OF triggers for INSERT/UPDATE/DELETE on the view
  */
 void
-orochi_create_union_view(Oid table_oid)
+orochi_create_union_view(Oid table_oid, const char *dist_column, int32 shard_count)
 {
     StringInfoData query;
-    OrochiTableInfo *info;
     char *schema_name;
     char *table_name;
-    char *dist_column;
     int i;
     int ret;
 
-    info = orochi_catalog_get_table(table_oid);
-    if (info == NULL || !info->is_distributed)
+    if (shard_count <= 0 || dist_column == NULL)
         return;
 
     schema_name = get_namespace_name(get_rel_namespace(table_oid));
     table_name = get_rel_name(table_oid);
-    dist_column = info->distribution_column;
 
     SPI_connect();
 
@@ -487,7 +481,7 @@ orochi_create_union_view(Oid table_oid)
         "CREATE OR REPLACE VIEW %s.%s_all_shards AS ",
         quote_identifier(schema_name), table_name);
 
-    for (i = 0; i < info->shard_count; i++)
+    for (i = 0; i < shard_count; i++)
     {
         if (i > 0)
             appendStringInfoString(&query, " UNION ALL ");
@@ -515,13 +509,13 @@ orochi_create_union_view(Oid table_oid)
         "END; "
         "$orochi_trigger$ LANGUAGE plpgsql",
         quote_identifier(schema_name), table_name,
-        quote_identifier(dist_column), info->shard_count,
+        quote_identifier(dist_column), shard_count,
         schema_name, table_name);
 
     SPI_execute(query.data, false, 0);
     pfree(query.data);
 
-    /* Create INSTEAD OF UPDATE trigger function */
+    /* Create INSTEAD OF UPDATE trigger function - uses DELETE + INSERT strategy */
     initStringInfo(&query);
     appendStringInfo(&query,
         "CREATE OR REPLACE FUNCTION %s.%s_view_update() "
@@ -532,20 +526,15 @@ orochi_create_union_view(Oid table_oid)
         "BEGIN "
         "    old_shard := orochi.get_shard_index(orochi.hash_value(OLD.%s), %d); "
         "    new_shard := orochi.get_shard_index(orochi.hash_value(NEW.%s), %d); "
-        "    IF old_shard = new_shard THEN "
-        "        EXECUTE format('UPDATE %s.%s_shard_%%s SET * = $1 WHERE ctid = (SELECT ctid FROM %s.%s_shard_%%s WHERE %s = $2 LIMIT 1)', old_shard, old_shard) USING NEW, OLD.%s; "
-        "    ELSE "
-        "        EXECUTE format('DELETE FROM %s.%s_shard_%%s WHERE ctid = (SELECT ctid FROM %s.%s_shard_%%s WHERE %s = $1 LIMIT 1)', old_shard, old_shard) USING OLD.%s; "
-        "        EXECUTE format('INSERT INTO %s.%s_shard_%%s VALUES ($1.*)', new_shard) USING NEW; "
-        "    END IF; "
+        "    EXECUTE format('DELETE FROM %s.%s_shard_%%s WHERE %s = $1', old_shard) USING OLD.%s; "
+        "    EXECUTE format('INSERT INTO %s.%s_shard_%%s VALUES ($1.*)', new_shard) USING NEW; "
         "    RETURN NEW; "
         "END; "
         "$orochi_trigger$ LANGUAGE plpgsql",
         quote_identifier(schema_name), table_name,
-        quote_identifier(dist_column), info->shard_count,
-        quote_identifier(dist_column), info->shard_count,
-        schema_name, table_name, schema_name, table_name, dist_column, dist_column,
-        schema_name, table_name, schema_name, table_name, dist_column, dist_column,
+        quote_identifier(dist_column), shard_count,
+        quote_identifier(dist_column), shard_count,
+        schema_name, table_name, dist_column, dist_column,
         schema_name, table_name);
 
     SPI_execute(query.data, false, 0);
@@ -565,7 +554,7 @@ orochi_create_union_view(Oid table_oid)
         "END; "
         "$orochi_trigger$ LANGUAGE plpgsql",
         quote_identifier(schema_name), table_name,
-        quote_identifier(dist_column), info->shard_count,
+        quote_identifier(dist_column), shard_count,
         schema_name, table_name, schema_name, table_name, dist_column, dist_column);
 
     SPI_execute(query.data, false, 0);
