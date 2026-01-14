@@ -108,6 +108,7 @@ typedef struct ColumnarColumnChunk
     Oid                 column_type;        /* PostgreSQL type OID */
     int64               value_count;        /* Number of values */
     int64               null_count;         /* Number of nulls */
+    bool                has_nulls;          /* Contains null values */
 
     /* Compression info */
     OrochiCompressionType compression_type;

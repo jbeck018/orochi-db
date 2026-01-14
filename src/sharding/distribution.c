@@ -14,6 +14,7 @@
 #include "catalog/pg_type.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
+#include "utils/syscache.h"
 
 #include "../orochi.h"
 #include "../core/catalog.h"

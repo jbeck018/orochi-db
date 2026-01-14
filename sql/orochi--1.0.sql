@@ -1,23 +1,10 @@
-/*-------------------------------------------------------------------------
- *
- * orochi--1.0.sql
- *    Orochi DB SQL interface - User-facing functions and types
- *
- * This file is loaded when CREATE EXTENSION orochi is executed.
- *
- * Copyright (c) 2024, Orochi DB Contributors
- *
- *-------------------------------------------------------------------------
- */
+-- orochi--1.0.sql
+-- Orochi DB SQL interface - User-facing functions and types
+-- This file is loaded when CREATE EXTENSION orochi is executed.
+-- Copyright (c) 2024, Orochi DB Contributors
 
--- Complain if script is sourced in psql, rather than via CREATE EXTENSION
-\echo Use "CREATE EXTENSION orochi" to load this file. \quit
-
--- ============================================================
--- Schema Setup
--- ============================================================
-
-CREATE SCHEMA IF NOT EXISTS orochi;
+-- Note: Schema 'orochi' is automatically created by the extension framework
+-- due to 'schema = orochi' in orochi.control
 
 -- ============================================================
 -- Vector Data Type
@@ -78,8 +65,8 @@ CREATE FUNCTION vector_add(vector, vector) RETURNS vector
 CREATE FUNCTION vector_sub(vector, vector) RETURNS vector
     AS 'MODULE_PATHNAME' LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;
 
-CREATE FUNCTION normalize(vector) RETURNS vector
-    AS 'MODULE_PATHNAME', 'vector_normalize' LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;
+CREATE FUNCTION vector_normalize(vector) RETURNS vector
+    AS 'MODULE_PATHNAME' LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;
 
 -- Vector operators
 CREATE OPERATOR + (
@@ -246,7 +233,7 @@ CREATE FUNCTION time_bucket(
     bucket_width bigint,
     ts bigint
 ) RETURNS bigint
-    AS 'MODULE_PATHNAME', 'orochi_time_bucket_int'
+    AS 'MODULE_PATHNAME', 'orochi_time_bucket_int_sql'
     LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;
 
 -- ============================================================
@@ -476,6 +463,84 @@ CREATE FUNCTION orochi._rebalance_shards(table_oid oid, strategy text)
 RETURNS void
     AS 'MODULE_PATHNAME', 'orochi_rebalance_shards_sql'
     LANGUAGE C;
+
+-- ============================================================
+-- Catalog Tables
+-- ============================================================
+
+-- Main table registry
+CREATE TABLE IF NOT EXISTS orochi.orochi_tables (
+    table_oid OID PRIMARY KEY,
+    schema_name TEXT NOT NULL,
+    table_name TEXT NOT NULL,
+    storage_type INTEGER NOT NULL DEFAULT 0,
+    shard_strategy INTEGER NOT NULL DEFAULT 0,
+    shard_count INTEGER NOT NULL DEFAULT 0,
+    distribution_column TEXT,
+    is_distributed BOOLEAN NOT NULL DEFAULT FALSE,
+    is_timeseries BOOLEAN NOT NULL DEFAULT FALSE,
+    time_column TEXT,
+    chunk_interval INTERVAL,
+    compression INTEGER NOT NULL DEFAULT 0,
+    compression_level INTEGER NOT NULL DEFAULT 3,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Shard metadata
+CREATE TABLE IF NOT EXISTS orochi.orochi_shards (
+    shard_id BIGSERIAL PRIMARY KEY,
+    table_oid OID NOT NULL REFERENCES orochi.orochi_tables(table_oid) ON DELETE CASCADE,
+    shard_index INTEGER NOT NULL,
+    hash_min INTEGER NOT NULL,
+    hash_max INTEGER NOT NULL,
+    node_id INTEGER,
+    row_count BIGINT NOT NULL DEFAULT 0,
+    size_bytes BIGINT NOT NULL DEFAULT 0,
+    storage_tier INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_accessed TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(table_oid, shard_index)
+);
+
+-- Cluster nodes
+CREATE TABLE IF NOT EXISTS orochi.orochi_nodes (
+    node_id SERIAL PRIMARY KEY,
+    hostname TEXT NOT NULL,
+    port INTEGER NOT NULL DEFAULT 5432,
+    role INTEGER NOT NULL DEFAULT 1,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    shard_count BIGINT NOT NULL DEFAULT 0,
+    total_size BIGINT NOT NULL DEFAULT 0,
+    cpu_usage DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    memory_usage DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    last_heartbeat TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(hostname, port)
+);
+
+-- Time-series chunks
+CREATE TABLE IF NOT EXISTS orochi.orochi_chunks (
+    chunk_id BIGSERIAL PRIMARY KEY,
+    hypertable_oid OID NOT NULL REFERENCES orochi.orochi_tables(table_oid) ON DELETE CASCADE,
+    dimension_id INTEGER NOT NULL DEFAULT 0,
+    chunk_table_oid OID,
+    range_start TIMESTAMPTZ NOT NULL,
+    range_end TIMESTAMPTZ NOT NULL,
+    row_count BIGINT NOT NULL DEFAULT 0,
+    size_bytes BIGINT NOT NULL DEFAULT 0,
+    is_compressed BOOLEAN NOT NULL DEFAULT FALSE,
+    storage_tier INTEGER NOT NULL DEFAULT 0,
+    tablespace_name TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(hypertable_oid, range_start)
+);
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_shards_table ON orochi.orochi_shards(table_oid);
+CREATE INDEX IF NOT EXISTS idx_shards_node ON orochi.orochi_shards(node_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_hypertable ON orochi.orochi_chunks(hypertable_oid);
+CREATE INDEX IF NOT EXISTS idx_chunks_range ON orochi.orochi_chunks(range_start, range_end);
 
 -- ============================================================
 -- Information Views

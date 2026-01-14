@@ -671,6 +671,24 @@ orochi_catalog_record_heartbeat(int32 node_id)
     pfree(query.data);
 }
 
+void
+orochi_catalog_update_node_status(int32 node_id, bool is_active)
+{
+    StringInfoData query;
+    int ret;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "UPDATE orochi.orochi_nodes SET is_active = %s WHERE node_id = %d",
+        is_active ? "TRUE" : "FALSE", node_id);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, false, 0);
+    SPI_finish();
+
+    pfree(query.data);
+}
+
 /* ============================================================
  * Chunk Operations
  * ============================================================ */
@@ -927,4 +945,240 @@ orochi_catalog_register_vector_index(OrochiVectorIndex *index_info)
     SPI_finish();
 
     pfree(query.data);
+}
+
+/* ============================================================
+ * Additional Catalog Operations
+ * ============================================================ */
+
+void
+orochi_catalog_update_chunk_compression(int64 chunk_id, bool is_compressed)
+{
+    StringInfoData query;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "UPDATE orochi.orochi_chunks SET is_compressed = %s WHERE chunk_id = %ld",
+        is_compressed ? "TRUE" : "FALSE", chunk_id);
+
+    SPI_connect();
+    SPI_execute(query.data, false, 0);
+    SPI_finish();
+    pfree(query.data);
+}
+
+void
+orochi_catalog_delete_chunk(int64 chunk_id)
+{
+    StringInfoData query;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "DELETE FROM orochi.orochi_chunks WHERE chunk_id = %ld", chunk_id);
+
+    SPI_connect();
+    SPI_execute(query.data, false, 0);
+    SPI_finish();
+    pfree(query.data);
+}
+
+void
+orochi_catalog_update_shard_placement(int64 shard_id, int32 node_id)
+{
+    StringInfoData query;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "UPDATE orochi.orochi_shards SET node_id = %d WHERE shard_id = %ld",
+        node_id, shard_id);
+
+    SPI_connect();
+    SPI_execute(query.data, false, 0);
+    SPI_finish();
+    pfree(query.data);
+}
+
+void
+orochi_catalog_update_shard_stats(int64 shard_id, int64 row_count, int64 size_bytes)
+{
+    StringInfoData query;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "UPDATE orochi.orochi_shards SET row_count = %ld, size_bytes = %ld WHERE shard_id = %ld",
+        row_count, size_bytes, shard_id);
+
+    SPI_connect();
+    SPI_execute(query.data, false, 0);
+    SPI_finish();
+    pfree(query.data);
+}
+
+void
+orochi_catalog_record_shard_access(int64 shard_id)
+{
+    StringInfoData query;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "UPDATE orochi.orochi_shards SET last_accessed = NOW() WHERE shard_id = %ld",
+        shard_id);
+
+    SPI_connect();
+    SPI_execute(query.data, false, 0);
+    SPI_finish();
+    pfree(query.data);
+}
+
+void
+orochi_catalog_update_node_stats(int32 node_id, int64 shard_count, int64 total_size,
+                                 double cpu_usage, double memory_usage)
+{
+    StringInfoData query;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "UPDATE orochi.orochi_nodes SET shard_count = %ld, total_size = %ld, "
+        "cpu_usage = %f, memory_usage = %f, last_heartbeat = NOW() WHERE node_id = %d",
+        shard_count, total_size, cpu_usage, memory_usage, node_id);
+
+    SPI_connect();
+    SPI_execute(query.data, false, 0);
+    SPI_finish();
+    pfree(query.data);
+}
+
+void
+orochi_catalog_remove_node(int32 node_id)
+{
+    StringInfoData query;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "DELETE FROM orochi.orochi_nodes WHERE node_id = %d", node_id);
+
+    SPI_connect();
+    SPI_execute(query.data, false, 0);
+    SPI_finish();
+    pfree(query.data);
+}
+
+void
+orochi_catalog_update_table(OrochiTableInfo *table_info)
+{
+    orochi_catalog_register_table(table_info);
+}
+
+void
+orochi_catalog_log_invalidation(Oid table_oid, TimestampTz start, TimestampTz end)
+{
+    elog(DEBUG1, "Logging invalidation for table %u", table_oid);
+}
+
+void
+orochi_catalog_clear_invalidations(Oid agg_oid, TimestampTz up_to)
+{
+    /* TODO: Implement invalidation clearing */
+}
+
+void
+orochi_catalog_register_continuous_agg(Oid view_oid, Oid source_table, const char *query)
+{
+    elog(DEBUG1, "Registering continuous aggregate %u on table %u", view_oid, source_table);
+}
+
+void
+orochi_catalog_create_column_chunk(OrochiColumnChunk *chunk)
+{
+    /* TODO: Implement column chunk creation */
+}
+
+void
+orochi_catalog_delete_tiering_policy(int64 policy_id)
+{
+    StringInfoData query;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "DELETE FROM orochi.orochi_tiering_policies WHERE policy_id = %ld", policy_id);
+
+    SPI_connect();
+    SPI_execute(query.data, false, 0);
+    SPI_finish();
+    pfree(query.data);
+}
+
+void
+orochi_catalog_update_tiering_policy(OrochiTieringPolicy *policy)
+{
+    orochi_catalog_create_tiering_policy(policy);
+}
+
+void
+orochi_catalog_execute(const char *sql_query)
+{
+    SPI_connect();
+    SPI_execute(sql_query, false, 0);
+    SPI_finish();
+}
+
+void
+orochi_catalog_begin_transaction(void)
+{
+    /* Transaction management is handled by PostgreSQL */
+}
+
+void
+orochi_catalog_commit_transaction(void)
+{
+    /* Transaction management is handled by PostgreSQL */
+}
+
+void
+orochi_catalog_rollback_transaction(void)
+{
+    /* Transaction management is handled by PostgreSQL */
+}
+
+OrochiChunkInfo *
+orochi_catalog_get_chunk(int64 chunk_id)
+{
+    StringInfoData query;
+    OrochiChunkInfo *info = NULL;
+    int ret;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "SELECT chunk_id, hypertable_oid, dimension_id, range_start, range_end, "
+        "row_count, size_bytes, is_compressed, storage_tier, tablespace_name "
+        "FROM orochi.orochi_chunks WHERE chunk_id = %ld",
+        chunk_id);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 1);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0)
+    {
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        bool isnull;
+
+        info = (OrochiChunkInfo *) palloc0(sizeof(OrochiChunkInfo));
+
+        info->chunk_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+        info->hypertable_oid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 2, &isnull));
+        info->dimension_id = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 3, &isnull));
+        info->range_start = DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 4, &isnull));
+        info->range_end = DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 5, &isnull));
+        info->row_count = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 6, &isnull));
+        info->size_bytes = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 7, &isnull));
+        info->is_compressed = DatumGetBool(SPI_getbinval(tuple, tupdesc, 8, &isnull));
+        info->storage_tier = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 9, &isnull));
+        info->tablespace = SPI_getvalue(tuple, tupdesc, 10);
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
+    return info;
 }

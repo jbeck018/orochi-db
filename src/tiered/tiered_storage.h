@@ -198,10 +198,10 @@ extern OrochiTieringPolicy *orochi_get_tiering_policy(Oid table_oid);
 extern void orochi_remove_tiering_policy(Oid table_oid);
 
 /*
- * Enable/disable tiering
+ * Enable/disable tiering for a specific table
  */
-extern void orochi_enable_tiering(Oid table_oid);
-extern void orochi_disable_tiering(Oid table_oid);
+extern void orochi_enable_table_tiering(Oid table_oid);
+extern void orochi_disable_table_tiering(Oid table_oid);
 
 /* ============================================================
  * Tier Movement Functions

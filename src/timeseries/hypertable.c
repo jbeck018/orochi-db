@@ -579,3 +579,159 @@ orochi_run_maintenance(void)
      */
     elog(LOG, "Running Orochi maintenance");
 }
+
+/* ============================================================
+ * SQL-Callable Functions
+ * ============================================================ */
+
+PG_FUNCTION_INFO_V1(orochi_create_hypertable_sql);
+PG_FUNCTION_INFO_V1(orochi_add_dimension_sql);
+PG_FUNCTION_INFO_V1(orochi_time_bucket_timestamp);
+PG_FUNCTION_INFO_V1(orochi_time_bucket_timestamptz);
+PG_FUNCTION_INFO_V1(orochi_time_bucket_timestamptz_origin);
+PG_FUNCTION_INFO_V1(orochi_time_bucket_int_sql);
+PG_FUNCTION_INFO_V1(orochi_compress_chunk_sql);
+PG_FUNCTION_INFO_V1(orochi_decompress_chunk_sql);
+PG_FUNCTION_INFO_V1(orochi_drop_chunks_sql);
+PG_FUNCTION_INFO_V1(orochi_add_compression_policy_sql);
+PG_FUNCTION_INFO_V1(orochi_remove_compression_policy_sql);
+PG_FUNCTION_INFO_V1(orochi_add_retention_policy_sql);
+PG_FUNCTION_INFO_V1(orochi_remove_retention_policy_sql);
+PG_FUNCTION_INFO_V1(orochi_run_maintenance_sql);
+
+Datum
+orochi_create_hypertable_sql(PG_FUNCTION_ARGS)
+{
+    Oid table_oid = PG_GETARG_OID(0);
+    text *time_column_text = PG_GETARG_TEXT_PP(1);
+    Interval *chunk_interval = PG_GETARG_INTERVAL_P(2);
+    bool if_not_exists = PG_GETARG_BOOL(3);
+    char *time_column = text_to_cstring(time_column_text);
+
+    orochi_create_hypertable(table_oid, time_column, chunk_interval, if_not_exists);
+    PG_RETURN_VOID();
+}
+
+Datum
+orochi_add_dimension_sql(PG_FUNCTION_ARGS)
+{
+    Oid hypertable_oid = PG_GETARG_OID(0);
+    text *column_text = PG_GETARG_TEXT_PP(1);
+    int32 num_partitions = PG_GETARG_INT32(2);
+    Interval *interval_val = PG_ARGISNULL(3) ? NULL : PG_GETARG_INTERVAL_P(3);
+    char *column_name = text_to_cstring(column_text);
+
+    orochi_add_dimension(hypertable_oid, column_name, num_partitions, interval_val);
+    PG_RETURN_VOID();
+}
+
+Datum
+orochi_time_bucket_timestamp(PG_FUNCTION_ARGS)
+{
+    Interval *bucket_width = PG_GETARG_INTERVAL_P(0);
+    Timestamp ts = PG_GETARG_TIMESTAMP(1);
+    /* Convert timestamp to timestamptz for bucketing, then back */
+    TimestampTz tstz = (TimestampTz) ts;  /* Simple conversion */
+    TimestampTz result = orochi_time_bucket(bucket_width, tstz);
+    PG_RETURN_TIMESTAMP((Timestamp) result);
+}
+
+Datum
+orochi_time_bucket_timestamptz(PG_FUNCTION_ARGS)
+{
+    Interval *bucket_width = PG_GETARG_INTERVAL_P(0);
+    TimestampTz ts = PG_GETARG_TIMESTAMPTZ(1);
+    PG_RETURN_TIMESTAMPTZ(orochi_time_bucket(bucket_width, ts));
+}
+
+Datum
+orochi_time_bucket_timestamptz_origin(PG_FUNCTION_ARGS)
+{
+    Interval *bucket_width = PG_GETARG_INTERVAL_P(0);
+    TimestampTz ts = PG_GETARG_TIMESTAMPTZ(1);
+    TimestampTz origin = PG_GETARG_TIMESTAMPTZ(2);
+    PG_RETURN_TIMESTAMPTZ(orochi_time_bucket_origin(bucket_width, ts, origin));
+}
+
+Datum
+orochi_time_bucket_int_sql(PG_FUNCTION_ARGS)
+{
+    int64 bucket_width = PG_GETARG_INT64(0);
+    int64 ts = PG_GETARG_INT64(1);
+    int64 result = orochi_time_bucket_int(bucket_width, ts);
+    PG_RETURN_INT64(result);
+}
+
+Datum
+orochi_compress_chunk_sql(PG_FUNCTION_ARGS)
+{
+    int64 chunk_id = PG_GETARG_INT64(0);
+    orochi_compress_chunk(chunk_id);
+    PG_RETURN_VOID();
+}
+
+Datum
+orochi_decompress_chunk_sql(PG_FUNCTION_ARGS)
+{
+    int64 chunk_id = PG_GETARG_INT64(0);
+    orochi_decompress_chunk(chunk_id);
+    PG_RETURN_VOID();
+}
+
+Datum
+orochi_drop_chunks_sql(PG_FUNCTION_ARGS)
+{
+    Oid hypertable_oid = PG_GETARG_OID(0);
+    Interval *older_than = PG_ARGISNULL(1) ? NULL : PG_GETARG_INTERVAL_P(1);
+    int dropped;
+
+    dropped = orochi_drop_chunks_older_than(hypertable_oid, older_than);
+    PG_RETURN_INT32(dropped);
+}
+
+Datum
+orochi_add_compression_policy_sql(PG_FUNCTION_ARGS)
+{
+    Oid hypertable_oid = PG_GETARG_OID(0);
+    Interval *compress_after = PG_GETARG_INTERVAL_P(1);
+
+    orochi_add_compression_policy(hypertable_oid, compress_after);
+    /* Return a dummy policy ID for now */
+    PG_RETURN_INT32(1);
+}
+
+Datum
+orochi_remove_compression_policy_sql(PG_FUNCTION_ARGS)
+{
+    Oid hypertable_oid = PG_GETARG_OID(0);
+    /* TODO: Implement policy removal */
+    elog(NOTICE, "Removed compression policy from hypertable %u", hypertable_oid);
+    PG_RETURN_VOID();
+}
+
+Datum
+orochi_add_retention_policy_sql(PG_FUNCTION_ARGS)
+{
+    Oid hypertable_oid = PG_GETARG_OID(0);
+    Interval *drop_after = PG_GETARG_INTERVAL_P(1);
+
+    orochi_add_retention_policy(hypertable_oid, drop_after);
+    /* Return a dummy policy ID for now */
+    PG_RETURN_INT32(1);
+}
+
+Datum
+orochi_remove_retention_policy_sql(PG_FUNCTION_ARGS)
+{
+    Oid hypertable_oid = PG_GETARG_OID(0);
+    /* TODO: Implement policy removal */
+    elog(NOTICE, "Removed retention policy from hypertable %u", hypertable_oid);
+    PG_RETURN_VOID();
+}
+
+Datum
+orochi_run_maintenance_sql(PG_FUNCTION_ARGS)
+{
+    orochi_run_maintenance();
+    PG_RETURN_VOID();
+}

@@ -75,29 +75,38 @@ static Size orochi_memsize(void);
 void
 _PG_init(void)
 {
-    if (!process_shared_preload_libraries_in_progress)
+    /* Define GUC variables - always safe to do */
+    orochi_define_gucs();
+
+    /*
+     * The following can only be done during shared library preload.
+     * If loaded later, we can still work but without shared memory features.
+     */
+    if (process_shared_preload_libraries_in_progress)
+    {
+        /* Request shared memory */
+        RequestAddinShmemSpace(orochi_memsize());
+        RequestNamedLWLockTranche("orochi", 8);
+
+        /* Install shared memory hooks */
+        prev_shmem_startup_hook = shmem_startup_hook;
+        shmem_startup_hook = orochi_shmem_startup;
+
+        /* Register background workers */
+        orochi_register_background_workers();
+    }
+    else
     {
         ereport(WARNING,
                 (errmsg("orochi extension should be loaded via shared_preload_libraries"),
-                 errhint("Add 'orochi' to shared_preload_libraries in postgresql.conf")));
+                 errhint("Add 'orochi' to shared_preload_libraries in postgresql.conf for full functionality")));
     }
 
-    /* Define GUC variables */
-    orochi_define_gucs();
-
-    /* Request shared memory */
-    RequestAddinShmemSpace(orochi_memsize());
-    RequestNamedLWLockTranche("orochi", 8);
-
-    /* Install shared memory hooks */
-    prev_shmem_startup_hook = shmem_startup_hook;
-    shmem_startup_hook = orochi_shmem_startup;
-
-    /* Install planner hook */
+    /* Install planner hook - can be done anytime */
     prev_planner_hook = planner_hook;
     planner_hook = orochi_planner_hook;
 
-    /* Install executor hooks */
+    /* Install executor hooks - can be done anytime */
     prev_executor_start_hook = ExecutorStart_hook;
     ExecutorStart_hook = orochi_executor_start_hook;
 
@@ -109,10 +118,6 @@ _PG_init(void)
 
     prev_executor_end_hook = ExecutorEnd_hook;
     ExecutorEnd_hook = orochi_executor_end_hook;
-
-    /* Register background workers */
-    if (process_shared_preload_libraries_in_progress)
-        orochi_register_background_workers();
 
     elog(LOG, "Orochi DB v%s initialized", OROCHI_VERSION_STRING);
 }
@@ -318,7 +323,7 @@ orochi_define_gucs(void)
                            256,
                            16,
                            16384,
-                           PGC_POSTMASTER,
+                           PGC_SIGHUP,
                            0,
                            NULL, NULL, NULL);
 }

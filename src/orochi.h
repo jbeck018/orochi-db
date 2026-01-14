@@ -267,7 +267,7 @@ extern void orochi_init(void);
 extern OrochiTableInfo *orochi_get_table_info(Oid relid);
 extern void orochi_create_distributed_table(Oid relid, const char *distribution_column,
                                             OrochiShardStrategy strategy, int shard_count);
-extern void orochi_create_hypertable(Oid relid, const char *time_column, Interval *chunk_interval);
+extern void orochi_create_hypertable(Oid relid, const char *time_column, Interval *chunk_interval, bool if_not_exists);
 extern void orochi_set_storage_type(Oid relid, OrochiStorageType storage_type);
 
 /* Shard management */
@@ -295,7 +295,8 @@ extern OrochiS3Config *orochi_get_s3_config(void);
 
 /* Vector operations */
 extern void orochi_create_vector_index(Oid relid, const char *column,
-                                       int dimensions, const char *index_type);
+                                       int dimensions, const char *index_type,
+                                       const char *distance_type);
 
 /* Cluster management */
 extern List *orochi_get_nodes(void);

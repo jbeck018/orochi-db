@@ -20,10 +20,13 @@
 #include <float.h>
 
 #include "../orochi.h"
+#include "../core/catalog.h"
 #include "vector_ops.h"
 
 PG_FUNCTION_INFO_V1(vector_in);
 PG_FUNCTION_INFO_V1(vector_out);
+PG_FUNCTION_INFO_V1(vector_typmod_in);
+PG_FUNCTION_INFO_V1(vector_typmod_out);
 PG_FUNCTION_INFO_V1(vector_dims);
 PG_FUNCTION_INFO_V1(vector_norm);
 PG_FUNCTION_INFO_V1(vector_l2_distance);
@@ -197,6 +200,57 @@ vector_out(PG_FUNCTION_ARGS)
     appendStringInfoChar(&str, ']');
 
     PG_RETURN_CSTRING(str.data);
+}
+
+/*
+ * vector_typmod_in - parse type modifier (dimensions)
+ *
+ * Accepts a single integer specifying the vector dimensions.
+ * Example: vector(128) -> typmod = 128
+ */
+Datum
+vector_typmod_in(PG_FUNCTION_ARGS)
+{
+    ArrayType *ta = PG_GETARG_ARRAYTYPE_P(0);
+    int32 *tl;
+    int n;
+
+    tl = ArrayGetIntegerTypmods(ta, &n);
+
+    if (n != 1)
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("invalid type modifier"),
+                 errhint("vector type takes a single dimension, e.g., vector(128)")));
+
+    if (tl[0] < 1)
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("vector dimensions must be at least 1")));
+
+    if (tl[0] > VECTOR_MAX_DIM)
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("vector dimensions cannot exceed %d", VECTOR_MAX_DIM)));
+
+    PG_RETURN_INT32(tl[0]);
+}
+
+/*
+ * vector_typmod_out - output type modifier
+ */
+Datum
+vector_typmod_out(PG_FUNCTION_ARGS)
+{
+    int32 typmod = PG_GETARG_INT32(0);
+    char *result;
+
+    if (typmod < 0)
+        result = pstrdup("");
+    else
+        result = psprintf("(%d)", typmod);
+
+    PG_RETURN_CSTRING(result);
 }
 
 /*
@@ -616,7 +670,7 @@ float
 vector_l2_norm_simd(const float *a, int dim)
 {
 #ifdef __AVX2__
-    return vector_l2_norm_avx2(a, b, dim);
+    return vector_l2_norm_avx2(a, dim);
 #else
     return vector_l2_norm_scalar(a, dim);
 #endif

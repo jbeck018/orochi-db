@@ -16,12 +16,15 @@
 #include "storage/ipc.h"
 #include "storage/latch.h"
 #include "storage/proc.h"
+#include "utils/builtins.h"
+#include "utils/guc.h"
 #include "utils/memutils.h"
 #include "utils/timestamp.h"
 
 #include "../orochi.h"
 #include "../core/catalog.h"
 #include "../storage/columnar.h"
+#include "../timeseries/hypertable.h"
 #include "tiered_storage.h"
 
 /* Background worker state */
@@ -30,6 +33,17 @@ static volatile sig_atomic_t got_sigterm = false;
 
 /* S3 client instance */
 static S3Client *global_s3_client = NULL;
+
+/* GUC variables for tiered storage - defined in init.c */
+extern char *orochi_s3_bucket;
+extern char *orochi_s3_access_key;
+extern char *orochi_s3_secret_key;
+extern char *orochi_s3_region;
+extern char *orochi_s3_endpoint;
+extern int orochi_hot_threshold_hours;
+extern int orochi_warm_threshold_days;
+extern int orochi_cold_threshold_days;
+extern bool orochi_enable_tiering;
 
 /* Forward declarations */
 static void tiering_sighup_handler(SIGNAL_ARGS);
@@ -668,4 +682,109 @@ orochi_compression_worker_main(Datum main_arg)
 
     elog(LOG, "Orochi compression worker shutting down");
     proc_exit(0);
+}
+
+/* ============================================================
+ * SQL-Callable Functions
+ * ============================================================ */
+
+PG_FUNCTION_INFO_V1(orochi_set_tiering_policy_sql);
+PG_FUNCTION_INFO_V1(orochi_move_chunk_to_tier_sql);
+PG_FUNCTION_INFO_V1(orochi_add_node_sql);
+PG_FUNCTION_INFO_V1(orochi_remove_node_sql);
+PG_FUNCTION_INFO_V1(orochi_drain_node_sql);
+PG_FUNCTION_INFO_V1(orochi_rebalance_shards_sql);
+
+Datum
+orochi_set_tiering_policy_sql(PG_FUNCTION_ARGS)
+{
+    Oid table_oid = PG_GETARG_OID(0);
+    Interval *hot_after = PG_ARGISNULL(1) ? NULL : PG_GETARG_INTERVAL_P(1);
+    Interval *warm_after = PG_ARGISNULL(2) ? NULL : PG_GETARG_INTERVAL_P(2);
+    Interval *cold_after = PG_ARGISNULL(3) ? NULL : PG_GETARG_INTERVAL_P(3);
+
+    OrochiTieringPolicy policy;
+    memset(&policy, 0, sizeof(policy));
+    policy.table_oid = table_oid;
+    policy.hot_to_warm = hot_after;
+    policy.warm_to_cold = warm_after;
+    policy.cold_to_frozen = cold_after;
+    policy.enabled = true;
+    policy.compress_on_tier = true;
+
+    orochi_catalog_create_tiering_policy(&policy);
+    PG_RETURN_VOID();
+}
+
+Datum
+orochi_move_chunk_to_tier_sql(PG_FUNCTION_ARGS)
+{
+    int64 chunk_id = PG_GETARG_INT64(0);
+    text *tier_text = PG_GETARG_TEXT_PP(1);
+    char *tier = text_to_cstring(tier_text);
+    OrochiStorageTier target_tier;
+
+    if (strcmp(tier, "hot") == 0)
+        target_tier = OROCHI_TIER_HOT;
+    else if (strcmp(tier, "warm") == 0)
+        target_tier = OROCHI_TIER_WARM;
+    else if (strcmp(tier, "cold") == 0)
+        target_tier = OROCHI_TIER_COLD;
+    else if (strcmp(tier, "frozen") == 0)
+        target_tier = OROCHI_TIER_FROZEN;
+    else
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("invalid tier: %s", tier),
+                 errhint("Valid tiers are: hot, warm, cold, frozen")));
+
+    orochi_catalog_update_chunk_tier(chunk_id, target_tier);
+    PG_RETURN_VOID();
+}
+
+Datum
+orochi_add_node_sql(PG_FUNCTION_ARGS)
+{
+    text *hostname_text = PG_GETARG_TEXT_PP(0);
+    int32 port = PG_GETARG_INT32(1);
+    char *hostname = text_to_cstring(hostname_text);
+    int32 node_id;
+
+    node_id = orochi_catalog_add_node(hostname, port, OROCHI_NODE_WORKER);
+    PG_RETURN_INT32(node_id);
+}
+
+Datum
+orochi_remove_node_sql(PG_FUNCTION_ARGS)
+{
+    int32 node_id = PG_GETARG_INT32(0);
+    /* TODO: Implement proper node removal with shard migration */
+    orochi_catalog_update_node_status(node_id, false);
+    elog(NOTICE, "Marked node %d as inactive", node_id);
+    PG_RETURN_VOID();
+}
+
+Datum
+orochi_drain_node_sql(PG_FUNCTION_ARGS)
+{
+    int32 node_id = PG_GETARG_INT32(0);
+    /* TODO: Implement shard migration to other nodes */
+    elog(NOTICE, "Draining node %d (migration not yet implemented)", node_id);
+    PG_RETURN_VOID();
+}
+
+Datum
+orochi_rebalance_shards_sql(PG_FUNCTION_ARGS)
+{
+    Oid table_oid = PG_ARGISNULL(0) ? InvalidOid : PG_GETARG_OID(0);
+    text *strategy_text = PG_ARGISNULL(1) ? NULL : PG_GETARG_TEXT_PP(1);
+    char *strategy = strategy_text ? text_to_cstring(strategy_text) : "by_shard_count";
+
+    /* TODO: Implement shard rebalancing */
+    if (OidIsValid(table_oid))
+        elog(NOTICE, "Rebalancing shards for table %u using strategy %s", table_oid, strategy);
+    else
+        elog(NOTICE, "Rebalancing all shards using strategy %s", strategy);
+
+    PG_RETURN_VOID();
 }

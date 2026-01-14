@@ -20,7 +20,9 @@
 #include "postgres.h"
 #include "nodes/plannodes.h"
 #include "nodes/pathnodes.h"
+#include "nodes/extensible.h"
 #include "optimizer/planner.h"
+#include "commands/explain.h"
 
 #include "../orochi.h"
 

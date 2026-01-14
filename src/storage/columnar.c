@@ -27,6 +27,7 @@
 #include "utils/syscache.h"
 
 #include "../orochi.h"
+#include "../core/catalog.h"
 #include "columnar.h"
 #include "compression.h"
 
