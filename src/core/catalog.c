@@ -1072,19 +1072,265 @@ orochi_catalog_update_table(OrochiTableInfo *table_info)
 void
 orochi_catalog_log_invalidation(Oid table_oid, TimestampTz start, TimestampTz end)
 {
-    elog(DEBUG1, "Logging invalidation for table %u", table_oid);
+    StringInfoData query;
+    int ret;
+
+    ensure_catalog_initialized();
+
+    /*
+     * Log invalidation for all continuous aggregates that depend on this table.
+     * This is called when data in a hypertable changes.
+     */
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "INSERT INTO orochi.orochi_invalidation_log (agg_id, range_start, range_end) "
+        "SELECT agg_id, '%s'::timestamptz, '%s'::timestamptz "
+        "FROM orochi.orochi_continuous_aggregates "
+        "WHERE source_table_oid = %u AND enabled = TRUE",
+        timestamptz_to_str(start),
+        timestamptz_to_str(end),
+        table_oid);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, false, 0);
+    SPI_finish();
+
+    pfree(query.data);
+
+    elog(DEBUG1, "Logged invalidation for table %u from %s to %s",
+         table_oid, timestamptz_to_str(start), timestamptz_to_str(end));
 }
 
 void
 orochi_catalog_clear_invalidations(Oid agg_oid, TimestampTz up_to)
 {
-    /* TODO: Implement invalidation clearing */
+    StringInfoData query;
+    int ret;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "DELETE FROM orochi.orochi_invalidation_log "
+        "WHERE agg_id = %u AND range_end <= '%s'::timestamptz",
+        agg_oid, timestamptz_to_str(up_to));
+
+    SPI_connect();
+    ret = SPI_execute(query.data, false, 0);
+    SPI_finish();
+
+    pfree(query.data);
+}
+
+List *
+orochi_catalog_get_pending_invalidations(Oid agg_oid)
+{
+    StringInfoData query;
+    List *invalidations = NIL;
+    int ret;
+    uint64 i;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "SELECT log_id, agg_id, range_start, range_end "
+        "FROM orochi.orochi_invalidation_log "
+        "WHERE agg_id = %u "
+        "ORDER BY range_start",
+        agg_oid);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 0);
+
+    if (ret == SPI_OK_SELECT)
+    {
+        for (i = 0; i < SPI_processed; i++)
+        {
+            HeapTuple tuple = SPI_tuptable->vals[i];
+            TupleDesc tupdesc = SPI_tuptable->tupdesc;
+            bool isnull;
+            OrochiInvalidationEntry *entry;
+
+            entry = (OrochiInvalidationEntry *) palloc0(sizeof(OrochiInvalidationEntry));
+
+            entry->log_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+            entry->agg_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 2, &isnull));
+            entry->range_start = DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 3, &isnull));
+            entry->range_end = DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 4, &isnull));
+
+            invalidations = lappend(invalidations, entry);
+        }
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
+    return invalidations;
+}
+
+List *
+orochi_catalog_get_continuous_aggs(Oid source_table)
+{
+    StringInfoData query;
+    List *aggs = NIL;
+    int ret;
+    uint64 i;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "SELECT agg_id, view_oid, source_table_oid, materialization_table_oid, "
+        "query_text, refresh_interval, last_refresh, enabled "
+        "FROM orochi.orochi_continuous_aggregates "
+        "WHERE source_table_oid = %u",
+        source_table);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 0);
+
+    if (ret == SPI_OK_SELECT)
+    {
+        for (i = 0; i < SPI_processed; i++)
+        {
+            HeapTuple tuple = SPI_tuptable->vals[i];
+            TupleDesc tupdesc = SPI_tuptable->tupdesc;
+            bool isnull;
+            OrochiContinuousAggInfo *info;
+
+            info = (OrochiContinuousAggInfo *) palloc0(sizeof(OrochiContinuousAggInfo));
+
+            info->agg_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+            info->view_oid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 2, &isnull));
+            info->source_table_oid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 3, &isnull));
+            info->materialization_table_oid = isnull ? InvalidOid :
+                DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 4, &isnull));
+            info->query_text = SPI_getvalue(tuple, tupdesc, 5);
+            /* refresh_interval and last_refresh handled separately */
+            info->enabled = DatumGetBool(SPI_getbinval(tuple, tupdesc, 8, &isnull));
+
+            aggs = lappend(aggs, info);
+        }
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
+    return aggs;
+}
+
+int64
+orochi_catalog_register_continuous_agg(Oid view_oid, Oid source_table,
+                                       Oid mat_table, const char *query_text)
+{
+    StringInfoData query;
+    int ret;
+    int64 agg_id = -1;
+
+    ensure_catalog_initialized();
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "INSERT INTO orochi.orochi_continuous_aggregates "
+        "(view_oid, source_table_oid, materialization_table_oid, query_text, enabled) "
+        "VALUES (%u, %u, %u, %s, TRUE) "
+        "ON CONFLICT (view_oid) DO UPDATE SET "
+        "query_text = EXCLUDED.query_text, "
+        "materialization_table_oid = EXCLUDED.materialization_table_oid "
+        "RETURNING agg_id",
+        view_oid, source_table, mat_table,
+        quote_literal_cstr(query_text));
+
+    SPI_connect();
+    ret = SPI_execute(query.data, false, 1);
+
+    if ((ret == SPI_OK_INSERT_RETURNING || ret == SPI_OK_UPDATE_RETURNING) && SPI_processed > 0)
+    {
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        bool isnull;
+        agg_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
+    elog(DEBUG1, "Registered continuous aggregate %u on table %u (agg_id=%ld)",
+         view_oid, source_table, agg_id);
+
+    return agg_id;
+}
+
+OrochiContinuousAggInfo *
+orochi_catalog_get_continuous_agg(Oid view_oid)
+{
+    StringInfoData query;
+    OrochiContinuousAggInfo *info = NULL;
+    int ret;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "SELECT agg_id, view_oid, source_table_oid, materialization_table_oid, "
+        "query_text, refresh_interval, last_refresh, enabled "
+        "FROM orochi.orochi_continuous_aggregates "
+        "WHERE view_oid = %u",
+        view_oid);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 1);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0)
+    {
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        bool isnull;
+
+        info = (OrochiContinuousAggInfo *) palloc0(sizeof(OrochiContinuousAggInfo));
+
+        info->agg_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+        info->view_oid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 2, &isnull));
+        info->source_table_oid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 3, &isnull));
+        info->materialization_table_oid = isnull ? InvalidOid :
+            DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 4, &isnull));
+        info->query_text = SPI_getvalue(tuple, tupdesc, 5);
+        info->enabled = DatumGetBool(SPI_getbinval(tuple, tupdesc, 8, &isnull));
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
+    return info;
 }
 
 void
-orochi_catalog_register_continuous_agg(Oid view_oid, Oid source_table, const char *query)
+orochi_catalog_update_continuous_agg_refresh(int64 agg_id, TimestampTz last_refresh)
 {
-    elog(DEBUG1, "Registering continuous aggregate %u on table %u", view_oid, source_table);
+    StringInfoData query;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "UPDATE orochi.orochi_continuous_aggregates "
+        "SET last_refresh = '%s'::timestamptz "
+        "WHERE agg_id = %ld",
+        timestamptz_to_str(last_refresh), agg_id);
+
+    SPI_connect();
+    SPI_execute(query.data, false, 0);
+    SPI_finish();
+
+    pfree(query.data);
+}
+
+void
+orochi_catalog_delete_continuous_agg(Oid view_oid)
+{
+    StringInfoData query;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "DELETE FROM orochi.orochi_continuous_aggregates WHERE view_oid = %u",
+        view_oid);
+
+    SPI_connect();
+    SPI_execute(query.data, false, 0);
+    SPI_finish();
+
+    pfree(query.data);
 }
 
 void

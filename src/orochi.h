@@ -254,6 +254,33 @@ typedef struct OrochiTieringPolicy
     bool                enabled;            /* Policy active? */
 } OrochiTieringPolicy;
 
+/*
+ * Continuous aggregate metadata
+ */
+typedef struct OrochiContinuousAggInfo
+{
+    int64               agg_id;             /* Unique aggregate ID */
+    Oid                 view_oid;           /* View OID */
+    Oid                 source_table_oid;   /* Source hypertable OID */
+    Oid                 materialization_table_oid; /* Materialization table */
+    char               *query_text;         /* Original query text */
+    Interval           *refresh_interval;   /* Auto-refresh interval */
+    TimestampTz         last_refresh;       /* Last refresh timestamp */
+    bool                enabled;            /* Is aggregate active? */
+} OrochiContinuousAggInfo;
+
+/*
+ * Invalidation log entry for continuous aggregates
+ */
+typedef struct OrochiInvalidationEntry
+{
+    int64               log_id;             /* Log entry ID */
+    int64               agg_id;             /* Continuous aggregate ID */
+    TimestampTz         range_start;        /* Invalidated range start */
+    TimestampTz         range_end;          /* Invalidated range end */
+    TimestampTz         created_at;         /* When logged */
+} OrochiInvalidationEntry;
+
 /* ============================================================
  * Function Declarations
  * ============================================================ */

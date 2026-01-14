@@ -318,27 +318,42 @@ extern List *orochi_catalog_get_table_vector_indexes(Oid table_oid);
 /*
  * Register continuous aggregate
  */
-extern void orochi_catalog_register_continuous_agg(Oid view_oid, Oid source_table,
-                                                   const char *query);
+extern int64 orochi_catalog_register_continuous_agg(Oid view_oid, Oid source_table,
+                                                    Oid mat_table, const char *query_text);
 
 /*
- * Get continuous aggregates for table
+ * Get continuous aggregate info by view OID
+ */
+extern OrochiContinuousAggInfo *orochi_catalog_get_continuous_agg(Oid view_oid);
+
+/*
+ * Get continuous aggregates for source table
  */
 extern List *orochi_catalog_get_continuous_aggs(Oid source_table);
 
 /*
- * Log invalidation
+ * Update continuous aggregate refresh timestamp
+ */
+extern void orochi_catalog_update_continuous_agg_refresh(int64 agg_id, TimestampTz last_refresh);
+
+/*
+ * Delete continuous aggregate
+ */
+extern void orochi_catalog_delete_continuous_agg(Oid view_oid);
+
+/*
+ * Log invalidation for continuous aggregates
  */
 extern void orochi_catalog_log_invalidation(Oid table_oid, TimestampTz start,
                                             TimestampTz end);
 
 /*
- * Get pending invalidations
+ * Get pending invalidations for an aggregate
  */
 extern List *orochi_catalog_get_pending_invalidations(Oid agg_oid);
 
 /*
- * Clear invalidations
+ * Clear invalidations up to a timestamp
  */
 extern void orochi_catalog_clear_invalidations(Oid agg_oid, TimestampTz up_to);
 

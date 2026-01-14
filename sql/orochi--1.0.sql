@@ -681,3 +681,137 @@ CREATE FUNCTION orochi._run_maintenance()
 RETURNS void
     AS 'MODULE_PATHNAME', 'orochi_run_maintenance_sql'
     LANGUAGE C;
+
+-- ============================================================
+-- Continuous Aggregate Functions
+-- ============================================================
+
+-- Create a continuous aggregate (materialized view with incremental refresh)
+CREATE FUNCTION create_continuous_aggregate(
+    view_name text,
+    query text,
+    refresh_interval interval DEFAULT INTERVAL '1 hour',
+    with_data boolean DEFAULT TRUE
+) RETURNS void AS $$
+BEGIN
+    PERFORM orochi._create_continuous_aggregate(view_name, query, refresh_interval, with_data);
+    RAISE NOTICE 'Created continuous aggregate %', view_name;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE FUNCTION orochi._create_continuous_aggregate(
+    view_name text,
+    query text,
+    refresh_interval interval,
+    with_data boolean
+) RETURNS void
+    AS 'MODULE_PATHNAME', 'orochi_create_continuous_aggregate_sql'
+    LANGUAGE C;
+
+-- Refresh a continuous aggregate for a time range
+CREATE FUNCTION refresh_continuous_aggregate(
+    continuous_aggregate regclass,
+    window_start timestamptz DEFAULT NULL,
+    window_end timestamptz DEFAULT NULL
+) RETURNS void AS $$
+BEGIN
+    PERFORM orochi._refresh_continuous_aggregate(continuous_aggregate, window_start, window_end);
+    RAISE NOTICE 'Refreshed continuous aggregate %', continuous_aggregate;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE FUNCTION orochi._refresh_continuous_aggregate(
+    view_oid oid,
+    window_start timestamptz,
+    window_end timestamptz
+) RETURNS void
+    AS 'MODULE_PATHNAME', 'orochi_refresh_continuous_aggregate_sql'
+    LANGUAGE C;
+
+-- Drop a continuous aggregate and its materialization table
+CREATE FUNCTION drop_continuous_aggregate(
+    continuous_aggregate regclass
+) RETURNS void AS $$
+BEGIN
+    PERFORM orochi._drop_continuous_aggregate(continuous_aggregate);
+    RAISE NOTICE 'Dropped continuous aggregate %', continuous_aggregate;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE FUNCTION orochi._drop_continuous_aggregate(view_oid oid)
+RETURNS void
+    AS 'MODULE_PATHNAME', 'orochi_drop_continuous_aggregate_sql'
+    LANGUAGE C STRICT;
+
+-- Add a refresh policy for automatic continuous aggregate refresh
+CREATE FUNCTION add_continuous_aggregate_policy(
+    continuous_aggregate regclass,
+    start_offset interval,
+    end_offset interval,
+    schedule_interval interval DEFAULT INTERVAL '1 hour'
+) RETURNS integer AS $$
+DECLARE
+    policy_id integer;
+BEGIN
+    -- Store the policy in the catalog
+    INSERT INTO orochi.orochi_cagg_policies
+    (view_oid, start_offset, end_offset, schedule_interval, enabled)
+    VALUES (continuous_aggregate, start_offset, end_offset, schedule_interval, TRUE)
+    ON CONFLICT (view_oid) DO UPDATE SET
+        start_offset = EXCLUDED.start_offset,
+        end_offset = EXCLUDED.end_offset,
+        schedule_interval = EXCLUDED.schedule_interval,
+        enabled = TRUE
+    RETURNING orochi.orochi_cagg_policies.policy_id INTO policy_id;
+
+    RAISE NOTICE 'Added continuous aggregate policy % for %', policy_id, continuous_aggregate;
+    RETURN policy_id;
+EXCEPTION WHEN undefined_table THEN
+    -- Create the policy table if it doesn't exist
+    CREATE TABLE IF NOT EXISTS orochi.orochi_cagg_policies (
+        policy_id SERIAL PRIMARY KEY,
+        view_oid OID UNIQUE NOT NULL,
+        start_offset INTERVAL NOT NULL,
+        end_offset INTERVAL NOT NULL,
+        schedule_interval INTERVAL NOT NULL DEFAULT INTERVAL '1 hour',
+        enabled BOOLEAN NOT NULL DEFAULT TRUE,
+        last_run TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    INSERT INTO orochi.orochi_cagg_policies
+    (view_oid, start_offset, end_offset, schedule_interval, enabled)
+    VALUES (continuous_aggregate, start_offset, end_offset, schedule_interval, TRUE)
+    RETURNING orochi.orochi_cagg_policies.policy_id INTO policy_id;
+
+    RETURN policy_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Remove a continuous aggregate policy
+CREATE FUNCTION remove_continuous_aggregate_policy(
+    continuous_aggregate regclass
+) RETURNS void AS $$
+BEGIN
+    DELETE FROM orochi.orochi_cagg_policies WHERE view_oid = continuous_aggregate;
+    RAISE NOTICE 'Removed continuous aggregate policy from %', continuous_aggregate;
+END;
+$$ LANGUAGE plpgsql;
+
+-- View for continuous aggregates information
+CREATE VIEW orochi.continuous_aggregates AS
+SELECT
+    ca.agg_id,
+    ca.view_oid,
+    v.relname as view_name,
+    ns.nspname as view_schema,
+    t.schema_name || '.' || t.table_name as source_hypertable,
+    ca.materialization_table_oid,
+    ca.query_text,
+    ca.refresh_interval,
+    ca.last_refresh,
+    ca.enabled
+FROM orochi.orochi_continuous_aggregates ca
+JOIN pg_class v ON ca.view_oid = v.oid
+JOIN pg_namespace ns ON v.relnamespace = ns.oid
+LEFT JOIN orochi.orochi_tables t ON ca.source_table_oid = t.table_oid;

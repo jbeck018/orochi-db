@@ -182,6 +182,7 @@ extern void orochi_set_continuous_aggregate_policy(Oid view_oid, Interval *start
                                                    Interval *end_offset,
                                                    Interval *schedule_interval);
 extern ContinuousAggregate *orochi_get_continuous_aggregate(Oid view_oid);
+extern void orochi_drop_continuous_aggregate(Oid view_oid);
 extern void orochi_log_invalidation(Oid hypertable_oid, TimestampTz start, TimestampTz end);
 extern List *orochi_get_invalidations(Oid agg_id);
 
