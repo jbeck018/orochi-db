@@ -22,6 +22,7 @@
 #include "../orochi.h"
 #include "../core/catalog.h"
 #include "../sharding/distribution.h"
+#include "../sharding/physical_sharding.h"
 #include "distributed_planner.h"
 
 /* Previous planner hook */
@@ -53,16 +54,80 @@ orochi_planner_hook_init(void)
     planner_hook = orochi_planner_hook;
 }
 
+/*
+ * Rewrite query to use shard tables instead of parent table.
+ * For SELECT queries, we replace the parent table RTE with a subquery
+ * that UNIONs all shard tables.
+ */
+static Query *
+rewrite_query_for_shards(Query *parse)
+{
+    ListCell *lc;
+    Query *result;
+    bool modified = false;
+
+    /* Make a copy of the query to modify */
+    result = (Query *) copyObjectImpl(parse);
+
+    foreach(lc, result->rtable)
+    {
+        RangeTblEntry *rte = (RangeTblEntry *) lfirst(lc);
+
+        if (rte->rtekind == RTE_RELATION)
+        {
+            OrochiTableInfo *info = orochi_catalog_get_table(rte->relid);
+
+            if (info != NULL && info->is_distributed && info->shard_count > 1)
+            {
+                /* For SELECT queries, replace with UNION ALL subquery */
+                if (parse->commandType == CMD_SELECT)
+                {
+                    char *schema_name = get_namespace_name(get_rel_namespace(rte->relid));
+                    char *table_name = get_rel_name(rte->relid);
+                    Oid view_oid;
+                    char *view_name;
+
+                    /* Use the pre-created union view */
+                    view_name = psprintf("%s_all_shards", table_name);
+                    view_oid = get_relname_relid(view_name, get_rel_namespace(rte->relid));
+
+                    if (OidIsValid(view_oid))
+                    {
+                        /* Replace parent table with union view */
+                        rte->relid = view_oid;
+                        rte->relkind = 'v';  /* View */
+                        modified = true;
+
+                        elog(DEBUG1, "Rewrote query to use %s.%s instead of %s.%s",
+                             schema_name, view_name, schema_name, table_name);
+                    }
+
+                    pfree(view_name);
+                }
+                /* INSERT/UPDATE/DELETE are handled by triggers - let them go to parent */
+            }
+        }
+    }
+
+    if (!modified)
+    {
+        pfree(result);
+        return parse;
+    }
+
+    return result;
+}
+
 PlannedStmt *
 orochi_planner_hook(Query *parse, const char *query_string, int cursorOptions,
                     ParamListInfo boundParams)
 {
     PlannedStmt *result;
-    DistributedPlan *dplan;
+    Query *rewritten_query;
     bool is_distributed;
 
     /*
-     * Prevent infinite recursion when querying catalog tables.
+     * Prevent infinite recursion when querying catalog tables or views.
      * When we check if a table is distributed, we query orochi.orochi_tables,
      * which would trigger this hook again.
      */
@@ -79,10 +144,9 @@ orochi_planner_hook(Query *parse, const char *query_string, int cursorOptions,
     /* Check if query involves distributed tables */
     is_distributed = contains_distributed_table(parse);
 
-    planner_recursion_depth--;
-
     if (!is_distributed)
     {
+        planner_recursion_depth--;
         /* Use standard planner for local queries */
         if (prev_planner_hook)
             return prev_planner_hook(parse, query_string, cursorOptions, boundParams);
@@ -90,20 +154,27 @@ orochi_planner_hook(Query *parse, const char *query_string, int cursorOptions,
             return standard_planner(parse, query_string, cursorOptions, boundParams);
     }
 
-    /* Create distributed plan */
-    dplan = orochi_create_distributed_plan(parse);
-
-    if (dplan->query_type == OROCHI_QUERY_LOCAL)
+    /*
+     * For SELECT queries on distributed tables, rewrite to use the union view.
+     * For INSERT/UPDATE/DELETE, let them go through - triggers handle routing.
+     */
+    if (parse->commandType == CMD_SELECT)
     {
-        /* Query can be executed locally */
-        if (prev_planner_hook)
-            return prev_planner_hook(parse, query_string, cursorOptions, boundParams);
-        else
-            return standard_planner(parse, query_string, cursorOptions, boundParams);
+        rewritten_query = rewrite_query_for_shards(parse);
+    }
+    else
+    {
+        /* INSERT/UPDATE/DELETE go to parent table, triggers route them */
+        rewritten_query = parse;
     }
 
-    /* Create distributed execution plan */
-    result = create_distributed_plan_stmt(parse, dplan);
+    planner_recursion_depth--;
+
+    /* Plan the (possibly rewritten) query */
+    if (prev_planner_hook)
+        result = prev_planner_hook(rewritten_query, query_string, cursorOptions, boundParams);
+    else
+        result = standard_planner(rewritten_query, query_string, cursorOptions, boundParams);
 
     return result;
 }

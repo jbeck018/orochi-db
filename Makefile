@@ -11,6 +11,7 @@ OBJS = \
 	src/storage/columnar.o \
 	src/storage/compression.o \
 	src/sharding/distribution.o \
+	src/sharding/physical_sharding.o \
 	src/timeseries/hypertable.o \
 	src/tiered/tiered_storage.o \
 	src/vector/vector_ops.o \

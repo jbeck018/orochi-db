@@ -19,6 +19,7 @@
 #include "../orochi.h"
 #include "../core/catalog.h"
 #include "distribution.h"
+#include "physical_sharding.h"
 
 /* CRC32 lookup table */
 static uint32 crc32_table[256];
@@ -508,11 +509,23 @@ orochi_create_distributed_table_sql(PG_FUNCTION_ARGS)
     /* Register in catalog */
     orochi_catalog_register_table(&info);
 
-    /* Create shards */
+    /* Create shard metadata entries */
     orochi_catalog_create_shards(table_oid, shard_count,
                                  (OrochiShardStrategy) strategy);
 
-    elog(LOG, "Created distributed table %s.%s with %d shards on column %s",
+    /* Create physical shard tables */
+    orochi_create_physical_shards(table_oid, shard_count, dist_col);
+
+    /* Install routing triggers for INSERT/UPDATE/DELETE */
+    orochi_install_routing_trigger(table_oid, dist_col);
+
+    /* Move existing data to shards (if any) */
+    orochi_redistribute_data(table_oid);
+
+    /* Create union view for easy querying */
+    orochi_create_union_view(table_oid);
+
+    elog(LOG, "Created distributed table %s.%s with %d physical shards on column %s",
          info.schema_name, info.table_name, shard_count, dist_col);
 
     PG_RETURN_VOID();
@@ -540,6 +553,15 @@ orochi_undistribute_table_sql(PG_FUNCTION_ARGS)
         ereport(ERROR,
                 (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                  errmsg("table is not distributed")));
+
+    /* Remove routing triggers */
+    orochi_remove_routing_trigger(table_oid);
+
+    /* Drop union view */
+    orochi_drop_union_view(table_oid);
+
+    /* Drop physical shard tables */
+    orochi_drop_physical_shards(table_oid);
 
     /* Remove from catalog */
     orochi_catalog_remove_table(table_oid);

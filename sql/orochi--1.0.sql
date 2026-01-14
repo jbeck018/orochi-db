@@ -156,6 +156,29 @@ RETURNS void
     LANGUAGE C STRICT;
 
 -- ============================================================
+-- Shard Routing Helper Functions
+-- These are used by triggers to route data to correct shards
+-- ============================================================
+
+-- Compute a stable hash value for routing (works with any type)
+CREATE FUNCTION hash_value(anyelement)
+RETURNS integer
+    AS 'MODULE_PATHNAME', 'orochi_hash_value_sql'
+    LANGUAGE C IMMUTABLE PARALLEL SAFE;
+
+-- Get the shard index (0-based) for a hash value
+CREATE FUNCTION get_shard_index(hash_value integer, shard_count integer)
+RETURNS integer
+    AS 'MODULE_PATHNAME', 'orochi_get_shard_index_sql'
+    LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;
+
+-- Get the shard index for a value in a specific distributed table
+CREATE FUNCTION get_shard_for_value(table_name regclass, value anyelement)
+RETURNS integer
+    AS 'MODULE_PATHNAME', 'orochi_get_shard_for_value_sql'
+    LANGUAGE C STABLE PARALLEL SAFE;
+
+-- ============================================================
 -- Hypertable Functions
 -- ============================================================
 
