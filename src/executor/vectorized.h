@@ -488,4 +488,64 @@ extern void vectorized_batch_debug_print(VectorBatch *batch);
 extern void vectorized_load_column_data(VectorColumn *column, const void *src_data,
                                         int32 row_count, const uint8 *null_bitmap);
 
+/* ============================================================
+ * JIT Integration
+ *
+ * These functions provide JIT-accelerated paths for vectorized
+ * execution when JIT compilation is enabled.
+ * ============================================================ */
+
+/* Forward declarations for JIT types */
+struct JitCompiledFilter;
+struct JitCompiledAgg;
+struct JitContext;
+
+/*
+ * Execute filter with optional JIT acceleration
+ * Falls back to interpreted execution if JIT unavailable or disabled
+ */
+extern void vectorized_filter_with_jit(VectorBatch *batch,
+                                       VectorizedFilterState *filter,
+                                       struct JitCompiledFilter *jit_filter);
+
+/*
+ * Execute aggregation with optional JIT acceleration
+ * Falls back to interpreted execution if JIT unavailable or disabled
+ */
+extern void vectorized_aggregate_with_jit(VectorizedAggState *state,
+                                          VectorBatch *batch,
+                                          struct JitCompiledAgg *jit_agg);
+
+/*
+ * Check if JIT is beneficial for this batch size and expression cost
+ */
+extern bool vectorized_should_use_jit(VectorBatch *batch, int32 expr_cost);
+
+/*
+ * Get the global JIT context (creates if not exists)
+ */
+extern struct JitContext *vectorized_get_jit_context(void);
+
+/*
+ * Compile a filter for JIT execution
+ * Returns NULL if JIT is disabled or compilation fails
+ */
+extern struct JitCompiledFilter *vectorized_compile_filter_jit(VectorizedFilterState *filter);
+
+/*
+ * Compile an aggregation for JIT execution
+ * Returns NULL if JIT is disabled or compilation fails
+ */
+extern struct JitCompiledAgg *vectorized_compile_agg_jit(VectorizedAggState *agg);
+
+/*
+ * Free JIT-compiled filter
+ */
+extern void vectorized_free_filter_jit(struct JitCompiledFilter *jit_filter);
+
+/*
+ * Free JIT-compiled aggregation
+ */
+extern void vectorized_free_agg_jit(struct JitCompiledAgg *jit_agg);
+
 #endif /* OROCHI_VECTORIZED_H */

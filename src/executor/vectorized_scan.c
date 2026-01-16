@@ -263,9 +263,10 @@ load_batch_from_chunk_group(VectorizedScanState *state, VectorBatch *batch,
                     int64 *dest = (int64 *)vcol->data;
 
                     /*
-                     * In a full implementation, we would decompress ccol->value_buffer
-                     * and copy to dest. For now, initialize with values from
-                     * the columnar read state.
+                     * Read decompressed values from the columnar read state.
+                     * The columnar_state buffers are populated by load_chunk_group()
+                     * which reads compressed data from catalog storage and decompresses
+                     * using LZ4/ZSTD via columnar_decompress_buffer().
                      */
                     ColumnarReadState *rs = state->columnar_state;
                     if (rs->column_buffers[table_col].is_loaded)
@@ -577,9 +578,14 @@ vectorized_columnar_scan(VectorizedScanState *state)
                     }
                 }
 
-                /* Populate column read buffers */
+                /* Populate column read buffers with decompressed data */
                 for (int col_idx = 0; col_idx < state->tupdesc->natts; col_idx++)
                 {
+                    ColumnarColumnChunk *chunk;
+                    Form_pg_attribute attr;
+                    char *compressed_data;
+                    int64 compressed_size;
+
                     if (!bms_is_member(col_idx, state->columns_needed))
                         continue;
 
@@ -592,14 +598,124 @@ vectorized_columnar_scan(VectorizedScanState *state)
                     col_buf->row_count = row_count;
                     col_buf->is_loaded = true;
 
-                    /*
-                     * In a complete implementation, here we would:
-                     * 1. Read compressed data from storage
-                     * 2. Decompress using columnar_decompress_buffer()
-                     * 3. Decode into Datum array
-                     *
-                     * For now, values are initialized to zero/false
-                     */
+                    /* Get the column chunk metadata and attribute info */
+                    chunk = columnar->current_chunk_group->columns[col_idx];
+                    attr = TupleDescAttr(state->tupdesc, col_idx);
+
+                    if (chunk == NULL)
+                    {
+                        /* No chunk metadata, mark all as null */
+                        memset(col_buf->nulls, true, row_count * sizeof(bool));
+                        continue;
+                    }
+
+                    /* Read compressed data from catalog storage */
+                    compressed_data = orochi_catalog_read_chunk_data(
+                        columnar->current_stripe->stripe_id,
+                        columnar->current_chunk_group_index,
+                        col_idx,
+                        &compressed_size);
+
+                    if (compressed_data != NULL && compressed_size > 0)
+                    {
+                        char *decompressed_buffer;
+                        int64 decompressed_size = chunk->decompressed_size;
+                        OrochiCompressionType compression_type = chunk->compression_type;
+
+                        if (decompressed_size <= 0)
+                            decompressed_size = compressed_size;
+
+                        decompressed_buffer = palloc(decompressed_size);
+
+                        /* Decompress the data */
+                        if (compression_type != OROCHI_COMPRESS_NONE)
+                        {
+                            int64 actual_size = columnar_decompress_buffer(
+                                compressed_data, compressed_size,
+                                decompressed_buffer, decompressed_size,
+                                compression_type);
+
+                            if (actual_size > 0 && actual_size != decompressed_size)
+                                decompressed_size = actual_size;
+                        }
+                        else
+                        {
+                            memcpy(decompressed_buffer, compressed_data, compressed_size);
+                            decompressed_size = compressed_size;
+                        }
+
+                        /* Decode values based on attribute type */
+                        if (attr->attbyval && attr->attlen > 0)
+                        {
+                            /* Fixed-width pass-by-value type */
+                            for (int64 j = 0; j < row_count && j * attr->attlen < decompressed_size; j++)
+                            {
+                                memcpy(&col_buf->values[j],
+                                       decompressed_buffer + (j * attr->attlen),
+                                       attr->attlen);
+                                col_buf->nulls[j] = false;
+                            }
+                        }
+                        else
+                        {
+                            /* Variable-length type with size prefix */
+                            int64 offset = 0;
+                            int64 j = 0;
+
+                            while (offset < decompressed_size && j < row_count)
+                            {
+                                Size value_size;
+
+                                if (offset + (int64)sizeof(Size) > decompressed_size)
+                                    break;
+
+                                memcpy(&value_size, decompressed_buffer + offset, sizeof(Size));
+                                offset += sizeof(Size);
+
+                                if (value_size == 0)
+                                {
+                                    col_buf->nulls[j] = true;
+                                    col_buf->values[j] = (Datum) 0;
+                                }
+                                else
+                                {
+                                    if (offset + (int64)value_size > decompressed_size)
+                                        break;
+
+                                    void *value_ptr = palloc(value_size);
+                                    memcpy(value_ptr, decompressed_buffer + offset, value_size);
+                                    col_buf->values[j] = PointerGetDatum(value_ptr);
+                                    col_buf->nulls[j] = false;
+                                    offset += value_size;
+                                }
+                                j++;
+                            }
+
+                            /* Mark remaining as null */
+                            while (j < row_count)
+                            {
+                                col_buf->nulls[j] = true;
+                                col_buf->values[j] = (Datum) 0;
+                                j++;
+                            }
+                        }
+
+                        pfree(decompressed_buffer);
+                        pfree(compressed_data);
+                    }
+                    else
+                    {
+                        /* No data available, initialize based on metadata */
+                        if (chunk->has_nulls)
+                        {
+                            memset(col_buf->nulls, true, row_count * sizeof(bool));
+                        }
+                        else
+                        {
+                            memset(col_buf->nulls, false, row_count * sizeof(bool));
+                            memset(col_buf->values, 0, row_count * sizeof(Datum));
+                        }
+                    }
                 }
 
                 list_free_deep(column_chunks);

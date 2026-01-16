@@ -24,6 +24,7 @@
 #include "utils/timestamp.h"
 
 #include "../orochi.h"
+#include "../storage/columnar.h"
 #include "catalog.h"
 
 /* Cache for schema OID */
@@ -163,7 +164,9 @@ orochi_catalog_init(void)
         "CREATE TABLE IF NOT EXISTS orochi.orochi_column_chunks ("
         "    chunk_id BIGSERIAL PRIMARY KEY,"
         "    stripe_id BIGINT NOT NULL REFERENCES orochi.orochi_stripes(stripe_id) ON DELETE CASCADE,"
+        "    chunk_group_index INTEGER NOT NULL DEFAULT 0,"
         "    column_index SMALLINT NOT NULL,"
+        "    column_type OID NOT NULL DEFAULT 0,"
         "    value_count BIGINT NOT NULL,"
         "    null_count BIGINT NOT NULL DEFAULT 0,"
         "    compressed_size BIGINT NOT NULL,"
@@ -172,7 +175,11 @@ orochi_catalog_init(void)
         "    min_value BYTEA,"
         "    max_value BYTEA,"
         "    has_nulls BOOLEAN NOT NULL DEFAULT FALSE,"
-        "    UNIQUE(stripe_id, column_index)"
+        "    min_is_null BOOLEAN NOT NULL DEFAULT FALSE,"
+        "    max_is_null BOOLEAN NOT NULL DEFAULT FALSE,"
+        "    chunk_data BYTEA,"
+        "    null_bitmap BYTEA,"
+        "    UNIQUE(stripe_id, chunk_group_index, column_index)"
         ");"
 
         /* Tiering policies */
@@ -1716,4 +1723,212 @@ orochi_catalog_get_chunk(int64 chunk_id)
     pfree(query.data);
 
     return info;
+}
+
+/*
+ * orochi_catalog_read_chunk_data
+ *
+ * Read compressed chunk data from catalog storage.
+ * Returns the compressed data buffer and sets size.
+ * Caller is responsible for freeing the returned buffer.
+ */
+char *
+orochi_catalog_read_chunk_data(int64 stripe_id, int32 chunk_group_index,
+                               int16 column_index, int64 *data_size)
+{
+    StringInfoData query;
+    char *result = NULL;
+    int ret;
+
+    if (data_size)
+        *data_size = 0;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "SELECT chunk_data, compressed_size "
+        "FROM orochi.orochi_column_chunks "
+        "WHERE stripe_id = %ld AND chunk_group_index = %d AND column_index = %d",
+        stripe_id, chunk_group_index, column_index);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 1);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0)
+    {
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        bool isnull;
+        Datum chunk_data_datum;
+        int64 compressed_size;
+
+        chunk_data_datum = SPI_getbinval(tuple, tupdesc, 1, &isnull);
+
+        if (!isnull)
+        {
+            bytea *chunk_bytea = DatumGetByteaP(chunk_data_datum);
+            int32 bytea_len = VARSIZE_ANY_EXHDR(chunk_bytea);
+            char *bytea_data = VARDATA_ANY(chunk_bytea);
+
+            /* Allocate result buffer and copy data */
+            result = (char *) palloc(bytea_len);
+            memcpy(result, bytea_data, bytea_len);
+
+            if (data_size)
+                *data_size = bytea_len;
+        }
+
+        /* Also get compressed_size from column 2 as fallback */
+        compressed_size = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 2, &isnull));
+        if (data_size && *data_size == 0)
+            *data_size = compressed_size;
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
+    return result;
+}
+
+/*
+ * orochi_catalog_create_column_chunk_with_data
+ *
+ * Create a column chunk entry with the actual compressed data.
+ */
+void
+orochi_catalog_create_column_chunk_with_data(int64 stripe_id,
+                                              int32 chunk_group_index,
+                                              int16 column_index,
+                                              OrochiColumnChunk *chunk,
+                                              const char *data,
+                                              int64 data_size)
+{
+    StringInfoData query;
+    int ret;
+    char *hex_data = NULL;
+
+    if (chunk == NULL)
+        return;
+
+    ensure_catalog_initialized();
+
+    /* Convert binary data to hex string for SQL insertion */
+    if (data != NULL && data_size > 0)
+    {
+        int64 i;
+        hex_data = palloc(data_size * 2 + 1);
+        for (i = 0; i < data_size; i++)
+        {
+            sprintf(hex_data + (i * 2), "%02x", (unsigned char)data[i]);
+        }
+        hex_data[data_size * 2] = '\0';
+    }
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "INSERT INTO orochi.orochi_column_chunks "
+        "(stripe_id, chunk_group_index, column_index, column_type, "
+        "value_count, null_count, has_nulls, compressed_size, decompressed_size, "
+        "compression, chunk_data) "
+        "VALUES (%ld, %d, %d, %u, %ld, %ld, %s, %ld, %ld, %d, ",
+        stripe_id,
+        chunk_group_index,
+        column_index,
+        (unsigned int) INT8OID, /* Will be updated with proper type */
+        chunk->value_count,
+        chunk->null_count,
+        chunk->has_nulls ? "TRUE" : "FALSE",
+        chunk->compressed_size,
+        chunk->decompressed_size,
+        (int) chunk->compression);
+
+    /* Add chunk data as bytea */
+    if (hex_data != NULL)
+    {
+        appendStringInfo(&query, "E'\\\\x%s'", hex_data);
+        pfree(hex_data);
+    }
+    else
+    {
+        appendStringInfo(&query, "NULL");
+    }
+
+    appendStringInfo(&query,
+        ") ON CONFLICT (stripe_id, chunk_group_index, column_index) DO UPDATE SET "
+        "value_count = EXCLUDED.value_count, "
+        "null_count = EXCLUDED.null_count, "
+        "has_nulls = EXCLUDED.has_nulls, "
+        "compressed_size = EXCLUDED.compressed_size, "
+        "decompressed_size = EXCLUDED.decompressed_size, "
+        "compression = EXCLUDED.compression, "
+        "chunk_data = EXCLUDED.chunk_data");
+
+    SPI_connect();
+    ret = SPI_execute(query.data, false, 0);
+    if (ret != SPI_OK_INSERT && ret != SPI_OK_UPDATE)
+    {
+        ereport(WARNING,
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("failed to create column chunk with data: %d", ret)));
+    }
+    SPI_finish();
+    pfree(query.data);
+}
+
+/*
+ * orochi_catalog_get_table_stripes
+ *
+ * Get all stripes for a table.
+ */
+List *
+orochi_catalog_get_table_stripes(Oid table_oid)
+{
+    StringInfoData query;
+    List *stripes = NIL;
+    int ret;
+    uint64 i;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "SELECT stripe_id, table_oid, first_row, row_count, column_count, "
+        "data_size, metadata_size, compression, is_flushed "
+        "FROM orochi.orochi_stripes WHERE table_oid = %u ORDER BY first_row",
+        table_oid);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 0);
+
+    if (ret == SPI_OK_SELECT)
+    {
+        for (i = 0; i < SPI_processed; i++)
+        {
+            HeapTuple tuple = SPI_tuptable->vals[i];
+            TupleDesc tupdesc = SPI_tuptable->tupdesc;
+            bool isnull;
+            ColumnarStripe *stripe;
+
+            stripe = (ColumnarStripe *) palloc0(sizeof(ColumnarStripe));
+
+            stripe->stripe_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+            /* table_oid at col 2 - not needed */
+            stripe->first_row_number = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 3, &isnull));
+            stripe->row_count = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 4, &isnull));
+            stripe->column_count = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 5, &isnull));
+            stripe->data_size = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 6, &isnull));
+            stripe->metadata_size = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 7, &isnull));
+            /* compression at col 8 - not in ColumnarStripe */
+            stripe->is_flushed = DatumGetBool(SPI_getbinval(tuple, tupdesc, 9, &isnull));
+
+            /* Calculate chunk_group_count based on row_count and default chunk group size */
+            stripe->chunk_group_count = (int32)((stripe->row_count + 9999) / 10000);
+            if (stripe->chunk_group_count < 1)
+                stripe->chunk_group_count = 1;
+
+            stripes = lappend(stripes, stripe);
+        }
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
+    return stripes;
 }

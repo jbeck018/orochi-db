@@ -1056,6 +1056,11 @@ static KafkaSourceConfig *
 parse_kafka_config(const char *json)
 {
     KafkaSourceConfig *config;
+    Datum json_datum;
+    Jsonb *jb;
+    JsonbIterator *it;
+    JsonbValue v;
+    JsonbIteratorToken r;
 
     config = palloc0(sizeof(KafkaSourceConfig));
 
@@ -1068,8 +1073,127 @@ parse_kafka_config(const char *json)
     config->partition = -1;  /* All partitions */
     config->start_offset = -1;  /* Latest */
 
-    /* TODO: Parse JSON and populate config fields */
-    /* For now, just return defaults */
+    if (json == NULL || strlen(json) == 0 || strcmp(json, "{}") == 0)
+        return config;
+
+    /* Parse JSON using JSONB functions */
+    PG_TRY();
+    {
+        jb = DatumGetJsonbP(DirectFunctionCall1(jsonb_in, CStringGetDatum(json)));
+
+        it = JsonbIteratorInit(&jb->root);
+
+        while ((r = JsonbIteratorNext(&it, &v, false)) != WJB_DONE)
+        {
+            if (r == WJB_KEY)
+            {
+                char *key = pnstrdup(v.val.string.val, v.val.string.len);
+
+                /* Get the value */
+                r = JsonbIteratorNext(&it, &v, false);
+
+                if (strcmp(key, "bootstrap_servers") == 0 || strcmp(key, "brokers") == 0)
+                {
+                    if (v.type == jbvString)
+                        config->bootstrap_servers = pnstrdup(v.val.string.val, v.val.string.len);
+                }
+                else if (strcmp(key, "topic") == 0)
+                {
+                    if (v.type == jbvString)
+                        config->topic = pnstrdup(v.val.string.val, v.val.string.len);
+                }
+                else if (strcmp(key, "consumer_group") == 0 || strcmp(key, "group_id") == 0)
+                {
+                    if (v.type == jbvString)
+                        config->consumer_group = pnstrdup(v.val.string.val, v.val.string.len);
+                }
+                else if (strcmp(key, "partition") == 0)
+                {
+                    if (v.type == jbvNumeric)
+                        config->partition = DatumGetInt32(DirectFunctionCall1(numeric_int4,
+                                            NumericGetDatum(v.val.numeric)));
+                }
+                else if (strcmp(key, "start_offset") == 0)
+                {
+                    if (v.type == jbvNumeric)
+                        config->start_offset = DatumGetInt64(DirectFunctionCall1(numeric_int8,
+                                               NumericGetDatum(v.val.numeric)));
+                    else if (v.type == jbvString)
+                    {
+                        char *offset_str = pnstrdup(v.val.string.val, v.val.string.len);
+                        if (strcmp(offset_str, "earliest") == 0)
+                            config->start_offset = -2;
+                        else if (strcmp(offset_str, "latest") == 0)
+                            config->start_offset = -1;
+                        pfree(offset_str);
+                    }
+                }
+                else if (strcmp(key, "fetch_min_bytes") == 0)
+                {
+                    if (v.type == jbvNumeric)
+                        config->fetch_min_bytes = DatumGetInt32(DirectFunctionCall1(numeric_int4,
+                                                  NumericGetDatum(v.val.numeric)));
+                }
+                else if (strcmp(key, "fetch_max_wait_ms") == 0)
+                {
+                    if (v.type == jbvNumeric)
+                        config->fetch_max_wait_ms = DatumGetInt32(DirectFunctionCall1(numeric_int4,
+                                                    NumericGetDatum(v.val.numeric)));
+                }
+                else if (strcmp(key, "session_timeout_ms") == 0)
+                {
+                    if (v.type == jbvNumeric)
+                        config->session_timeout_ms = DatumGetInt32(DirectFunctionCall1(numeric_int4,
+                                                     NumericGetDatum(v.val.numeric)));
+                }
+                else if (strcmp(key, "heartbeat_interval_ms") == 0)
+                {
+                    if (v.type == jbvNumeric)
+                        config->heartbeat_interval_ms = DatumGetInt32(DirectFunctionCall1(numeric_int4,
+                                                        NumericGetDatum(v.val.numeric)));
+                }
+                else if (strcmp(key, "security_protocol") == 0)
+                {
+                    if (v.type == jbvString)
+                        config->security_protocol = pnstrdup(v.val.string.val, v.val.string.len);
+                }
+                else if (strcmp(key, "sasl_mechanism") == 0)
+                {
+                    if (v.type == jbvString)
+                        config->sasl_mechanism = pnstrdup(v.val.string.val, v.val.string.len);
+                }
+                else if (strcmp(key, "sasl_username") == 0)
+                {
+                    if (v.type == jbvString)
+                        config->sasl_username = pnstrdup(v.val.string.val, v.val.string.len);
+                }
+                else if (strcmp(key, "sasl_password") == 0)
+                {
+                    if (v.type == jbvString)
+                        config->sasl_password = pnstrdup(v.val.string.val, v.val.string.len);
+                }
+                else if (strcmp(key, "enable_auto_commit") == 0)
+                {
+                    if (v.type == jbvBool)
+                        config->enable_auto_commit = v.val.boolean;
+                }
+                else if (strcmp(key, "auto_commit_interval") == 0)
+                {
+                    if (v.type == jbvNumeric)
+                        config->auto_commit_interval = DatumGetInt32(DirectFunctionCall1(numeric_int4,
+                                                       NumericGetDatum(v.val.numeric)));
+                }
+
+                pfree(key);
+            }
+        }
+    }
+    PG_CATCH();
+    {
+        elog(WARNING, "Failed to parse Kafka JSON configuration, using defaults");
+        FlushErrorState();
+    }
+    PG_END_TRY();
 
     return config;
 }
@@ -1078,6 +1202,10 @@ static S3SourceConfig *
 parse_s3_config(const char *json)
 {
     S3SourceConfig *config;
+    Jsonb *jb;
+    JsonbIterator *it;
+    JsonbValue v;
+    JsonbIteratorToken r;
 
     config = palloc0(sizeof(S3SourceConfig));
 
@@ -1087,7 +1215,93 @@ parse_s3_config(const char *json)
     config->max_file_size = S3_DEFAULT_MAX_FILE_SIZE;
     config->use_ssl = true;
 
-    /* TODO: Parse JSON and populate config fields */
+    if (json == NULL || strlen(json) == 0 || strcmp(json, "{}") == 0)
+        return config;
+
+    /* Parse JSON using JSONB functions */
+    PG_TRY();
+    {
+        jb = DatumGetJsonbP(DirectFunctionCall1(jsonb_in, CStringGetDatum(json)));
+
+        it = JsonbIteratorInit(&jb->root);
+
+        while ((r = JsonbIteratorNext(&it, &v, false)) != WJB_DONE)
+        {
+            if (r == WJB_KEY)
+            {
+                char *key = pnstrdup(v.val.string.val, v.val.string.len);
+
+                /* Get the value */
+                r = JsonbIteratorNext(&it, &v, false);
+
+                if (strcmp(key, "bucket") == 0)
+                {
+                    if (v.type == jbvString)
+                        config->bucket = pnstrdup(v.val.string.val, v.val.string.len);
+                }
+                else if (strcmp(key, "prefix") == 0)
+                {
+                    if (v.type == jbvString)
+                        config->prefix = pnstrdup(v.val.string.val, v.val.string.len);
+                }
+                else if (strcmp(key, "region") == 0)
+                {
+                    if (v.type == jbvString)
+                        config->region = pnstrdup(v.val.string.val, v.val.string.len);
+                }
+                else if (strcmp(key, "endpoint") == 0)
+                {
+                    if (v.type == jbvString)
+                        config->endpoint = pnstrdup(v.val.string.val, v.val.string.len);
+                }
+                else if (strcmp(key, "access_key") == 0 || strcmp(key, "access_key_id") == 0)
+                {
+                    if (v.type == jbvString)
+                        config->access_key = pnstrdup(v.val.string.val, v.val.string.len);
+                }
+                else if (strcmp(key, "secret_key") == 0 || strcmp(key, "secret_access_key") == 0)
+                {
+                    if (v.type == jbvString)
+                        config->secret_key = pnstrdup(v.val.string.val, v.val.string.len);
+                }
+                else if (strcmp(key, "poll_interval_sec") == 0 || strcmp(key, "poll_interval") == 0)
+                {
+                    if (v.type == jbvNumeric)
+                        config->poll_interval_sec = DatumGetInt32(DirectFunctionCall1(numeric_int4,
+                                                    NumericGetDatum(v.val.numeric)));
+                }
+                else if (strcmp(key, "delete_after_process") == 0)
+                {
+                    if (v.type == jbvBool)
+                        config->delete_after_process = v.val.boolean;
+                }
+                else if (strcmp(key, "file_pattern") == 0 || strcmp(key, "pattern") == 0)
+                {
+                    if (v.type == jbvString)
+                        config->file_pattern = pnstrdup(v.val.string.val, v.val.string.len);
+                }
+                else if (strcmp(key, "max_file_size") == 0)
+                {
+                    if (v.type == jbvNumeric)
+                        config->max_file_size = DatumGetInt64(DirectFunctionCall1(numeric_int8,
+                                                NumericGetDatum(v.val.numeric)));
+                }
+                else if (strcmp(key, "use_ssl") == 0)
+                {
+                    if (v.type == jbvBool)
+                        config->use_ssl = v.val.boolean;
+                }
+
+                pfree(key);
+            }
+        }
+    }
+    PG_CATCH();
+    {
+        elog(WARNING, "Failed to parse S3 JSON configuration, using defaults");
+        FlushErrorState();
+    }
+    PG_END_TRY();
 
     return config;
 }

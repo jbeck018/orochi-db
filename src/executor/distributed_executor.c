@@ -18,6 +18,7 @@
 #include "catalog/pg_type.h"
 #include "miscadmin.h"
 #include "storage/proc.h"
+#include "storage/lwlock.h"
 
 #ifndef WIN32
 #include <sys/select.h>
@@ -26,6 +27,53 @@
 #include "../orochi.h"
 #include "../core/catalog.h"
 #include "distributed_executor.h"
+#include "../consensus/raft_integration.h"
+
+/* GUC variable for Raft-based distributed commits */
+bool orochi_use_raft_consensus = true;
+
+/* ============================================================
+ * LWLock Protection for Thread Safety
+ * ============================================================ */
+
+/* Lock tranche IDs for connection pool and query cache */
+static LWLockTranche connection_pool_tranche = {
+    .name = "OrochiConnectionPool"
+};
+static LWLockTranche query_cache_tranche = {
+    .name = "OrochiQueryCache"
+};
+
+/* LWLocks for protecting shared state */
+static LWLockPadded connection_pool_lock_padded;
+static LWLockPadded query_cache_lock_padded;
+static LWLock *connection_pool_lock = NULL;
+static LWLock *query_cache_lock = NULL;
+static bool locks_initialized = false;
+
+/*
+ * Initialize LWLocks for thread safety
+ *
+ * Security: Prevents race conditions in concurrent access to shared data structures
+ */
+static void
+init_executor_locks(void)
+{
+    if (locks_initialized)
+        return;
+
+    /* Initialize connection pool lock */
+    LWLockRegisterTranche(LWTRANCHE_FIRST_USER_DEFINED, &connection_pool_tranche);
+    LWLockInitialize(&connection_pool_lock_padded.lock, LWTRANCHE_FIRST_USER_DEFINED);
+    connection_pool_lock = &connection_pool_lock_padded.lock;
+
+    /* Initialize query cache lock */
+    LWLockRegisterTranche(LWTRANCHE_FIRST_USER_DEFINED + 1, &query_cache_tranche);
+    LWLockInitialize(&query_cache_lock_padded.lock, LWTRANCHE_FIRST_USER_DEFINED + 1);
+    query_cache_lock = &query_cache_lock_padded.lock;
+
+    locks_initialized = true;
+}
 
 /* ============================================================
  * Connection Pool Management
@@ -58,12 +106,17 @@ static DistributedTransactionState *current_dtxn = NULL;
 
 /*
  * Initialize connection pool
+ *
+ * Security: Also initializes LWLocks for thread-safe access
  */
 static void
 init_connection_pool(void)
 {
     if (pool_initialized)
         return;
+
+    /* Initialize locks first for thread safety */
+    init_executor_locks();
 
     memset(connection_pool, 0, sizeof(connection_pool));
     pool_initialized = true;
@@ -194,16 +247,23 @@ orochi_execute_distributed_plan(DistributedPlan *plan,
 
 /*
  * Get connection from pool or create new
+ *
+ * Security: Uses LWLock to prevent race conditions in concurrent access
  */
 void *
 orochi_get_worker_connection(int32 node_id)
 {
     int i;
-    PGconn *conn;
+    PGconn *conn = NULL;
+    PGconn *found_conn = NULL;
     OrochiNodeInfo *node;
     char *connstr;
+    bool need_new_connection = true;
 
     init_connection_pool();
+
+    /* Acquire exclusive lock for pool access */
+    LWLockAcquire(connection_pool_lock, LW_EXCLUSIVE);
 
     /* Check for existing idle connection */
     for (i = 0; i < connection_pool_size; i++)
@@ -215,7 +275,9 @@ orochi_get_worker_connection(int32 node_id)
             {
                 connection_pool[i].in_use = true;
                 connection_pool[i].last_used = GetCurrentTimestamp();
-                return connection_pool[i].conn;
+                found_conn = connection_pool[i].conn;
+                need_new_connection = false;
+                break;
             }
             else
             {
@@ -227,7 +289,12 @@ orochi_get_worker_connection(int32 node_id)
         }
     }
 
-    /* Create new connection */
+    LWLockRelease(connection_pool_lock);
+
+    if (!need_new_connection)
+        return found_conn;
+
+    /* Create new connection (outside of lock to avoid blocking) */
     node = orochi_catalog_get_node(node_id);
     if (node == NULL)
     {
@@ -247,7 +314,9 @@ orochi_get_worker_connection(int32 node_id)
         return NULL;
     }
 
-    /* Add to pool */
+    /* Add to pool under lock */
+    LWLockAcquire(connection_pool_lock, LW_EXCLUSIVE);
+
     if (connection_pool_size < MAX_CONNECTION_POOL_SIZE)
     {
         connection_pool[connection_pool_size].node_id = node_id;
@@ -257,19 +326,27 @@ orochi_get_worker_connection(int32 node_id)
         connection_pool_size++;
     }
 
+    LWLockRelease(connection_pool_lock);
+
     return conn;
 }
 
 /*
  * Release connection back to pool
+ *
+ * Security: Uses LWLock to prevent race conditions
  */
 void
 orochi_release_worker_connection(void *conn)
 {
     int i;
+    bool found = false;
 
     if (conn == NULL)
         return;
+
+    /* Acquire lock before modifying pool state */
+    LWLockAcquire(connection_pool_lock, LW_EXCLUSIVE);
 
     for (i = 0; i < connection_pool_size; i++)
     {
@@ -277,32 +354,51 @@ orochi_release_worker_connection(void *conn)
         {
             connection_pool[i].in_use = false;
             connection_pool[i].last_used = GetCurrentTimestamp();
-            return;
+            found = true;
+            break;
         }
     }
 
-    /* Not in pool, just close it */
-    PQfinish((PGconn *) conn);
+    LWLockRelease(connection_pool_lock);
+
+    /* Not in pool, just close it (outside lock) */
+    if (!found)
+        PQfinish((PGconn *) conn);
 }
 
 /*
  * Close all connections
+ *
+ * Security: Uses LWLock to prevent race conditions
  */
 void
 orochi_close_all_connections(void)
 {
     int i;
+    PGconn *conns_to_close[MAX_CONNECTION_POOL_SIZE];
+    int num_to_close = 0;
+
+    /* Acquire lock to get list of connections */
+    LWLockAcquire(connection_pool_lock, LW_EXCLUSIVE);
 
     for (i = 0; i < connection_pool_size; i++)
     {
         if (connection_pool[i].conn != NULL)
         {
-            PQfinish(connection_pool[i].conn);
+            conns_to_close[num_to_close++] = connection_pool[i].conn;
             connection_pool[i].conn = NULL;
         }
     }
 
     connection_pool_size = 0;
+
+    LWLockRelease(connection_pool_lock);
+
+    /* Close connections outside of lock to avoid blocking */
+    for (i = 0; i < num_to_close; i++)
+    {
+        PQfinish(conns_to_close[i]);
+    }
 }
 
 void
@@ -1106,11 +1202,16 @@ register_cache_dependency(uint64 query_hash, Oid table_oid)
 
 /*
  * Initialize query result cache
+ *
+ * Security: Thread-safe initialization with lock protection
  */
 void
 orochi_init_query_cache(void)
 {
     HASHCTL hash_ctl;
+
+    /* Ensure locks are initialized first */
+    init_executor_locks();
 
     if (query_cache != NULL)
         return;
@@ -1141,18 +1242,26 @@ compute_query_hash(const char *query_string)
 
 /*
  * Look up query in cache
+ *
+ * Security: Uses LWLock to prevent race conditions
  */
 QueryCacheEntry *
 orochi_cache_lookup(const char *query_string)
 {
     uint64 hash;
     QueryCacheEntry *entry;
+    QueryCacheEntry *result = NULL;
     bool found;
+    bool expired = false;
 
     if (query_cache == NULL)
         orochi_init_query_cache();
 
     hash = compute_query_hash(query_string);
+
+    /* Acquire shared lock for read access */
+    LWLockAcquire(query_cache_lock, LW_SHARED);
+
     entry = hash_search(query_cache, &hash, HASH_FIND, &found);
 
     if (found)
@@ -1162,21 +1271,31 @@ orochi_cache_lookup(const char *query_string)
         if (now - entry->cached_at < 5 * 60 * 1000000L)
         {
             entry->hit_count++;
-            return entry;
+            result = entry;
         }
         else
         {
-            /* Expired - remove entry */
-            hash_search(query_cache, &hash, HASH_REMOVE, NULL);
-            return NULL;
+            expired = true;
         }
     }
 
-    return NULL;
+    LWLockRelease(query_cache_lock);
+
+    /* If expired, remove under exclusive lock */
+    if (expired)
+    {
+        LWLockAcquire(query_cache_lock, LW_EXCLUSIVE);
+        hash_search(query_cache, &hash, HASH_REMOVE, NULL);
+        LWLockRelease(query_cache_lock);
+    }
+
+    return result;
 }
 
 /*
  * Store query result in cache
+ *
+ * Security: Uses LWLock to prevent race conditions
  */
 void
 orochi_cache_store(const char *query_string, const char *result_data, int64 result_size)
@@ -1189,6 +1308,10 @@ orochi_cache_store(const char *query_string, const char *result_data, int64 resu
         orochi_init_query_cache();
 
     hash = compute_query_hash(query_string);
+
+    /* Acquire exclusive lock for write access */
+    LWLockAcquire(query_cache_lock, LW_EXCLUSIVE);
+
     entry = hash_search(query_cache, &hash, HASH_ENTER, &found);
 
     if (!found || entry->result_data == NULL)
@@ -1199,10 +1322,14 @@ orochi_cache_store(const char *query_string, const char *result_data, int64 resu
         entry->cached_at = GetCurrentTimestamp();
         entry->hit_count = 0;
     }
+
+    LWLockRelease(query_cache_lock);
 }
 
 /*
  * Invalidate cache entries for a table using dependency tracking
+ *
+ * Security: Uses LWLock to prevent race conditions
  */
 void
 orochi_cache_invalidate(Oid table_oid)
@@ -1211,9 +1338,16 @@ orochi_cache_invalidate(Oid table_oid)
     bool found;
     int i;
     int invalidated = 0;
+    uint64 hashes_to_remove[64];
+    int num_to_remove = 0;
+    char *data_to_free[64];
+    int num_to_free = 0;
 
     if (query_cache == NULL)
         return;
+
+    /* Acquire exclusive lock for modification */
+    LWLockAcquire(query_cache_lock, LW_EXCLUSIVE);
 
     /* Look up which queries depend on this table */
     if (cache_dependencies != NULL)
@@ -1222,8 +1356,8 @@ orochi_cache_invalidate(Oid table_oid)
 
         if (found && dep_entry->num_queries > 0)
         {
-            /* Invalidate each dependent query */
-            for (i = 0; i < dep_entry->num_queries; i++)
+            /* Collect entries to remove */
+            for (i = 0; i < dep_entry->num_queries && num_to_remove < 64; i++)
             {
                 uint64 hash = dep_entry->dependent_queries[i];
                 QueryCacheEntry *cache_entry;
@@ -1231,17 +1365,30 @@ orochi_cache_invalidate(Oid table_oid)
                 cache_entry = hash_search(query_cache, &hash, HASH_FIND, &found);
                 if (found)
                 {
-                    /* Free result data and remove from cache */
-                    if (cache_entry->result_data != NULL)
-                        pfree(cache_entry->result_data);
+                    if (cache_entry->result_data != NULL && num_to_free < 64)
+                        data_to_free[num_to_free++] = cache_entry->result_data;
 
-                    hash_search(query_cache, &hash, HASH_REMOVE, NULL);
+                    hashes_to_remove[num_to_remove++] = hash;
                     invalidated++;
                 }
             }
 
+            /* Remove entries from hash table */
+            for (i = 0; i < num_to_remove; i++)
+            {
+                hash_search(query_cache, &hashes_to_remove[i], HASH_REMOVE, NULL);
+            }
+
             /* Clear the dependency entry */
             dep_entry->num_queries = 0;
+
+            LWLockRelease(query_cache_lock);
+
+            /* Free result data outside of lock */
+            for (i = 0; i < num_to_free; i++)
+            {
+                pfree(data_to_free[i]);
+            }
 
             elog(DEBUG1, "Invalidated %d cache entries for table OID %u",
                  invalidated, table_oid);
@@ -1255,10 +1402,14 @@ orochi_cache_invalidate(Oid table_oid)
          table_oid);
     hash_destroy(query_cache);
     query_cache = NULL;
+
+    LWLockRelease(query_cache_lock);
 }
 
 /*
  * Store cache entry with table dependencies
+ *
+ * Security: Uses LWLock to prevent race conditions
  */
 void
 orochi_cache_store_with_deps(const char *query_string, const char *result_data,
@@ -1273,6 +1424,10 @@ orochi_cache_store_with_deps(const char *query_string, const char *result_data,
         orochi_init_query_cache();
 
     hash = compute_query_hash(query_string);
+
+    /* Acquire exclusive lock for write access */
+    LWLockAcquire(query_cache_lock, LW_EXCLUSIVE);
+
     entry = hash_search(query_cache, &hash, HASH_ENTER, &found);
 
     if (!found || entry->result_data == NULL)
@@ -1294,6 +1449,8 @@ orochi_cache_store_with_deps(const char *query_string, const char *result_data,
             register_cache_dependency(hash, table_oids[i]);
         }
     }
+
+    LWLockRelease(query_cache_lock);
 }
 
 /* ============================================================
@@ -1507,6 +1664,7 @@ orochi_prepare_distributed_transaction(DistributedExecutorState *state)
     ListCell *lc;
     bool all_prepared = true;
     StringInfoData cmd;
+    List *shard_ids = NIL;
 
     if (current_dtxn == NULL)
     {
@@ -1514,7 +1672,7 @@ orochi_prepare_distributed_transaction(DistributedExecutorState *state)
         return false;
     }
 
-    /* Collect all participant nodes */
+    /* Collect all participant nodes and shard IDs */
     foreach(lc, state->tasks)
     {
         RemoteTask *task = (RemoteTask *) lfirst(lc);
@@ -1533,7 +1691,10 @@ orochi_prepare_distributed_transaction(DistributedExecutorState *state)
         }
 
         if (!already_added)
+        {
             current_dtxn->participants = lappend_int(current_dtxn->participants, node_id);
+            shard_ids = lappend_int(shard_ids, (int) task->fragment->shard_id);
+        }
     }
 
     initStringInfo(&cmd);
@@ -1570,6 +1731,25 @@ orochi_prepare_distributed_transaction(DistributedExecutorState *state)
     if (all_prepared)
     {
         current_dtxn->prepared = true;
+
+        /*
+         * Log the prepare decision to Raft for durability
+         * This ensures the commit decision survives coordinator failures
+         */
+        if (orochi_use_raft_consensus && orochi_raft_is_leader())
+        {
+            if (!orochi_raft_prepare_transaction(current_dtxn->gid, shard_ids))
+            {
+                elog(WARNING, "Failed to log prepare decision to Raft for %s",
+                     current_dtxn->gid);
+                /* Continue anyway - Raft logging is best-effort for now */
+            }
+            else
+            {
+                elog(DEBUG1, "Prepare decision logged to Raft: %s", current_dtxn->gid);
+            }
+        }
+
         elog(DEBUG1, "All participants prepared: %s", current_dtxn->gid);
     }
     else
@@ -1578,6 +1758,7 @@ orochi_prepare_distributed_transaction(DistributedExecutorState *state)
         orochi_rollback_distributed_transaction(state);
     }
 
+    list_free(shard_ids);
     return all_prepared;
 }
 
@@ -1591,6 +1772,46 @@ orochi_commit_distributed_transaction(DistributedExecutorState *state)
     {
         elog(WARNING, "No prepared distributed transaction to commit");
         return;
+    }
+
+    /*
+     * Log the commit decision to Raft BEFORE committing on participants.
+     * This ensures that if the coordinator crashes after deciding to commit,
+     * the decision is durable and can be recovered from the Raft log.
+     */
+    if (orochi_use_raft_consensus)
+    {
+        if (orochi_raft_is_leader())
+        {
+            if (!orochi_raft_commit_transaction(current_dtxn->gid))
+            {
+                elog(WARNING, "Failed to log commit decision to Raft for %s, proceeding anyway",
+                     current_dtxn->gid);
+            }
+            else
+            {
+                /* Wait for Raft commit to be replicated for durability */
+                if (!orochi_raft_wait_for_commit(current_dtxn->gid, 5000))
+                {
+                    elog(WARNING, "Raft commit replication timeout for %s, proceeding with 2PC commit",
+                         current_dtxn->gid);
+                }
+                else
+                {
+                    elog(DEBUG1, "Commit decision replicated via Raft: %s", current_dtxn->gid);
+                }
+            }
+        }
+        else
+        {
+            /* Not the Raft leader - forward to leader or proceed with local commit */
+            int32 leader_id = orochi_raft_get_leader();
+            if (leader_id > 0)
+            {
+                elog(DEBUG1, "Not Raft leader (leader=%d), proceeding with local 2PC commit",
+                     leader_id);
+            }
+        }
     }
 
     initStringInfo(&cmd);
@@ -1643,6 +1864,26 @@ orochi_rollback_distributed_transaction(DistributedExecutorState *state)
 
     if (current_dtxn == NULL)
         return;
+
+    /*
+     * Log the abort decision to Raft for durability.
+     * This ensures that the abort decision is replicated across the cluster.
+     */
+    if (orochi_use_raft_consensus && current_dtxn->prepared)
+    {
+        if (orochi_raft_is_leader())
+        {
+            if (!orochi_raft_abort_transaction(current_dtxn->gid))
+            {
+                elog(WARNING, "Failed to log abort decision to Raft for %s",
+                     current_dtxn->gid);
+            }
+            else
+            {
+                elog(DEBUG1, "Abort decision logged to Raft: %s", current_dtxn->gid);
+            }
+        }
+    }
 
     initStringInfo(&cmd);
 

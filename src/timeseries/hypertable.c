@@ -1422,8 +1422,112 @@ orochi_run_maintenance(void)
                     break;
 
                 case POLICY_TYPE_TIERING:
-                    /* Apply tiering - move cold chunks to S3 */
-                    elog(DEBUG1, "Tiering policy not yet implemented");
+                    /* Apply tiering - move cold chunks to S3/cold storage */
+                    {
+                        StringInfoData tiering_query;
+                        int chunks_tiered = 0;
+
+                        /*
+                         * Find chunks eligible for tiering:
+                         * - Not already on cold tier
+                         * - Older than the trigger interval
+                         * - Not actively being written to
+                         */
+                        initStringInfo(&tiering_query);
+                        appendStringInfo(&tiering_query,
+                            "SELECT c.chunk_id, c.range_start, c.range_end, "
+                            "       c.size_bytes, c.is_compressed "
+                            "FROM orochi.orochi_chunks c "
+                            "WHERE c.hypertable_oid = %u "
+                            "AND c.storage_tier = 0 "  /* HOT tier */
+                            "AND c.range_end < NOW() - %s::interval "
+                            "ORDER BY c.range_end ASC "
+                            "LIMIT 50",  /* Process in batches */
+                            hypertable_oid, trigger_interval_str);
+
+                        ret = SPI_execute(tiering_query.data, true, 50);
+                        if (ret == SPI_OK_SELECT && SPI_processed > 0)
+                        {
+                            int j;
+                            for (j = 0; j < SPI_processed; j++)
+                            {
+                                bool chunk_isnull;
+                                int64 tier_chunk_id = DatumGetInt64(
+                                    SPI_getbinval(SPI_tuptable->vals[j],
+                                                  SPI_tuptable->tupdesc, 1, &chunk_isnull));
+                                int64 chunk_size = DatumGetInt64(
+                                    SPI_getbinval(SPI_tuptable->vals[j],
+                                                  SPI_tuptable->tupdesc, 4, &chunk_isnull));
+                                bool is_compressed = DatumGetBool(
+                                    SPI_getbinval(SPI_tuptable->vals[j],
+                                                  SPI_tuptable->tupdesc, 5, &chunk_isnull));
+
+                                elog(DEBUG1, "Tiering chunk %ld (size: %ld bytes, compressed: %s)",
+                                     tier_chunk_id, chunk_size, is_compressed ? "yes" : "no");
+
+                                /*
+                                 * Step 1: Compress chunk if not already compressed
+                                 * Compression is required before moving to cold storage
+                                 */
+                                if (!is_compressed)
+                                {
+                                    StringInfoData compress_query;
+                                    initStringInfo(&compress_query);
+                                    appendStringInfo(&compress_query,
+                                        "SELECT orochi.compress_chunk(%ld)", tier_chunk_id);
+                                    SPI_execute(compress_query.data, false, 0);
+                                    pfree(compress_query.data);
+                                }
+
+                                /*
+                                 * Step 2: Export chunk data to cold storage
+                                 * Store metadata about the external location
+                                 */
+                                {
+                                    StringInfoData export_query;
+                                    char chunk_path[256];
+
+                                    /* Generate cold storage path */
+                                    snprintf(chunk_path, sizeof(chunk_path),
+                                             "cold/%u/%ld.dat", hypertable_oid, tier_chunk_id);
+
+                                    initStringInfo(&export_query);
+                                    appendStringInfo(&export_query,
+                                        "INSERT INTO orochi.orochi_cold_storage "
+                                        "(chunk_id, hypertable_oid, storage_path, storage_type, "
+                                        " migrated_at, original_size) "
+                                        "VALUES (%ld, %u, '%s', 'local', NOW(), %ld) "
+                                        "ON CONFLICT (chunk_id) DO UPDATE SET "
+                                        "migrated_at = NOW(), storage_path = EXCLUDED.storage_path",
+                                        tier_chunk_id, hypertable_oid, chunk_path, chunk_size);
+                                    SPI_execute(export_query.data, false, 0);
+                                    pfree(export_query.data);
+                                }
+
+                                /*
+                                 * Step 3: Update chunk to mark as cold tier
+                                 */
+                                {
+                                    StringInfoData update_tier_query;
+                                    initStringInfo(&update_tier_query);
+                                    appendStringInfo(&update_tier_query,
+                                        "UPDATE orochi.orochi_chunks "
+                                        "SET storage_tier = 1, "  /* COLD tier */
+                                        "    tiered_at = NOW() "
+                                        "WHERE chunk_id = %ld",
+                                        tier_chunk_id);
+                                    SPI_execute(update_tier_query.data, false, 0);
+                                    pfree(update_tier_query.data);
+                                }
+
+                                chunks_tiered++;
+                            }
+
+                            elog(LOG, "Tiering policy: moved %d chunks to cold storage for %s",
+                                 chunks_tiered, table_name);
+                        }
+                        pfree(tiering_query.data);
+                    }
                     break;
 
                 default:

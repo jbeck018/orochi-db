@@ -184,6 +184,14 @@ typedef struct ColumnarWriteState
         Datum           min_value;          /* Running min */
         Datum           max_value;          /* Running max */
         bool            has_nulls;
+        /* Compression state */
+        Oid             attr_type;          /* Column data type OID */
+        int64           row_count;          /* Number of rows in buffer */
+        int64           null_count;         /* Number of null values */
+        char           *compressed_data;    /* Compressed column data */
+        int64           compressed_size;    /* Size of compressed data */
+        int64           uncompressed_size;  /* Size of uncompressed data */
+        OrochiCompressionType compression_type; /* Compression algorithm */
     } *column_buffers;
 
     /* Memory context for writes */

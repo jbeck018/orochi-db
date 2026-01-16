@@ -1051,3 +1051,181 @@ FROM orochi.orochi_shards s
 JOIN orochi.orochi_tables t ON s.table_oid = t.table_oid
 LEFT JOIN orochi.orochi_nodes n ON s.node_id = n.node_id
 ORDER BY t.table_name, s.shard_index;
+
+-- ============================================================
+-- Raft Consensus Functions
+-- ============================================================
+
+-- Internal: Handle RequestVote RPC from a candidate
+CREATE FUNCTION orochi.raft_request_vote(
+    p_term bigint,
+    p_candidate_id integer,
+    p_last_log_index bigint,
+    p_last_log_term bigint
+) RETURNS TABLE(term bigint, vote_granted boolean)
+    AS 'MODULE_PATHNAME', 'orochi_raft_request_vote_sql'
+    LANGUAGE C STRICT;
+
+-- Internal: Handle AppendEntries RPC from leader
+CREATE FUNCTION orochi.raft_append_entries(
+    p_term bigint,
+    p_leader_id integer,
+    p_prev_log_index bigint,
+    p_prev_log_term bigint,
+    p_entries jsonb,
+    p_leader_commit bigint
+) RETURNS TABLE(term bigint, success boolean, match_index bigint)
+    AS 'MODULE_PATHNAME', 'orochi_raft_append_entries_sql'
+    LANGUAGE C;
+
+-- Internal: Handle InstallSnapshot RPC from leader
+CREATE FUNCTION orochi.raft_install_snapshot(
+    p_term bigint,
+    p_leader_id integer,
+    p_last_included_index bigint,
+    p_last_included_term bigint,
+    p_offset integer,
+    p_data bytea,
+    p_data_size integer,
+    p_done boolean
+) RETURNS TABLE(term bigint, bytes_received integer, success boolean)
+    AS 'MODULE_PATHNAME', 'orochi_raft_install_snapshot_sql'
+    LANGUAGE C;
+
+-- Internal: Get read index for linearizable reads (called by followers on leader)
+CREATE FUNCTION orochi.raft_leader_read_index(
+    p_requester_node_id integer
+) RETURNS bigint
+    AS 'MODULE_PATHNAME', 'orochi_raft_leader_read_index_sql'
+    LANGUAGE C STRICT;
+
+-- User-facing: Request a linearizable read index
+-- This is the main entry point for applications wanting consistent reads
+CREATE FUNCTION raft_read_index(
+    timeout_ms integer DEFAULT 5000
+) RETURNS bigint AS $$
+DECLARE
+    v_read_index bigint;
+BEGIN
+    SELECT orochi._raft_read_index(timeout_ms) INTO v_read_index;
+    RETURN v_read_index;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE FUNCTION orochi._raft_read_index(timeout_ms integer)
+RETURNS bigint
+    AS 'MODULE_PATHNAME', 'orochi_raft_read_index_sql'
+    LANGUAGE C STRICT;
+
+-- User-facing: Check if this node can serve a stale read
+-- Returns true if data is fresh enough (within max_staleness_ms)
+CREATE FUNCTION raft_can_read_stale(
+    max_staleness_ms integer DEFAULT 1000
+) RETURNS boolean AS $$
+    SELECT orochi._raft_can_read_stale(max_staleness_ms);
+$$ LANGUAGE sql;
+
+CREATE FUNCTION orochi._raft_can_read_stale(max_staleness_ms integer)
+RETURNS boolean
+    AS 'MODULE_PATHNAME', 'orochi_raft_can_read_stale_sql'
+    LANGUAGE C STRICT;
+
+-- User-facing: Get current Raft cluster status
+CREATE FUNCTION raft_status()
+RETURNS TABLE(
+    node_id integer,
+    state text,
+    term bigint,
+    leader_id integer,
+    commit_index bigint,
+    last_applied bigint,
+    is_leader boolean,
+    peer_count integer
+) AS $$
+    SELECT * FROM orochi._raft_status();
+$$ LANGUAGE sql;
+
+CREATE FUNCTION orochi._raft_status()
+RETURNS TABLE(
+    node_id integer,
+    state text,
+    term bigint,
+    leader_id integer,
+    commit_index bigint,
+    last_applied bigint,
+    is_leader boolean,
+    peer_count integer
+)
+    AS 'MODULE_PATHNAME', 'orochi_raft_status_sql'
+    LANGUAGE C STRICT;
+
+-- User-facing: Check if this node is the Raft leader
+CREATE FUNCTION raft_is_leader()
+RETURNS boolean AS $$
+    SELECT orochi._raft_is_leader();
+$$ LANGUAGE sql;
+
+CREATE FUNCTION orochi._raft_is_leader()
+RETURNS boolean
+    AS 'MODULE_PATHNAME', 'orochi_raft_is_leader_sql'
+    LANGUAGE C STRICT;
+
+-- User-facing: Get the current Raft leader's node ID
+CREATE FUNCTION raft_get_leader()
+RETURNS integer AS $$
+    SELECT orochi._raft_get_leader();
+$$ LANGUAGE sql;
+
+CREATE FUNCTION orochi._raft_get_leader()
+RETURNS integer
+    AS 'MODULE_PATHNAME', 'orochi_raft_get_leader_sql'
+    LANGUAGE C STRICT;
+
+-- User-facing: Perform a follower read with bounded staleness
+-- This allows reading from a replica with a freshness guarantee
+CREATE FUNCTION raft_follower_read(
+    max_staleness_ms integer DEFAULT 1000
+) RETURNS boolean AS $$
+DECLARE
+    v_can_read boolean;
+BEGIN
+    SELECT orochi._raft_follower_read(max_staleness_ms) INTO v_can_read;
+    IF NOT v_can_read THEN
+        RAISE WARNING 'Follower data too stale (> % ms)', max_staleness_ms;
+    END IF;
+    RETURN v_can_read;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE FUNCTION orochi._raft_follower_read(max_staleness_ms integer)
+RETURNS boolean
+    AS 'MODULE_PATHNAME', 'orochi_raft_follower_read_sql'
+    LANGUAGE C STRICT;
+
+-- User-facing: Trigger a snapshot creation
+CREATE FUNCTION raft_create_snapshot()
+RETURNS boolean AS $$
+    SELECT orochi._raft_create_snapshot();
+$$ LANGUAGE sql;
+
+CREATE FUNCTION orochi._raft_create_snapshot()
+RETURNS boolean
+    AS 'MODULE_PATHNAME', 'orochi_raft_create_snapshot_sql'
+    LANGUAGE C STRICT;
+
+-- View for Raft cluster members
+CREATE VIEW orochi.raft_cluster AS
+SELECT
+    node_id,
+    hostname,
+    port,
+    CASE role
+        WHEN 0 THEN 'coordinator'
+        WHEN 1 THEN 'worker'
+        WHEN 2 THEN 'replica'
+    END as role,
+    is_active,
+    last_heartbeat
+FROM orochi.orochi_nodes
+WHERE role IN (0, 1, 2)  -- Only show Raft-participating nodes
+ORDER BY node_id;

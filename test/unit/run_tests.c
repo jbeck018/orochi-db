@@ -34,11 +34,17 @@
 /* Example test suite for framework validation */
 static void test_framework_validation(void);
 
+/* HTAP module test suites */
+extern void test_catalog(void);
+extern void test_hypertable(void);
+extern void test_columnar(void);
+extern void test_distribution(void);
+extern void test_executor(void);
+
 /* Placeholder for future test suites - uncomment as implemented */
 /* extern void test_hyperloglog(void); */
 /* extern void test_tdigest(void); */
 /* extern void test_compression(void); */
-/* extern void test_columnar(void); */
 /* extern void test_vector_ops(void); */
 
 /* ============================================================
@@ -50,11 +56,17 @@ static void run_all_tests(void)
     /* Framework self-test */
     RUN_TEST_SUITE(test_framework_validation);
 
+    /* HTAP module test suites */
+    RUN_TEST_SUITE(test_catalog);
+    RUN_TEST_SUITE(test_hypertable);
+    RUN_TEST_SUITE(test_columnar);
+    RUN_TEST_SUITE(test_distribution);
+    RUN_TEST_SUITE(test_executor);
+
     /* Add test suites here as they are implemented:
      * RUN_TEST_SUITE(test_hyperloglog);
      * RUN_TEST_SUITE(test_tdigest);
      * RUN_TEST_SUITE(test_compression);
-     * RUN_TEST_SUITE(test_columnar);
      * RUN_TEST_SUITE(test_vector_ops);
      */
 }

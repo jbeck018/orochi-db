@@ -19,7 +19,12 @@ TESTDIR = .
 TARGET = run_tests
 
 # Test source files
-TEST_SRCS = run_tests.c
+TEST_SRCS = run_tests.c \
+            test_catalog.c \
+            test_hypertable.c \
+            test_columnar.c \
+            test_distribution.c \
+            test_executor.c
 
 # Object files for tests
 TEST_OBJS = $(TEST_SRCS:.c=.o)
@@ -87,6 +92,11 @@ help:
 
 # Dependencies
 run_tests.o: run_tests.c test_framework.h mocks/postgres_mock.h
+test_catalog.o: test_catalog.c test_framework.h mocks/postgres_mock.h
+test_hypertable.o: test_hypertable.c test_framework.h mocks/postgres_mock.h
+test_columnar.o: test_columnar.c test_framework.h mocks/postgres_mock.h
+test_distribution.o: test_distribution.c test_framework.h mocks/postgres_mock.h
+test_executor.o: test_executor.c test_framework.h mocks/postgres_mock.h
 
 # Additional test files (add as implemented)
 # test_hyperloglog.o: test_hyperloglog.c test_framework.h mocks/postgres_mock.h

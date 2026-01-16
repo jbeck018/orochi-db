@@ -17,6 +17,7 @@
 #include "catalog/pg_operator.h"
 #include "catalog/pg_type.h"
 #include "commands/vacuum.h"
+#include "executor/spi.h"
 #include "executor/tuptable.h"
 #include "miscadmin.h"
 #include "nodes/primnodes.h"
@@ -583,7 +584,19 @@ serialize_chunk_group(ColumnarWriteState *state)
 
         cg->columns[i] = chunk;
 
-        /* Reset buffer for next chunk group */
+        /*
+         * Also store compression info in ColumnWriteBuffer for flush_stripe
+         * to access when writing to catalog storage.
+         */
+        buf->attr_type = attr->atttypid;
+        buf->row_count = chunk->value_count;
+        buf->null_count = chunk->null_count;
+        buf->compressed_data = chunk->value_buffer;
+        buf->compressed_size = chunk->compressed_size;
+        buf->uncompressed_size = chunk->decompressed_size;
+        buf->compression_type = chunk->compression_type;
+
+        /* Reset count for next chunk group (but keep compression data for flush) */
         buf->count = 0;
         buf->has_nulls = false;
     }
@@ -616,7 +629,7 @@ flush_stripe(ColumnarWriteState *state)
 
     /*
      * Write stripe data to storage.
-     * Serialize each chunk group's column data and store in catalog.
+     * Store each column's compressed data separately in the catalog.
      */
     {
         int cg_idx;
@@ -625,43 +638,46 @@ flush_stripe(ColumnarWriteState *state)
         /* Store data for each chunk group */
         for (cg_idx = 0; cg_idx < stripe->chunk_group_count; cg_idx++)
         {
-            StringInfoData data_buf;
             int col_idx;
 
-            initStringInfo(&data_buf);
-
-            /* Serialize column data for this chunk group */
+            /* Store each column separately */
             for (col_idx = 0; col_idx < state->tupdesc->natts; col_idx++)
             {
                 struct ColumnWriteBuffer *col_buf = &state->column_buffers[col_idx];
+                OrochiColumnChunk chunk_meta;
 
-                /* Write column header: type, compressed size, uncompressed size */
-                appendBinaryStringInfo(&data_buf, (char *)&col_buf->attr_type, sizeof(Oid));
-                appendBinaryStringInfo(&data_buf, (char *)&col_buf->compressed_size, sizeof(int64));
-                appendBinaryStringInfo(&data_buf, (char *)&col_buf->uncompressed_size, sizeof(int64));
+                /* Build chunk metadata */
+                memset(&chunk_meta, 0, sizeof(OrochiColumnChunk));
+                chunk_meta.stripe_id = stripe_id;
+                chunk_meta.chunk_group_index = cg_idx;
+                chunk_meta.column_index = col_idx;
+                chunk_meta.data_type = col_buf->attr_type;
+                chunk_meta.value_count = col_buf->row_count;
+                chunk_meta.null_count = col_buf->null_count;
+                chunk_meta.has_nulls = (col_buf->null_count > 0);
+                chunk_meta.compressed_size = col_buf->compressed_size;
+                chunk_meta.decompressed_size = col_buf->uncompressed_size;
+                chunk_meta.compression = col_buf->compression_type;
+                chunk_meta.min_value = col_buf->min_value;
+                chunk_meta.max_value = col_buf->max_value;
 
-                /* Write compressed data if present */
-                if (col_buf->compressed_data != NULL && col_buf->compressed_size > 0)
-                {
-                    appendBinaryStringInfo(&data_buf, col_buf->compressed_data,
-                                           col_buf->compressed_size);
-                }
+                /* Store chunk with compressed data */
+                orochi_catalog_create_column_chunk_with_data(
+                    stripe_id,
+                    cg_idx,
+                    col_idx,
+                    &chunk_meta,
+                    col_buf->compressed_data,
+                    col_buf->compressed_size);
 
-                /* Store min/max statistics for skip list */
+                /* Update min/max statistics for skip list */
                 orochi_catalog_update_column_stats(stripe_id, col_idx,
                                                    col_buf->min_value,
                                                    col_buf->max_value,
                                                    col_buf->attr_type);
+
+                total_data_size += col_buf->compressed_size;
             }
-
-            total_data_size += data_buf.len;
-
-            /* Store chunk group data in catalog */
-            orochi_catalog_create_column_chunk(stripe_id, cg_idx,
-                                               state->tupdesc->natts,
-                                               data_buf.data, data_buf.len);
-
-            pfree(data_buf.data);
         }
 
         stripe->data_size = total_data_size;
@@ -833,27 +849,145 @@ load_chunk_group(ColumnarReadState *state, int chunk_group_index)
         col_buf->row_count = chunk_meta->value_count;
 
         /*
-         * In a full implementation, we would:
-         * 1. Read compressed data from file storage using chunk_meta->data_offset
-         * 2. Decompress using columnar_decompress_buffer()
-         * 3. Decode values into Datum array
-         *
-         * For now, initialize with default values (zeros/empty)
-         * since we don't have actual file storage implemented yet.
+         * Read compressed data from catalog storage and decompress.
+         * Use the catalog function which reads from orochi_column_chunks table.
          */
-        if (chunk_meta->has_nulls)
         {
-            /* Mark all values as null if chunk reports nulls */
-            int64 i;
-            for (i = 0; i < chunk_meta->value_count; i++)
+            char *compressed_data = NULL;
+            int64 compressed_size = 0;
+            int64 decompressed_size = chunk_meta->decompressed_size;
+            char *decompressed_buffer = NULL;
+
+            /* Read the compressed chunk data from catalog storage */
+            compressed_data = orochi_catalog_read_chunk_data(
+                stripe->stripe_id,
+                chunk_group_index,
+                col_idx,
+                &compressed_size);
+
+            /* Decompress the data if we have it */
+            if (compressed_data != NULL && compressed_size > 0)
             {
-                col_buf->nulls[i] = true;
+                OrochiCompressionType compression_type = chunk_meta->compression;
+
+                /* Allocate decompression buffer */
+                if (decompressed_size <= 0)
+                    decompressed_size = compressed_size;
+                decompressed_buffer = palloc(decompressed_size);
+
+                if (compression_type != OROCHI_COMPRESS_NONE)
+                {
+                    /* Decompress the column data using appropriate algorithm */
+                    int64 actual_size = columnar_decompress_buffer(
+                        compressed_data, compressed_size,
+                        decompressed_buffer, decompressed_size,
+                        compression_type);
+
+                    if (actual_size > 0 && actual_size != decompressed_size)
+                    {
+                        elog(DEBUG1, "Column %d decompression: expected %ld, got %ld",
+                             col_idx, decompressed_size, actual_size);
+                        decompressed_size = actual_size;
+                    }
+                }
+                else
+                {
+                    /* No compression, just copy the raw data */
+                    memcpy(decompressed_buffer, compressed_data, compressed_size);
+                    decompressed_size = compressed_size;
+                }
+
+                /*
+                 * Decode the decompressed data into Datum values.
+                 * Format depends on whether type is pass-by-value or pass-by-reference.
+                 */
+                if (attr->attbyval && attr->attlen > 0)
+                {
+                    /* Fixed-width pass-by-value type (int, float, etc.) */
+                    int64 j;
+                    for (j = 0; j < chunk_meta->value_count && j * attr->attlen < decompressed_size; j++)
+                    {
+                        memcpy(&col_buf->values[j],
+                               decompressed_buffer + (j * attr->attlen),
+                               attr->attlen);
+                        col_buf->nulls[j] = false;
+                    }
+                    /* Mark remaining as null if we ran out of data */
+                    while (j < chunk_meta->value_count)
+                    {
+                        col_buf->nulls[j] = true;
+                        col_buf->values[j] = (Datum) 0;
+                        j++;
+                    }
+                }
+                else
+                {
+                    /* Variable-length type - values stored with size prefix */
+                    int64 offset = 0;
+                    int64 j = 0;
+
+                    while (offset < decompressed_size && j < chunk_meta->value_count)
+                    {
+                        Size value_size;
+
+                        /* Read value size */
+                        if (offset + (int64)sizeof(Size) > decompressed_size)
+                            break;
+
+                        memcpy(&value_size, decompressed_buffer + offset, sizeof(Size));
+                        offset += sizeof(Size);
+
+                        if (value_size == 0)
+                        {
+                            /* Null value */
+                            col_buf->nulls[j] = true;
+                            col_buf->values[j] = (Datum) 0;
+                        }
+                        else
+                        {
+                            /* Read actual value */
+                            if (offset + (int64)value_size > decompressed_size)
+                                break;
+
+                            /* Copy value with proper alignment */
+                            void *value_ptr = palloc(value_size);
+                            memcpy(value_ptr, decompressed_buffer + offset, value_size);
+                            col_buf->values[j] = PointerGetDatum(value_ptr);
+                            col_buf->nulls[j] = false;
+
+                            offset += value_size;
+                        }
+                        j++;
+                    }
+
+                    /* Mark remaining as nulls if we ran out of data */
+                    while (j < chunk_meta->value_count)
+                    {
+                        col_buf->nulls[j] = true;
+                        col_buf->values[j] = (Datum) 0;
+                        j++;
+                    }
+                }
+
+                pfree(decompressed_buffer);
+                pfree(compressed_data);
             }
-        }
-        else
-        {
-            /* Initialize nulls to false */
-            memset(col_buf->nulls, false, chunk_meta->value_count * sizeof(bool));
+            else
+            {
+                /*
+                 * No compressed data available in catalog storage.
+                 * Initialize with defaults based on null metadata.
+                 */
+                if (chunk_meta->has_nulls)
+                {
+                    memset(col_buf->nulls, true, chunk_meta->value_count * sizeof(bool));
+                }
+                else
+                {
+                    memset(col_buf->nulls, false, chunk_meta->value_count * sizeof(bool));
+                    memset(col_buf->values, 0, chunk_meta->value_count * sizeof(Datum));
+                }
+            }
         }
 
         col_buf->is_loaded = true;

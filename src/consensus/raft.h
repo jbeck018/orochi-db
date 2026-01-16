@@ -168,6 +168,8 @@ typedef struct InstallSnapshotResponse
 {
     uint64              term;               /* Current term, for leader to update */
     int32               node_id;            /* ID of responding node */
+    int32               bytes_received;     /* Total bytes received so far */
+    bool                success;            /* True if chunk was accepted */
 } InstallSnapshotResponse;
 
 /* ============================================================
@@ -234,6 +236,10 @@ typedef struct RaftNode
     /* Callbacks */
     void              (*apply_callback)(RaftLogEntry *entry, void *context);
     void               *apply_context;      /* Context for apply callback */
+    bool              (*snapshot_apply_callback)(uint64 last_index, uint64 last_term,
+                                                  const char *data, int32 size,
+                                                  void *context);
+    void               *snapshot_apply_context;  /* Context for snapshot callback */
 
     /* Statistics */
     uint64              elections_started;  /* Number of elections started */
@@ -528,5 +534,78 @@ extern RequestVoteResponse raft_send_request_vote(RaftPeer *peer,
                                                   RequestVoteRequest *request);
 extern AppendEntriesResponse raft_send_append_entries(RaftPeer *peer,
                                                       AppendEntriesRequest *request);
+
+/* ============================================================
+ * Raft Snapshot Functions
+ * ============================================================ */
+
+/*
+ * Send snapshot to a lagging peer
+ * Returns true if the entire snapshot was successfully transferred.
+ */
+extern bool raft_send_install_snapshot(RaftNode *node, RaftPeer *peer);
+
+/*
+ * Send InstallSnapshot RPC via libpq
+ */
+extern InstallSnapshotResponse raft_send_install_snapshot_rpc(RaftPeer *peer,
+                                                              InstallSnapshotRequest *request);
+
+/*
+ * Register callback for applying snapshots to the state machine
+ */
+extern void raft_set_snapshot_callback(RaftNode *node,
+                                       bool (*callback)(uint64 last_index, uint64 last_term,
+                                                        const char *data, int32 size,
+                                                        void *context),
+                                       void *context);
+
+/*
+ * Create a snapshot of the current state
+ * The callback should return the serialized state machine data.
+ */
+extern bool raft_create_snapshot(RaftNode *node,
+                                 char *(*get_state)(void *context, int32 *size),
+                                 void *context);
+
+/*
+ * Check if we should create a snapshot (based on log size)
+ */
+extern bool raft_should_snapshot(RaftNode *node);
+
+/* ============================================================
+ * Raft Follower Reads (Linearizable)
+ * ============================================================ */
+
+/*
+ * Request a read index for linearizable reads.
+ * For leaders: confirms leadership via heartbeat round, returns commit_index.
+ * For followers: forwards request to leader and waits for response.
+ * Returns the read index if successful, 0 if failed.
+ */
+extern uint64 raft_read_index(RaftNode *node, int timeout_ms);
+
+/*
+ * Request read index from leader (used by followers)
+ */
+extern uint64 raft_request_read_index_from_leader(RaftPeer *leader, RaftNode *node);
+
+/*
+ * Check if this node can serve a read at given index
+ */
+extern bool raft_can_serve_read(RaftNode *node, uint64 read_index);
+
+/*
+ * Perform a bounded-stale read from a follower.
+ * Returns true if the read can proceed (data not too stale).
+ */
+extern bool raft_follower_read(RaftNode *node, int max_staleness_ms);
+
+/*
+ * Perform a lease-based read (for leader only).
+ * If the leader holds a valid lease, it can serve reads without network round trips.
+ * Returns the commit index if lease is valid, 0 otherwise.
+ */
+extern uint64 raft_lease_read(RaftNode *node);
 
 #endif /* OROCHI_RAFT_H */

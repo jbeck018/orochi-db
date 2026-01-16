@@ -199,12 +199,16 @@ typedef struct OrochiColumnChunk
 {
     int64               chunk_id;           /* Chunk identifier */
     int64               stripe_id;          /* Parent stripe ID */
+    int32               chunk_group_index;  /* Chunk group within stripe */
     int16               column_index;       /* Column position */
+    Oid                 data_type;          /* PostgreSQL data type OID */
     int64               value_count;        /* Number of values */
     int64               null_count;         /* Number of nulls */
     int64               compressed_size;    /* Compressed size */
     int64               decompressed_size;  /* Original size */
+    int64               uncompressed_size;  /* Alias for decompressed_size */
     OrochiCompressionType compression;      /* Compression type */
+    OrochiCompressionType compression_type; /* Alias for compression */
     Datum               min_value;          /* Minimum value */
     Datum               max_value;          /* Maximum value */
     bool                has_nulls;          /* Contains nulls? */

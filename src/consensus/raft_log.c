@@ -75,11 +75,13 @@ typedef struct RaftWALRecord
 
 static void raft_log_ensure_capacity(RaftLog *log, int32 needed);
 static uint32 raft_log_compute_crc(const char *data, int32 size);
-static void raft_log_write_wal_header(RaftLog *log, int fd);
-static void raft_log_write_wal_record(RaftLog *log, int fd,
+static bool raft_log_write_wal_header(RaftLog *log, int fd);
+static bool raft_log_write_wal_record(RaftLog *log, int fd,
                                       RaftWALRecordType type,
                                       const char *data, int32 size,
                                       uint64 index);
+static bool raft_log_write_full(int fd, const void *buf, size_t count);
+static bool raft_log_read_full(int fd, void *buf, size_t count);
 static bool raft_log_read_wal_record(int fd, RaftWALRecord *record,
                                      char **data);
 
@@ -494,7 +496,13 @@ raft_log_persist(RaftLog *log)
     /* Write header for new files */
     if (new_file)
     {
-        raft_log_write_wal_header(log, fd);
+        if (!raft_log_write_wal_header(log, fd))
+        {
+            elog(WARNING, "Failed to write Raft WAL header: %m");
+            close(fd);
+            pfree(path.data);
+            return;
+        }
     }
 
     /* Write all entries */
@@ -517,19 +525,38 @@ raft_log_persist(RaftLog *log)
             appendBinaryStringInfo(&entry_buf, entry->command_data, entry->command_size);
 
         /* Write record */
-        raft_log_write_wal_record(log, fd, RAFT_WAL_ENTRY,
-                                  entry_buf.data, entry_buf.len, entry->index);
+        if (!raft_log_write_wal_record(log, fd, RAFT_WAL_ENTRY,
+                                       entry_buf.data, entry_buf.len, entry->index))
+        {
+            elog(WARNING, "Failed to write Raft WAL entry at index %lu: %m", entry->index);
+            pfree(entry_buf.data);
+            close(fd);
+            pfree(path.data);
+            return;
+        }
 
         pfree(entry_buf.data);
     }
 
     /* Write commit index marker */
-    raft_log_write_wal_record(log, fd, RAFT_WAL_COMMIT,
-                              (char *) &log->commit_index,
-                              sizeof(uint64), log->commit_index);
+    if (!raft_log_write_wal_record(log, fd, RAFT_WAL_COMMIT,
+                                   (char *) &log->commit_index,
+                                   sizeof(uint64), log->commit_index))
+    {
+        elog(WARNING, "Failed to write Raft WAL commit marker: %m");
+        close(fd);
+        pfree(path.data);
+        return;
+    }
 
     /* Sync to disk */
-    fsync(fd);
+    if (fsync(fd) != 0)
+    {
+        elog(WARNING, "Failed to fsync Raft WAL file: %m");
+        close(fd);
+        pfree(path.data);
+        return;
+    }
     close(fd);
 
     pfree(path.data);
@@ -674,9 +701,72 @@ raft_log_recover(RaftLog *log)
 }
 
 /*
- * raft_log_write_wal_header - Write WAL file header
+ * raft_log_write_full - Write full buffer with retry on partial writes
+ *
+ * Returns true on success, false on error (errno is set).
  */
-static void
+static bool
+raft_log_write_full(int fd, const void *buf, size_t count)
+{
+    const char *ptr = (const char *) buf;
+    size_t remaining = count;
+
+    while (remaining > 0)
+    {
+        ssize_t written = write(fd, ptr, remaining);
+
+        if (written < 0)
+        {
+            if (errno == EINTR)
+                continue;  /* Retry on interrupt */
+            return false;  /* Real error */
+        }
+
+        ptr += written;
+        remaining -= written;
+    }
+
+    return true;
+}
+
+/*
+ * raft_log_read_full - Read full buffer with retry on partial reads
+ *
+ * Returns true on success, false on error or EOF before completing read.
+ */
+static bool
+raft_log_read_full(int fd, void *buf, size_t count)
+{
+    char *ptr = (char *) buf;
+    size_t remaining = count;
+
+    while (remaining > 0)
+    {
+        ssize_t bytes_read = read(fd, ptr, remaining);
+
+        if (bytes_read < 0)
+        {
+            if (errno == EINTR)
+                continue;  /* Retry on interrupt */
+            return false;  /* Real error */
+        }
+
+        if (bytes_read == 0)
+            return false;  /* EOF before completing read */
+
+        ptr += bytes_read;
+        remaining -= bytes_read;
+    }
+
+    return true;
+}
+
+/*
+ * raft_log_write_wal_header - Write WAL file header
+ *
+ * Returns true on success, false on error.
+ */
+static bool
 raft_log_write_wal_header(RaftLog *log, int fd)
 {
     RaftWALHeader header;
@@ -687,13 +777,15 @@ raft_log_write_wal_header(RaftLog *log, int fd)
     header.first_index = log->first_index;
     header.created_at = GetCurrentTimestamp();
 
-    write(fd, &header, sizeof(RaftWALHeader));
+    return raft_log_write_full(fd, &header, sizeof(RaftWALHeader));
 }
 
 /*
  * raft_log_write_wal_record - Write a record to WAL
+ *
+ * Returns true on success, false on error.
  */
-static void
+static bool
 raft_log_write_wal_record(RaftLog *log, int fd, RaftWALRecordType type,
                           const char *data, int32 size, uint64 index)
 {
@@ -704,36 +796,52 @@ raft_log_write_wal_record(RaftLog *log, int fd, RaftWALRecordType type,
     record.crc = raft_log_compute_crc(data, size);
     record.index = index;
 
-    write(fd, &record, sizeof(RaftWALRecord));
+    if (!raft_log_write_full(fd, &record, sizeof(RaftWALRecord)))
+        return false;
 
     if (size > 0 && data != NULL)
-        write(fd, data, size);
+    {
+        if (!raft_log_write_full(fd, data, size))
+            return false;
+    }
+
+    return true;
 }
 
 /*
  * raft_log_read_wal_record - Read a record from WAL
+ *
+ * Returns true on success, false on error or EOF.
+ * On error (not EOF), logs a warning with details.
  */
 static bool
 raft_log_read_wal_record(int fd, RaftWALRecord *record, char **data)
 {
-    ssize_t bytes_read;
     uint32 computed_crc;
 
     *data = NULL;
 
     /* Read record header */
-    bytes_read = read(fd, record, sizeof(RaftWALRecord));
-    if (bytes_read != sizeof(RaftWALRecord))
+    if (!raft_log_read_full(fd, record, sizeof(RaftWALRecord)))
+    {
+        /* Check if this is a read error vs EOF */
+        if (errno != 0 && errno != EINTR)
+            elog(WARNING, "Failed to read Raft WAL record header: %m");
         return false;
+    }
 
     /* Read payload */
     if (record->size > 0)
     {
         *data = palloc(record->size);
-        bytes_read = read(fd, *data, record->size);
 
-        if (bytes_read != record->size)
+        if (!raft_log_read_full(fd, *data, record->size))
         {
+            if (errno != 0 && errno != EINTR)
+                elog(WARNING, "Failed to read Raft WAL record payload at index %lu: %m",
+                     record->index);
+            else
+                elog(WARNING, "Truncated Raft WAL record at index %lu", record->index);
             pfree(*data);
             *data = NULL;
             return false;
@@ -870,16 +978,36 @@ raft_log_create_snapshot(RaftLog *log, uint64 last_included_index,
     snap.data_size = snapshot_size;
     snap.created_at = GetCurrentTimestamp();
 
-    write(fd, &snap.last_included_index, sizeof(uint64));
-    write(fd, &snap.last_included_term, sizeof(uint64));
-    write(fd, &snap.data_size, sizeof(int32));
-    write(fd, &snap.created_at, sizeof(TimestampTz));
+    if (!raft_log_write_full(fd, &snap.last_included_index, sizeof(uint64)) ||
+        !raft_log_write_full(fd, &snap.last_included_term, sizeof(uint64)) ||
+        !raft_log_write_full(fd, &snap.data_size, sizeof(int32)) ||
+        !raft_log_write_full(fd, &snap.created_at, sizeof(TimestampTz)))
+    {
+        elog(WARNING, "Failed to write Raft snapshot header: %m");
+        close(fd);
+        pfree(path.data);
+        return;
+    }
 
     /* Write snapshot data */
     if (snapshot_size > 0 && snapshot_data != NULL)
-        write(fd, snapshot_data, snapshot_size);
+    {
+        if (!raft_log_write_full(fd, snapshot_data, snapshot_size))
+        {
+            elog(WARNING, "Failed to write Raft snapshot data: %m");
+            close(fd);
+            pfree(path.data);
+            return;
+        }
+    }
 
-    fsync(fd);
+    if (fsync(fd) != 0)
+    {
+        elog(WARNING, "Failed to fsync Raft snapshot file: %m");
+        close(fd);
+        pfree(path.data);
+        return;
+    }
     close(fd);
 
     pfree(path.data);
@@ -952,16 +1080,38 @@ raft_log_load_snapshot(RaftLog *log, uint64 *last_included_index,
     int32 snap_size;
     TimestampTz snap_time;
 
-    read(fd, &snap_index, sizeof(uint64));
-    read(fd, &snap_term, sizeof(uint64));
-    read(fd, &snap_size, sizeof(int32));
-    read(fd, &snap_time, sizeof(TimestampTz));
+    if (!raft_log_read_full(fd, &snap_index, sizeof(uint64)) ||
+        !raft_log_read_full(fd, &snap_term, sizeof(uint64)) ||
+        !raft_log_read_full(fd, &snap_size, sizeof(int32)) ||
+        !raft_log_read_full(fd, &snap_time, sizeof(TimestampTz)))
+    {
+        elog(WARNING, "Failed to read Raft snapshot header: %m");
+        close(fd);
+        pfree(pattern.data);
+        return NULL;
+    }
+
+    /* Validate snapshot size before allocation */
+    if (snap_size < 0 || snap_size > 1024 * 1024 * 1024)  /* 1GB max */
+    {
+        elog(WARNING, "Invalid Raft snapshot size: %d", snap_size);
+        close(fd);
+        pfree(pattern.data);
+        return NULL;
+    }
 
     /* Read data */
     if (snap_size > 0)
     {
         snapshot_data = palloc(snap_size);
-        read(fd, snapshot_data, snap_size);
+        if (!raft_log_read_full(fd, snapshot_data, snap_size))
+        {
+            elog(WARNING, "Failed to read Raft snapshot data: %m");
+            pfree(snapshot_data);
+            close(fd);
+            pfree(pattern.data);
+            return NULL;
+        }
     }
 
     close(fd);

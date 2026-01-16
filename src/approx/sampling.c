@@ -19,13 +19,19 @@
 
 #include "postgres.h"
 #include "fmgr.h"
+#include "access/table.h"
+#include "access/tableam.h"
 #include "executor/executor.h"
+#include "executor/spi.h"
 #include "executor/tuptable.h"
+#include "funcapi.h"
 #include "nodes/execnodes.h"
+#include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "utils/datum.h"
 #include "utils/memutils.h"
+#include "utils/snapmgr.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -695,38 +701,308 @@ reservoir_sample_combine(PG_FUNCTION_ARGS)
  * Table Function for Sampling
  * ============================================================ */
 
+/*
+ * Internal state for sample_rows SRF
+ */
+typedef struct SampleRowsState
+{
+    Relation            rel;                /* Relation being sampled */
+    TableScanDesc       scan;               /* Table scan descriptor */
+    TupleDesc           tupdesc;            /* Tuple descriptor */
+    BernoulliSampleState *sample_state;     /* Bernoulli sampling state */
+    TupleTableSlot     *slot;               /* Slot for current tuple */
+    bool                scan_done;          /* Scan complete flag */
+} SampleRowsState;
+
 PG_FUNCTION_INFO_V1(sample_rows);
 
 /*
  * Table function that returns a sample of input rows.
  * sample_rows(relation regclass, probability float8, seed bigint DEFAULT NULL)
+ *
+ * Uses Bernoulli sampling to return a random sample of rows from the table.
+ * Each row has an independent probability of being selected.
  */
 Datum
 sample_rows(PG_FUNCTION_ARGS)
 {
     FuncCallContext *funcctx;
-    BernoulliSampleState *state;
+    SampleRowsState *sample_state;
 
-    /* On first call, set up sample state */
+    /* On first call, set up sample state and open table scan */
     if (SRF_IS_FIRSTCALL())
     {
         MemoryContext old_context;
+        Oid relid;
+        Relation rel;
+        TupleDesc tupdesc;
+        double probability;
+        uint64 seed;
 
         funcctx = SRF_FIRSTCALL_INIT();
         old_context = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        double probability = PG_NARGS() > 0 ? PG_GETARG_FLOAT8(0) : SAMPLING_DEFAULT_PROBABILITY;
-        uint64 seed = PG_NARGS() > 1 && !PG_ARGISNULL(1) ? PG_GETARG_INT64(1) : 0;
+        /* Get arguments */
+        if (PG_ARGISNULL(0))
+            ereport(ERROR,
+                    (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                     errmsg("relation cannot be NULL")));
 
-        state = bernoulli_sample_create(probability, seed);
-        funcctx->user_fctx = state;
+        relid = PG_GETARG_OID(0);
+        probability = PG_NARGS() > 1 && !PG_ARGISNULL(1) ?
+                      PG_GETARG_FLOAT8(1) : SAMPLING_DEFAULT_PROBABILITY;
+        seed = PG_NARGS() > 2 && !PG_ARGISNULL(2) ?
+               PG_GETARG_INT64(2) : 0;
+
+        /* Validate probability */
+        if (probability <= 0.0 || probability > 1.0)
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                     errmsg("sampling probability must be between 0 and 1")));
+
+        /* Open relation for reading */
+        rel = table_open(relid, AccessShareLock);
+        tupdesc = RelationGetDescr(rel);
+
+        /* Set up return type to match table structure */
+        funcctx->tuple_desc = BlessTupleDesc(CreateTupleDescCopy(tupdesc));
+
+        /* Allocate and initialize sample state */
+        sample_state = (SampleRowsState *) palloc0(sizeof(SampleRowsState));
+        sample_state->rel = rel;
+        sample_state->tupdesc = tupdesc;
+        sample_state->sample_state = bernoulli_sample_create(probability, seed);
+        sample_state->scan_done = false;
+
+        /* Begin table scan */
+        sample_state->scan = table_beginscan(rel, GetActiveSnapshot(), 0, NULL);
+
+        /* Create tuple slot for reading */
+        sample_state->slot = MakeSingleTupleTableSlot(tupdesc, &TTSOpsHeapTuple);
+
+        funcctx->user_fctx = sample_state;
 
         MemoryContextSwitchTo(old_context);
     }
 
     funcctx = SRF_PERCALL_SETUP();
-    state = (BernoulliSampleState *) funcctx->user_fctx;
+    sample_state = (SampleRowsState *) funcctx->user_fctx;
 
-    /* This is a simplified version - actual implementation would scan a table */
+    /* Scan for next sampled row */
+    while (!sample_state->scan_done)
+    {
+        /* Get next tuple from table */
+        if (!table_scan_getnextslot(sample_state->scan,
+                                    ForwardScanDirection,
+                                    sample_state->slot))
+        {
+            /* No more tuples */
+            sample_state->scan_done = true;
+            break;
+        }
+
+        /* Apply Bernoulli sampling decision */
+        if (bernoulli_sample_row(sample_state->sample_state))
+        {
+            /* This row was selected - return it */
+            HeapTuple tuple;
+            Datum result;
+
+            /* Extract tuple from slot */
+            tuple = ExecCopySlotHeapTuple(sample_state->slot);
+
+            /* Build result tuple */
+            result = HeapTupleGetDatum(tuple);
+
+            SRF_RETURN_NEXT(funcctx, result);
+        }
+
+        /* Row not selected, continue scanning */
+    }
+
+    /* Cleanup when done */
+    if (sample_state->scan != NULL)
+    {
+        table_endscan(sample_state->scan);
+        sample_state->scan = NULL;
+    }
+
+    if (sample_state->slot != NULL)
+    {
+        ExecDropSingleTupleTableSlot(sample_state->slot);
+        sample_state->slot = NULL;
+    }
+
+    if (sample_state->rel != NULL)
+    {
+        table_close(sample_state->rel, AccessShareLock);
+        sample_state->rel = NULL;
+    }
+
+    SRF_RETURN_DONE(funcctx);
+}
+
+/* ============================================================
+ * Additional Sampling Table Function: Reservoir Sample
+ * ============================================================ */
+
+/*
+ * Internal state for reservoir_sample_rows SRF
+ */
+typedef struct ReservoirRowsState
+{
+    ReservoirSampleState *reservoir;        /* Reservoir sampling state */
+    int32               current_index;      /* Current output index */
+    TupleDesc           tupdesc;            /* Tuple descriptor */
+    bool                scan_complete;      /* True when input scan done */
+} ReservoirRowsState;
+
+PG_FUNCTION_INFO_V1(reservoir_sample_rows);
+
+/*
+ * Table function that returns a fixed-size reservoir sample of rows.
+ * reservoir_sample_rows(relation regclass, sample_size int, seed bigint DEFAULT NULL)
+ *
+ * Uses Algorithm R to return exactly sample_size random rows (or fewer if table is smaller).
+ */
+Datum
+reservoir_sample_rows(PG_FUNCTION_ARGS)
+{
+    FuncCallContext *funcctx;
+    ReservoirRowsState *sample_state;
+
+    if (SRF_IS_FIRSTCALL())
+    {
+        MemoryContext old_context;
+        Oid relid;
+        Relation rel;
+        TupleDesc tupdesc;
+        TableScanDesc scan;
+        TupleTableSlot *slot;
+        int32 sample_size;
+        uint64 seed;
+        Oid *column_types;
+        int natts;
+        int i;
+
+        funcctx = SRF_FIRSTCALL_INIT();
+        old_context = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
+        /* Get arguments */
+        if (PG_ARGISNULL(0))
+            ereport(ERROR,
+                    (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                     errmsg("relation cannot be NULL")));
+
+        relid = PG_GETARG_OID(0);
+        sample_size = PG_NARGS() > 1 && !PG_ARGISNULL(1) ?
+                      PG_GETARG_INT32(1) : SAMPLING_DEFAULT_RESERVOIR_SIZE;
+        seed = PG_NARGS() > 2 && !PG_ARGISNULL(2) ?
+               PG_GETARG_INT64(2) : 0;
+
+        if (seed != 0)
+            sampling_rng_init(seed);
+
+        /* Open relation */
+        rel = table_open(relid, AccessShareLock);
+        tupdesc = RelationGetDescr(rel);
+        natts = tupdesc->natts;
+
+        /* Set up return type */
+        funcctx->tuple_desc = BlessTupleDesc(CreateTupleDescCopy(tupdesc));
+
+        /* Build column type array for reservoir */
+        column_types = palloc(natts * sizeof(Oid));
+        for (i = 0; i < natts; i++)
+        {
+            Form_pg_attribute attr = TupleDescAttr(tupdesc, i);
+            column_types[i] = attr->atttypid;
+        }
+
+        /* Allocate sample state */
+        sample_state = (ReservoirRowsState *) palloc0(sizeof(ReservoirRowsState));
+        sample_state->tupdesc = CreateTupleDescCopy(tupdesc);
+        sample_state->current_index = 0;
+        sample_state->scan_complete = false;
+
+        /* Create reservoir */
+        sample_state->reservoir = reservoir_sample_create(sample_size, natts, column_types);
+
+        /* Scan entire table and fill reservoir */
+        scan = table_beginscan(rel, GetActiveSnapshot(), 0, NULL);
+        slot = MakeSingleTupleTableSlot(tupdesc, &TTSOpsHeapTuple);
+
+        while (table_scan_getnextslot(scan, ForwardScanDirection, slot))
+        {
+            Datum *values;
+            bool *nulls;
+
+            values = palloc(natts * sizeof(Datum));
+            nulls = palloc(natts * sizeof(bool));
+
+            slot_getallattrs(slot);
+            memcpy(values, slot->tts_values, natts * sizeof(Datum));
+            memcpy(nulls, slot->tts_isnull, natts * sizeof(bool));
+
+            reservoir_sample_add(sample_state->reservoir, values, nulls);
+
+            pfree(values);
+            pfree(nulls);
+        }
+
+        ExecDropSingleTupleTableSlot(slot);
+        table_endscan(scan);
+        table_close(rel, AccessShareLock);
+
+        sample_state->scan_complete = true;
+
+        pfree(column_types);
+
+        funcctx->user_fctx = sample_state;
+        funcctx->max_calls = reservoir_sample_count(sample_state->reservoir);
+
+        MemoryContextSwitchTo(old_context);
+    }
+
+    funcctx = SRF_PERCALL_SETUP();
+    sample_state = (ReservoirRowsState *) funcctx->user_fctx;
+
+    if (sample_state->current_index < reservoir_sample_count(sample_state->reservoir))
+    {
+        int natts = sample_state->tupdesc->natts;
+        Datum *values;
+        bool *nulls;
+        HeapTuple tuple;
+        Datum result;
+
+        values = palloc(natts * sizeof(Datum));
+        nulls = palloc(natts * sizeof(bool));
+
+        if (reservoir_sample_get(sample_state->reservoir,
+                                  sample_state->current_index,
+                                  values, nulls))
+        {
+            tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+            result = HeapTupleGetDatum(tuple);
+
+            sample_state->current_index++;
+
+            pfree(values);
+            pfree(nulls);
+
+            SRF_RETURN_NEXT(funcctx, result);
+        }
+
+        pfree(values);
+        pfree(nulls);
+    }
+
+    /* Cleanup reservoir */
+    if (sample_state->reservoir != NULL)
+    {
+        reservoir_sample_free(sample_state->reservoir);
+        sample_state->reservoir = NULL;
+    }
+
     SRF_RETURN_DONE(funcctx);
 }

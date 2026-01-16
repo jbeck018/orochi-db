@@ -19,6 +19,8 @@ OBJS = \
 	src/executor/distributed_executor.o \
 	src/executor/vectorized.o \
 	src/executor/vectorized_scan.o \
+	src/jit/jit_compile.o \
+	src/jit/jit_expr.o \
 	src/consensus/raft.o \
 	src/consensus/raft_log.o \
 	src/approx/hyperloglog.o \

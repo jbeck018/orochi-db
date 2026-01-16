@@ -2192,3 +2192,174 @@ vectorized_batch_debug_print(VectorBatch *batch)
     elog(DEBUG1, "  stats: processed=%ld filtered=%ld",
          batch->rows_processed, batch->rows_filtered);
 }
+
+/* ============================================================
+ * JIT Integration Functions
+ *
+ * These functions integrate JIT compilation with the vectorized
+ * executor, providing optimized execution paths when JIT is
+ * enabled and beneficial.
+ * ============================================================ */
+
+#include "../jit/jit.h"
+
+/* Global JIT context for vectorized execution */
+static JitContext *vectorized_jit_ctx = NULL;
+
+/*
+ * Minimum batch size to consider JIT worthwhile
+ */
+#define VECTORIZED_JIT_MIN_BATCH_SIZE   64
+
+/*
+ * Minimum expression cost to consider JIT worthwhile
+ */
+#define VECTORIZED_JIT_MIN_EXPR_COST    5
+
+/*
+ * Get or create the global JIT context
+ */
+JitContext *
+vectorized_get_jit_context(void)
+{
+    if (vectorized_jit_ctx == NULL)
+    {
+        vectorized_jit_ctx = jit_get_global_context();
+    }
+    return vectorized_jit_ctx;
+}
+
+/*
+ * Check if JIT should be used for this batch and expression
+ */
+bool
+vectorized_should_use_jit(VectorBatch *batch, int32 expr_cost)
+{
+    /* Check if JIT is enabled globally */
+    if (!orochi_jit_enabled)
+        return false;
+
+    /* Batch must be large enough to amortize JIT overhead */
+    if (batch == NULL || batch->count < VECTORIZED_JIT_MIN_BATCH_SIZE)
+        return false;
+
+    /* Expression must be complex enough to benefit from JIT */
+    if (expr_cost < VECTORIZED_JIT_MIN_EXPR_COST)
+        return false;
+
+    return true;
+}
+
+/*
+ * Execute filter with JIT acceleration
+ */
+void
+vectorized_filter_with_jit(VectorBatch *batch,
+                           VectorizedFilterState *filter,
+                           JitCompiledFilter *jit_filter)
+{
+    /* If JIT filter is available and JIT is enabled, use it */
+    if (jit_filter != NULL && orochi_jit_enabled &&
+        batch->count >= VECTORIZED_JIT_MIN_BATCH_SIZE)
+    {
+        jit_vectorized_filter(batch, jit_filter);
+        return;
+    }
+
+    /* Fall back to interpreted execution */
+    if (filter != NULL)
+    {
+        vectorized_filter_generic(batch, filter);
+    }
+}
+
+/*
+ * Execute aggregation with JIT acceleration
+ */
+void
+vectorized_aggregate_with_jit(VectorizedAggState *state,
+                              VectorBatch *batch,
+                              JitCompiledAgg *jit_agg)
+{
+    /* If JIT aggregation is available and JIT is enabled, use it */
+    if (jit_agg != NULL && orochi_jit_enabled &&
+        batch->count >= VECTORIZED_JIT_MIN_BATCH_SIZE)
+    {
+        jit_vectorized_aggregate(state, batch, jit_agg);
+        return;
+    }
+
+    /* Fall back to interpreted execution */
+    vectorized_agg_update(state, batch);
+}
+
+/*
+ * Create a JIT-compiled filter from a VectorizedFilterState
+ * Returns NULL if JIT compilation is not possible or beneficial
+ */
+JitCompiledFilter *
+vectorized_compile_filter_jit(VectorizedFilterState *filter)
+{
+    JitContext *ctx;
+
+    if (filter == NULL || !orochi_jit_enabled)
+        return NULL;
+
+    ctx = vectorized_get_jit_context();
+    if (ctx == NULL)
+        return NULL;
+
+    return jit_compile_simple_filter(ctx,
+                                     filter->column_index,
+                                     filter->compare_op,
+                                     filter->const_value,
+                                     filter->data_type);
+}
+
+/*
+ * Create a JIT-compiled aggregation from a VectorizedAggState
+ * Returns NULL if JIT compilation is not possible or beneficial
+ */
+JitCompiledAgg *
+vectorized_compile_agg_jit(VectorizedAggState *agg)
+{
+    JitContext *ctx;
+
+    if (agg == NULL || !orochi_jit_enabled)
+        return NULL;
+
+    ctx = vectorized_get_jit_context();
+    if (ctx == NULL)
+        return NULL;
+
+    return jit_compile_agg(ctx,
+                           agg->agg_type,
+                           agg->column_index,
+                           agg->data_type);
+}
+
+/*
+ * Free JIT-compiled filter
+ */
+void
+vectorized_free_filter_jit(JitCompiledFilter *jit_filter)
+{
+    if (jit_filter != NULL)
+    {
+        JitContext *ctx = vectorized_get_jit_context();
+        jit_filter_free(ctx, jit_filter);
+    }
+}
+
+/*
+ * Free JIT-compiled aggregation
+ */
+void
+vectorized_free_agg_jit(JitCompiledAgg *jit_agg)
+{
+    if (jit_agg != NULL)
+    {
+        JitContext *ctx = vectorized_get_jit_context();
+        jit_agg_free(ctx, jit_agg);
+    }
+}
