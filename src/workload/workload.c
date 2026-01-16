@@ -65,6 +65,11 @@ static QueryEntry *find_queue_slot(void);
 static void remove_from_queue(int backend_pid);
 static int compare_query_priority(const void *a, const void *b);
 
+/* Session tracking internal functions */
+static uint32 session_hash_slot(int backend_pid);
+static SessionResourceTracker *find_session_slot(int backend_pid);
+static SessionResourceTracker *find_free_session_slot(int backend_pid);
+
 /* ============================================================
  * Initialization
  * ============================================================ */
@@ -109,8 +114,10 @@ orochi_workload_shmem_startup(void)
         memset(WorkloadState, 0, sizeof(WorkloadSharedState));
 
         WorkloadState->main_lock = &(GetNamedLWLockTranche("orochi_workload")->lock);
+        WorkloadState->session_lock = &(GetNamedLWLockTranche("orochi_workload")[1].lock);
         WorkloadState->num_pools = 0;
         WorkloadState->num_classes = 0;
+        WorkloadState->num_sessions = 0;
         WorkloadState->total_active_queries = 0;
         WorkloadState->total_queued_queries = 0;
         WorkloadState->queue_head = 0;
@@ -128,6 +135,16 @@ orochi_workload_shmem_startup(void)
         {
             WorkloadState->queue[i].backend_pid = 0;
             WorkloadState->queue[i].is_active = false;
+        }
+
+        /* Initialize session tracker entries */
+        for (int i = 0; i < WORKLOAD_MAX_SESSIONS; i++)
+        {
+            WorkloadState->sessions[i].backend_pid = 0;
+            WorkloadState->sessions[i].pool_id = 0;
+            WorkloadState->sessions[i].class_id = 0;
+            WorkloadState->sessions[i].is_active = false;
+            memset(&WorkloadState->sessions[i].usage, 0, sizeof(ResourceUsage));
         }
 
         WorkloadState->is_initialized = true;
@@ -1123,6 +1140,55 @@ find_queue_slot(void)
 }
 
 /*
+ * compare_query_priority
+ *    Comparison function for sorting queued queries
+ *    Sorts by priority (descending) then enqueue_time (ascending)
+ */
+static int
+compare_query_priority(const void *a, const void *b)
+{
+    const QueryEntry *qa = *(const QueryEntry **) a;
+    const QueryEntry *qb = *(const QueryEntry **) b;
+
+    /* Higher priority first */
+    if (qa->priority != qb->priority)
+        return (qb->priority - qa->priority);
+
+    /* Same priority - earlier enqueue time first (FIFO) */
+    if (qa->enqueue_time < qb->enqueue_time)
+        return -1;
+    else if (qa->enqueue_time > qb->enqueue_time)
+        return 1;
+
+    return 0;
+}
+
+/*
+ * update_pool_usage
+ *    Update a pool's resource usage with delta values
+ */
+static void
+update_pool_usage(ResourcePool *pool, ResourceUsage *delta)
+{
+    if (pool == NULL || delta == NULL)
+        return;
+
+    pool->usage.cpu_time_us += delta->cpu_time_us;
+    pool->usage.memory_bytes += delta->memory_bytes;
+    pool->usage.io_read_bytes += delta->io_read_bytes;
+    pool->usage.io_write_bytes += delta->io_write_bytes;
+    pool->usage.queries_executed += delta->queries_executed;
+    pool->usage.queries_queued += delta->queries_queued;
+    pool->usage.queries_rejected += delta->queries_rejected;
+
+    /* Track peak memory */
+    if (pool->usage.memory_bytes > pool->usage.peak_memory_bytes)
+        pool->usage.peak_memory_bytes = pool->usage.memory_bytes;
+
+    pool->usage.last_updated = GetCurrentTimestamp();
+}
+
+/*
  * orochi_release_query
  *    Release resources when a query completes
  */
@@ -1582,77 +1648,606 @@ orochi_assign_workload_class_by_name(int backend_pid, const char *class_name)
     return orochi_assign_workload_class(backend_pid, wclass->class_id);
 }
 
+/* ============================================================
+ * Session Tracking Implementation
+ * ============================================================ */
+
+/*
+ * session_hash_slot
+ *    Calculate hash slot for a backend PID
+ */
+static uint32
+session_hash_slot(int backend_pid)
+{
+    /* Simple hash using the PID */
+    uint32 hash = (uint32) backend_pid;
+    hash = hash * 2654435761U;  /* Knuth multiplicative hash */
+    return hash % WORKLOAD_MAX_SESSIONS;
+}
+
+/*
+ * find_session_slot
+ *    Find a session slot by backend PID (must hold session_lock)
+ */
+static SessionResourceTracker *
+find_session_slot(int backend_pid)
+{
+    uint32 slot;
+    int probe_count;
+
+    if (WorkloadState == NULL || !WorkloadState->is_initialized)
+        return NULL;
+
+    slot = session_hash_slot(backend_pid);
+
+    /* Linear probing with limited probes */
+    for (probe_count = 0; probe_count < 16; probe_count++)
+    {
+        SessionResourceTracker *entry = &WorkloadState->sessions[slot];
+
+        /* Empty slot means not found */
+        if (entry->backend_pid == 0)
+            return NULL;
+
+        /* Check for match */
+        if (entry->backend_pid == backend_pid && entry->is_active)
+            return entry;
+
+        /* Move to next slot */
+        slot = (slot + 1) % WORKLOAD_MAX_SESSIONS;
+    }
+
+    return NULL;  /* Not found after probing */
+}
+
+/*
+ * find_free_session_slot
+ *    Find an empty session slot for insertion (must hold session_lock)
+ */
+static SessionResourceTracker *
+find_free_session_slot(int backend_pid)
+{
+    uint32 slot;
+    int probe_count;
+    TimestampTz now = GetCurrentTimestamp();
+
+    if (WorkloadState == NULL)
+        return NULL;
+
+    slot = session_hash_slot(backend_pid);
+
+    /* Linear probing to find empty or expired slot */
+    for (probe_count = 0; probe_count < 16; probe_count++)
+    {
+        SessionResourceTracker *entry = &WorkloadState->sessions[slot];
+
+        /* Empty slot - use it */
+        if (entry->backend_pid == 0)
+            return entry;
+
+        /* Inactive entry - can reuse */
+        if (!entry->is_active)
+            return entry;
+
+        /* Expired entry (idle for too long) - can reuse */
+        if (entry->last_activity > 0 &&
+            (now - entry->last_activity) > WORKLOAD_SESSION_IDLE_TIMEOUT)
+        {
+            entry->is_active = false;
+            WorkloadState->num_sessions--;
+            return entry;
+        }
+
+        /* Move to next slot */
+        slot = (slot + 1) % WORKLOAD_MAX_SESSIONS;
+    }
+
+    return NULL;  /* No free slot found */
+}
+
+/*
+ * orochi_assign_workload_class
+ *    Assign a workload class to a session
+ */
 bool
 orochi_assign_workload_class(int backend_pid, int64 class_id)
 {
-    /* In a full implementation, this would update the session tracker */
-    elog(DEBUG1, "Assigned backend %d to workload class %ld",
-         backend_pid, class_id);
-    return true;
+    SessionResourceTracker *session;
+    WorkloadClass *wclass;
+    bool found = false;
+
+    if (WorkloadState == NULL || !WorkloadState->is_initialized)
+        return false;
+
+    /* Verify class exists */
+    wclass = orochi_get_workload_class(class_id);
+    if (wclass == NULL)
+    {
+        ereport(WARNING,
+                (errmsg("workload class %ld not found", class_id)));
+        return false;
+    }
+
+    LWLockAcquire(WorkloadState->session_lock, LW_EXCLUSIVE);
+
+    session = find_session_slot(backend_pid);
+    if (session != NULL)
+    {
+        session->class_id = class_id;
+        session->pool_id = wclass->pool_id;
+        session->last_activity = GetCurrentTimestamp();
+        found = true;
+    }
+    else
+    {
+        /* Session not registered - register it now */
+        session = find_free_session_slot(backend_pid);
+        if (session != NULL)
+        {
+            session->backend_pid = backend_pid;
+            session->class_id = class_id;
+            session->pool_id = wclass->pool_id;
+            session->is_active = true;
+            session->session_start = GetCurrentTimestamp();
+            session->last_activity = session->session_start;
+            session->active_queries = 0;
+            memset(&session->usage, 0, sizeof(ResourceUsage));
+            WorkloadState->num_sessions++;
+            found = true;
+        }
+    }
+
+    LWLockRelease(WorkloadState->session_lock);
+
+    pfree(wclass);
+
+    elog(DEBUG1, "Assigned backend %d to workload class %ld (found=%d)",
+         backend_pid, class_id, found);
+
+    return found;
 }
 
+/*
+ * orochi_get_session_class_id
+ *    Get the workload class ID for a session
+ */
 int64
 orochi_get_session_class_id(int backend_pid)
 {
-    /* Stub - would look up from session tracker */
-    return 0;
+    SessionResourceTracker *session;
+    int64 class_id = 0;
+
+    if (WorkloadState == NULL || !WorkloadState->is_initialized)
+        return 0;
+
+    LWLockAcquire(WorkloadState->session_lock, LW_SHARED);
+
+    session = find_session_slot(backend_pid);
+    if (session != NULL)
+        class_id = session->class_id;
+
+    LWLockRelease(WorkloadState->session_lock);
+
+    return class_id;
 }
 
-/* Session tracking stubs */
+/*
+ * orochi_register_session
+ *    Register a new session in shared memory
+ */
 bool
 orochi_register_session(int backend_pid, int64 pool_id, int64 class_id)
 {
-    elog(DEBUG1, "Registered session for backend %d in pool %ld class %ld",
-         backend_pid, pool_id, class_id);
-    return true;
+    SessionResourceTracker *session;
+    bool registered = false;
+
+    if (WorkloadState == NULL || !WorkloadState->is_initialized)
+    {
+        elog(DEBUG1, "WorkloadState not initialized, cannot register session");
+        return false;
+    }
+
+    LWLockAcquire(WorkloadState->session_lock, LW_EXCLUSIVE);
+
+    /* Check if already registered */
+    session = find_session_slot(backend_pid);
+    if (session != NULL)
+    {
+        /* Update existing session */
+        session->pool_id = pool_id;
+        session->class_id = class_id;
+        session->last_activity = GetCurrentTimestamp();
+        registered = true;
+        elog(DEBUG1, "Updated existing session for backend %d", backend_pid);
+    }
+    else
+    {
+        /* Find a free slot */
+        session = find_free_session_slot(backend_pid);
+        if (session != NULL)
+        {
+            TimestampTz now = GetCurrentTimestamp();
+
+            session->backend_pid = backend_pid;
+            session->pool_id = pool_id;
+            session->class_id = class_id;
+            session->is_active = true;
+            session->session_start = now;
+            session->last_activity = now;
+            session->active_queries = 0;
+            memset(&session->usage, 0, sizeof(ResourceUsage));
+            session->usage.last_updated = now;
+
+            WorkloadState->num_sessions++;
+            registered = true;
+
+            elog(DEBUG1, "Registered new session for backend %d in pool %ld class %ld",
+                 backend_pid, pool_id, class_id);
+        }
+        else
+        {
+            elog(WARNING, "Cannot register session for backend %d: no free slots "
+                 "(max sessions: %d)", backend_pid, WORKLOAD_MAX_SESSIONS);
+        }
+    }
+
+    LWLockRelease(WorkloadState->session_lock);
+
+    return registered;
 }
 
+/*
+ * orochi_unregister_session
+ *    Unregister a session from shared memory
+ */
 void
 orochi_unregister_session(int backend_pid)
 {
-    elog(DEBUG1, "Unregistered session for backend %d", backend_pid);
+    SessionResourceTracker *session;
+
+    if (WorkloadState == NULL || !WorkloadState->is_initialized)
+        return;
+
+    LWLockAcquire(WorkloadState->session_lock, LW_EXCLUSIVE);
+
+    session = find_session_slot(backend_pid);
+    if (session != NULL)
+    {
+        /* Update pool resource usage before clearing */
+        for (int i = 0; i < WORKLOAD_MAX_POOLS; i++)
+        {
+            if (WorkloadState->pools[i].pool_id == session->pool_id)
+            {
+                /* Add session usage to pool totals */
+                WorkloadState->pools[i].usage.cpu_time_us += session->usage.cpu_time_us;
+                WorkloadState->pools[i].usage.io_read_bytes += session->usage.io_read_bytes;
+                WorkloadState->pools[i].usage.io_write_bytes += session->usage.io_write_bytes;
+                break;
+            }
+        }
+
+        /* Clear the session slot */
+        session->backend_pid = 0;
+        session->pool_id = 0;
+        session->class_id = 0;
+        session->is_active = false;
+        session->active_queries = 0;
+        memset(&session->usage, 0, sizeof(ResourceUsage));
+
+        WorkloadState->num_sessions--;
+        if (WorkloadState->num_sessions < 0)
+            WorkloadState->num_sessions = 0;
+
+        elog(DEBUG1, "Unregistered session for backend %d", backend_pid);
+    }
+
+    LWLockRelease(WorkloadState->session_lock);
 }
 
+/*
+ * orochi_get_session_tracker
+ *    Get a copy of the session tracker for a backend
+ *    Returns palloc'd copy or NULL if not found
+ */
 SessionResourceTracker *
 orochi_get_session_tracker(int backend_pid)
 {
-    return NULL;  /* Stub */
+    SessionResourceTracker *session;
+    SessionResourceTracker *result = NULL;
+
+    if (WorkloadState == NULL || !WorkloadState->is_initialized)
+        return NULL;
+
+    LWLockAcquire(WorkloadState->session_lock, LW_SHARED);
+
+    session = find_session_slot(backend_pid);
+    if (session != NULL)
+    {
+        result = (SessionResourceTracker *) palloc(sizeof(SessionResourceTracker));
+        memcpy(result, session, sizeof(SessionResourceTracker));
+    }
+
+    LWLockRelease(WorkloadState->session_lock);
+
+    return result;
 }
 
+/*
+ * orochi_update_session_activity
+ *    Update the last activity timestamp for a session
+ */
 void
 orochi_update_session_activity(int backend_pid)
 {
-    /* Stub */
+    SessionResourceTracker *session;
+
+    if (WorkloadState == NULL || !WorkloadState->is_initialized)
+        return;
+
+    LWLockAcquire(WorkloadState->session_lock, LW_EXCLUSIVE);
+
+    session = find_session_slot(backend_pid);
+    if (session != NULL)
+    {
+        session->last_activity = GetCurrentTimestamp();
+        session->usage.last_updated = session->last_activity;
+    }
+
+    LWLockRelease(WorkloadState->session_lock);
 }
 
+/*
+ * orochi_track_session_cpu
+ *    Track CPU time for a session
+ */
 void
 orochi_track_session_cpu(int backend_pid, int64 cpu_time_us)
 {
-    /* Stub */
+    SessionResourceTracker *session;
+
+    if (WorkloadState == NULL || !WorkloadState->is_initialized)
+        return;
+
+    if (cpu_time_us <= 0)
+        return;
+
+    LWLockAcquire(WorkloadState->session_lock, LW_EXCLUSIVE);
+
+    session = find_session_slot(backend_pid);
+    if (session != NULL)
+    {
+        session->usage.cpu_time_us += cpu_time_us;
+        session->usage.last_updated = GetCurrentTimestamp();
+        session->last_activity = session->usage.last_updated;
+
+        /* Also update the pool's CPU usage */
+        for (int i = 0; i < WORKLOAD_MAX_POOLS; i++)
+        {
+            if (WorkloadState->pools[i].pool_id == session->pool_id)
+            {
+                WorkloadState->pools[i].usage.cpu_time_us += cpu_time_us;
+                WorkloadState->pools[i].usage.last_updated = session->usage.last_updated;
+                break;
+            }
+        }
+
+        elog(DEBUG2, "Tracked %ld us CPU for backend %d (total: %ld us)",
+             cpu_time_us, backend_pid, session->usage.cpu_time_us);
+    }
+
+    LWLockRelease(WorkloadState->session_lock);
 }
 
+/*
+ * orochi_track_session_memory
+ *    Track memory usage for a session
+ */
 void
 orochi_track_session_memory(int backend_pid, int64 memory_bytes)
 {
-    /* Stub */
+    SessionResourceTracker *session;
+
+    if (WorkloadState == NULL || !WorkloadState->is_initialized)
+        return;
+
+    LWLockAcquire(WorkloadState->session_lock, LW_EXCLUSIVE);
+
+    session = find_session_slot(backend_pid);
+    if (session != NULL)
+    {
+        /* Update current memory usage */
+        session->usage.memory_bytes = memory_bytes;
+
+        /* Track peak memory */
+        if (memory_bytes > session->usage.peak_memory_bytes)
+            session->usage.peak_memory_bytes = memory_bytes;
+
+        session->usage.last_updated = GetCurrentTimestamp();
+        session->last_activity = session->usage.last_updated;
+
+        /* Update pool memory tracking */
+        for (int i = 0; i < WORKLOAD_MAX_POOLS; i++)
+        {
+            if (WorkloadState->pools[i].pool_id == session->pool_id)
+            {
+                /* Note: Pool memory is aggregated from all sessions */
+                WorkloadState->pools[i].usage.last_updated = session->usage.last_updated;
+                break;
+            }
+        }
+
+        elog(DEBUG2, "Tracked %ld bytes memory for backend %d (peak: %ld)",
+             memory_bytes, backend_pid, session->usage.peak_memory_bytes);
+    }
+
+    LWLockRelease(WorkloadState->session_lock);
 }
 
+/*
+ * orochi_track_session_io
+ *    Track I/O usage for a session
+ */
 void
 orochi_track_session_io(int backend_pid, int64 read_bytes, int64 write_bytes)
 {
-    /* Stub */
+    SessionResourceTracker *session;
+
+    if (WorkloadState == NULL || !WorkloadState->is_initialized)
+        return;
+
+    if (read_bytes <= 0 && write_bytes <= 0)
+        return;
+
+    LWLockAcquire(WorkloadState->session_lock, LW_EXCLUSIVE);
+
+    session = find_session_slot(backend_pid);
+    if (session != NULL)
+    {
+        TimestampTz now = GetCurrentTimestamp();
+
+        if (read_bytes > 0)
+            session->usage.io_read_bytes += read_bytes;
+        if (write_bytes > 0)
+            session->usage.io_write_bytes += write_bytes;
+
+        session->usage.last_updated = now;
+        session->last_activity = now;
+
+        /* Update pool I/O tracking */
+        for (int i = 0; i < WORKLOAD_MAX_POOLS; i++)
+        {
+            if (WorkloadState->pools[i].pool_id == session->pool_id)
+            {
+                if (read_bytes > 0)
+                    WorkloadState->pools[i].usage.io_read_bytes += read_bytes;
+                if (write_bytes > 0)
+                    WorkloadState->pools[i].usage.io_write_bytes += write_bytes;
+                WorkloadState->pools[i].usage.last_updated = now;
+                break;
+            }
+        }
+
+        elog(DEBUG2, "Tracked I/O for backend %d: read=%ld, write=%ld",
+             backend_pid, read_bytes, write_bytes);
+    }
+
+    LWLockRelease(WorkloadState->session_lock);
 }
 
+/*
+ * orochi_get_queued_queries
+ *    Get a list of queued queries for a pool
+ *    Returns a List of palloc'd QueryEntry copies
+ */
 List *
 orochi_get_queued_queries(int64 pool_id)
 {
-    return NIL;  /* Stub */
+    List *queries = NIL;
+
+    if (WorkloadState == NULL || !WorkloadState->is_initialized)
+        return NIL;
+
+    LWLockAcquire(WorkloadState->main_lock, LW_SHARED);
+
+    for (int i = 0; i < WORKLOAD_QUEUE_SIZE; i++)
+    {
+        QueryEntry *entry = &WorkloadState->queue[i];
+
+        /* Include entries that match pool_id and are not yet active */
+        if (entry->backend_pid != 0 &&
+            (pool_id == 0 || entry->pool_id == pool_id) &&
+            !entry->is_active)
+        {
+            QueryEntry *copy = (QueryEntry *) palloc(sizeof(QueryEntry));
+            memcpy(copy, entry, sizeof(QueryEntry));
+            queries = lappend(queries, copy);
+        }
+    }
+
+    LWLockRelease(WorkloadState->main_lock);
+
+    /* Sort by priority (descending) and enqueue time (ascending) */
+    if (list_length(queries) > 1)
+    {
+        /* Use qsort on the list - first convert to array */
+        int count = list_length(queries);
+        QueryEntry **arr = (QueryEntry **) palloc(count * sizeof(QueryEntry *));
+        ListCell *lc;
+        int idx = 0;
+
+        foreach(lc, queries)
+        {
+            arr[idx++] = (QueryEntry *) lfirst(lc);
+        }
+
+        qsort(arr, count, sizeof(QueryEntry *), compare_query_priority);
+
+        /* Rebuild list in sorted order */
+        list_free(queries);
+        queries = NIL;
+        for (idx = 0; idx < count; idx++)
+        {
+            queries = lappend(queries, arr[idx]);
+        }
+        pfree(arr);
+    }
+
+    return queries;
 }
 
+/*
+ * orochi_drain_pool_queue
+ *    Drain all queued queries for a pool (cancel them)
+ */
 void
 orochi_drain_pool_queue(int64 pool_id)
 {
-    /* Stub */
+    int drained = 0;
+
+    if (WorkloadState == NULL || !WorkloadState->is_initialized)
+        return;
+
+    LWLockAcquire(WorkloadState->main_lock, LW_EXCLUSIVE);
+
+    for (int i = 0; i < WORKLOAD_QUEUE_SIZE; i++)
+    {
+        QueryEntry *entry = &WorkloadState->queue[i];
+
+        if (entry->backend_pid != 0 &&
+            entry->pool_id == pool_id &&
+            !entry->is_active)
+        {
+            int64 entry_pool_id = entry->pool_id;
+
+            /* Clear the queue entry */
+            memset(entry, 0, sizeof(QueryEntry));
+            drained++;
+
+            /* Update pool queued count */
+            for (int j = 0; j < WORKLOAD_MAX_POOLS; j++)
+            {
+                if (WorkloadState->pools[j].pool_id == entry_pool_id)
+                {
+                    WorkloadState->pools[j].queued_queries--;
+                    if (WorkloadState->pools[j].queued_queries < 0)
+                        WorkloadState->pools[j].queued_queries = 0;
+                    WorkloadState->pools[j].usage.queries_rejected++;
+                    break;
+                }
+            }
+        }
+    }
+
+    WorkloadState->total_queued_queries -= drained;
+    if (WorkloadState->total_queued_queries < 0)
+        WorkloadState->total_queued_queries = 0;
+
+    LWLockRelease(WorkloadState->main_lock);
+
+    if (drained > 0)
+    {
+        elog(LOG, "Drained %d queries from pool %ld queue", drained, pool_id);
+    }
 }
 
 ResourceUsage *

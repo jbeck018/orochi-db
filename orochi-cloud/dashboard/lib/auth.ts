@@ -182,3 +182,74 @@ export async function getMe(): Promise<User> {
 
   return user;
 }
+
+// OAuth Functions
+export type OAuthProvider = "google" | "github";
+
+export function getOAuthUrl(provider: OAuthProvider): string {
+  const redirectUri = typeof window !== "undefined"
+    ? `${window.location.origin}/auth/callback/${provider}`
+    : "";
+
+  return `${API_URL}/api/v1/auth/oauth/${provider}?redirect_uri=${encodeURIComponent(redirectUri)}`;
+}
+
+export async function handleOAuthCallback(
+  provider: OAuthProvider,
+  code: string
+): Promise<{ tokens: AuthTokens; user: User }> {
+  const redirectUri = typeof window !== "undefined"
+    ? `${window.location.origin}/auth/callback/${provider}`
+    : "";
+
+  const response = await fetch(`${API_URL}/api/v1/auth/oauth/${provider}/callback`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code, redirectUri }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: "OAuth authentication failed" }));
+    throw new Error(error.error ?? "OAuth authentication failed");
+  }
+
+  const data = await response.json();
+  const result = {
+    tokens: data.tokens as AuthTokens,
+    user: data.user as User,
+  };
+
+  storeAuth(result.tokens, result.user);
+  return result;
+}
+
+export async function linkOAuthProvider(provider: OAuthProvider, code: string): Promise<void> {
+  const response = await fetch(`${API_URL}/api/v1/auth/oauth/${provider}/link`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getAuthHeader(),
+    },
+    body: JSON.stringify({ code }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: "Failed to link account" }));
+    throw new Error(error.error ?? "Failed to link account");
+  }
+}
+
+export async function unlinkOAuthProvider(provider: OAuthProvider): Promise<void> {
+  const response = await fetch(`${API_URL}/api/v1/auth/oauth/${provider}/unlink`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getAuthHeader(),
+    },
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: "Failed to unlink account" }));
+    throw new Error(error.error ?? "Failed to unlink account");
+  }
+}

@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ClusterCard } from "@/components/clusters/cluster-card";
-import { clusterApi } from "@/lib/api";
+import { clusterApi, configApi, type SystemHealth } from "@/lib/api";
 import { formatBytes } from "@/lib/utils";
 import type { Cluster, ClusterMetrics } from "@/types";
 
@@ -38,12 +38,21 @@ export default function DashboardPage(): React.JSX.Element {
   const [clusters, setClusters] = React.useState<Cluster[]>([]);
   const [metrics, setMetrics] = React.useState<Record<string, ClusterMetrics>>({});
   const [stats, setStats] = React.useState<DashboardStats | null>(null);
+  const [systemHealth, setSystemHealth] = React.useState<SystemHealth | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
 
   const fetchData = React.useCallback(async (): Promise<void> => {
     try {
-      const response = await clusterApi.list(1, 100);
+      // Fetch clusters and system health in parallel
+      const [response, healthResponse] = await Promise.all([
+        clusterApi.list(1, 100),
+        configApi.getSystemHealth().catch(() => null),
+      ]);
+
       setClusters(response.data);
+      if (healthResponse) {
+        setSystemHealth(healthResponse.data);
+      }
 
       // Calculate stats
       const totalClusters = response.data.length;
@@ -195,11 +204,19 @@ export default function DashboardPage(): React.JSX.Element {
                 <Skeleton className="h-8 w-16" />
               ) : (
                 <>
-                  <div className="text-2xl font-bold text-green-600">
-                    Healthy
+                  <div className={`text-2xl font-bold ${
+                    systemHealth?.status === "operational" ? "text-green-600" :
+                    systemHealth?.status === "degraded" ? "text-yellow-600" :
+                    systemHealth?.status === "outage" ? "text-red-600" : "text-green-600"
+                  }`}>
+                    {systemHealth?.status === "operational" ? "Healthy" :
+                     systemHealth?.status === "degraded" ? "Degraded" :
+                     systemHealth?.status === "outage" ? "Outage" : "Healthy"}
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    All systems operational
+                    {systemHealth?.status === "operational" ? "All systems operational" :
+                     systemHealth?.status === "degraded" ? "Some services affected" :
+                     systemHealth?.status === "outage" ? "Service disruption" : "All systems operational"}
                   </p>
                 </>
               )}

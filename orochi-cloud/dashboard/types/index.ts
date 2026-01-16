@@ -201,6 +201,10 @@ export interface RegionOption {
   location: string;
 }
 
+/**
+ * Default provider options used as fallback when API is unavailable.
+ * For dynamic data, use the useConfig() or useProviders() hook from hooks/use-config.ts
+ */
 export const PROVIDERS: ProviderOption[] = [
   {
     id: "aws",
@@ -236,6 +240,10 @@ export const PROVIDERS: ProviderOption[] = [
   },
 ];
 
+/**
+ * Default tier options used as fallback when API is unavailable.
+ * For dynamic data, use the useConfig() or useTiers() hook from hooks/use-config.ts
+ */
 export const TIER_OPTIONS: Array<{
   id: ClusterTier;
   name: string;

@@ -28,6 +28,10 @@
 #include "storage/latch.h"
 #include "utils/timestamp.h"
 #include "utils/memutils.h"
+#include "utils/builtins.h"
+#include "utils/date.h"
+#include "executor/spi.h"
+#include "catalog/pg_type.h"
 #include "pgstat.h"
 
 #include "auth.h"
@@ -1024,7 +1028,7 @@ orochi_auth_cleanup_rate_limits(void)
 
 /*
  * orochi_auth_audit_log
- *    Log an authentication event
+ *    Log an authentication event to the audit log table
  */
 void
 orochi_auth_audit_log(const char *tenant_id,
@@ -1036,39 +1040,439 @@ orochi_auth_audit_log(const char *tenant_id,
                        const char *resource_type,
                        const char *resource_id)
 {
+    int             ret;
+    StringInfoData  query;
+    Oid             argtypes[8];
+    Datum           values[8];
+    char            nulls[8];
+    int             i;
+    bool            connected = false;
+
     if (!orochi_auth_audit_enabled)
         return;
 
-    /*
-     * TODO: Insert audit log entry into database table.
-     * For now, just log to PostgreSQL log.
-     */
+    /* Always log to PostgreSQL log for debugging */
     elog(LOG, "Orochi Auth Audit: event=%s tenant=%s user=%s session=%s ip=%s",
          orochi_auth_audit_event_name(event_type),
          tenant_id ? tenant_id : "(none)",
          user_id ? user_id : "(none)",
          session_id ? session_id : "(none)",
          ip_address ? ip_address : "(none)");
+
+    /* Attempt to insert into audit log table via SPI */
+    PG_TRY();
+    {
+        ret = SPI_connect();
+        if (ret != SPI_OK_CONNECT)
+        {
+            elog(WARNING, "Orochi Auth: SPI_connect failed: %d", ret);
+            PG_RE_THROW();
+        }
+        connected = true;
+
+        /* Build the INSERT query */
+        initStringInfo(&query);
+        appendStringInfoString(&query,
+            "INSERT INTO orochi.orochi_auth_audit_log "
+            "(tenant_id, user_id, session_id, event_type, event_name, "
+            " ip_address, user_agent, resource_type, resource_id) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)");
+
+        /* Set up parameter types */
+        argtypes[0] = TEXTOID;  /* tenant_id */
+        argtypes[1] = TEXTOID;  /* user_id */
+        argtypes[2] = TEXTOID;  /* session_id */
+        argtypes[3] = INT4OID;  /* event_type */
+        argtypes[4] = TEXTOID;  /* event_name */
+        argtypes[5] = TEXTOID;  /* ip_address */
+        argtypes[6] = TEXTOID;  /* user_agent */
+        argtypes[7] = TEXTOID;  /* resource_type */
+
+        /* Initialize nulls array */
+        for (i = 0; i < 8; i++)
+            nulls[i] = ' ';
+
+        /* Set parameter values */
+        if (tenant_id != NULL && tenant_id[0] != '\0')
+            values[0] = CStringGetTextDatum(tenant_id);
+        else
+            nulls[0] = 'n';
+
+        if (user_id != NULL && user_id[0] != '\0')
+            values[1] = CStringGetTextDatum(user_id);
+        else
+            nulls[1] = 'n';
+
+        if (session_id != NULL && session_id[0] != '\0')
+            values[2] = CStringGetTextDatum(session_id);
+        else
+            nulls[2] = 'n';
+
+        values[3] = Int32GetDatum((int32) event_type);
+        values[4] = CStringGetTextDatum(orochi_auth_audit_event_name(event_type));
+
+        if (ip_address != NULL && ip_address[0] != '\0')
+            values[5] = CStringGetTextDatum(ip_address);
+        else
+            nulls[5] = 'n';
+
+        if (user_agent != NULL && user_agent[0] != '\0')
+            values[6] = CStringGetTextDatum(user_agent);
+        else
+            nulls[6] = 'n';
+
+        if (resource_type != NULL && resource_type[0] != '\0')
+            values[7] = CStringGetTextDatum(resource_type);
+        else
+            nulls[7] = 'n';
+
+        /* Execute with 9 parameters (resource_id added inline) */
+        {
+            Oid         all_argtypes[9];
+            Datum       all_values[9];
+            char        all_nulls[9];
+
+            memcpy(all_argtypes, argtypes, sizeof(argtypes));
+            all_argtypes[8] = TEXTOID;  /* resource_id */
+
+            memcpy(all_values, values, sizeof(values));
+            memcpy(all_nulls, nulls, sizeof(nulls));
+            all_nulls[8] = ' ';  /* Initialize 9th parameter as non-NULL */
+
+            if (resource_id != NULL && resource_id[0] != '\0')
+                all_values[8] = CStringGetTextDatum(resource_id);
+            else
+                all_nulls[8] = 'n';
+
+            ret = SPI_execute_with_args(query.data, 9, all_argtypes,
+                                        all_values, all_nulls, false, 0);
+        }
+
+        if (ret != SPI_OK_INSERT)
+        {
+            elog(WARNING, "Orochi Auth: audit log insert failed: %d", ret);
+        }
+
+        pfree(query.data);
+        SPI_finish();
+        connected = false;
+    }
+    PG_CATCH();
+    {
+        /* Clean up on error */
+        if (connected)
+            SPI_finish();
+
+        /* Don't re-throw - audit logging should not break authentication */
+        elog(WARNING, "Orochi Auth: audit logging failed, continuing without audit");
+        FlushErrorState();
+    }
+    PG_END_TRY();
 }
 
 /*
  * orochi_auth_ensure_audit_partitions
- *    Ensure audit log partitions exist for current period
+ *    Ensure audit log partitions exist for current and next month
  */
 void
 orochi_auth_ensure_audit_partitions(void)
 {
-    /* TODO: Create monthly audit log partitions */
+    int             ret;
+    StringInfoData  query;
+    bool            connected = false;
+    TimestampTz     now;
+    struct pg_tm    tm;
+    fsec_t          fsec;
+    int             current_year, current_month;
+    int             next_year, next_month;
+
+    if (!orochi_auth_audit_enabled)
+        return;
+
+    /* Get current timestamp and extract year/month */
+    now = GetCurrentTimestamp();
+    if (timestamp2tm(now, NULL, &tm, &fsec, NULL, NULL) != 0)
+    {
+        elog(WARNING, "Orochi Auth: failed to decode current timestamp");
+        return;
+    }
+
+    current_year = tm.tm_year;
+    current_month = tm.tm_mon;
+
+    /* Calculate next month */
+    next_month = current_month + 1;
+    next_year = current_year;
+    if (next_month > 12)
+    {
+        next_month = 1;
+        next_year++;
+    }
+
+    PG_TRY();
+    {
+        ret = SPI_connect();
+        if (ret != SPI_OK_CONNECT)
+        {
+            elog(WARNING, "Orochi Auth: SPI_connect failed for partition creation: %d", ret);
+            PG_RE_THROW();
+        }
+        connected = true;
+
+        initStringInfo(&query);
+
+        /*
+         * Create partition for current month if it doesn't exist.
+         * Use DO block with exception handling to ignore "already exists" errors.
+         */
+        appendStringInfo(&query,
+            "DO $$ "
+            "BEGIN "
+            "  CREATE TABLE IF NOT EXISTS orochi.orochi_auth_audit_log_y%04dm%02d "
+            "  PARTITION OF orochi.orochi_auth_audit_log "
+            "  FOR VALUES FROM ('%04d-%02d-01') TO ('%04d-%02d-01'); "
+            "EXCEPTION WHEN duplicate_table THEN "
+            "  NULL; "  /* Partition already exists, ignore */
+            "END $$",
+            current_year, current_month,
+            current_year, current_month,
+            (current_month == 12 ? current_year + 1 : current_year),
+            (current_month == 12 ? 1 : current_month + 1));
+
+        ret = SPI_execute(query.data, false, 0);
+        if (ret != SPI_OK_UTILITY)
+        {
+            elog(LOG, "Orochi Auth: partition creation for %04d-%02d returned %d",
+                 current_year, current_month, ret);
+        }
+
+        /* Reset query buffer for next partition */
+        resetStringInfo(&query);
+
+        /*
+         * Create partition for next month if it doesn't exist.
+         */
+        {
+            int after_next_month = next_month + 1;
+            int after_next_year = next_year;
+            if (after_next_month > 12)
+            {
+                after_next_month = 1;
+                after_next_year++;
+            }
+
+            appendStringInfo(&query,
+                "DO $$ "
+                "BEGIN "
+                "  CREATE TABLE IF NOT EXISTS orochi.orochi_auth_audit_log_y%04dm%02d "
+                "  PARTITION OF orochi.orochi_auth_audit_log "
+                "  FOR VALUES FROM ('%04d-%02d-01') TO ('%04d-%02d-01'); "
+                "EXCEPTION WHEN duplicate_table THEN "
+                "  NULL; "  /* Partition already exists, ignore */
+                "END $$",
+                next_year, next_month,
+                next_year, next_month,
+                after_next_year, after_next_month);
+        }
+
+        ret = SPI_execute(query.data, false, 0);
+        if (ret != SPI_OK_UTILITY)
+        {
+            elog(LOG, "Orochi Auth: partition creation for %04d-%02d returned %d",
+                 next_year, next_month, ret);
+        }
+
+        pfree(query.data);
+        SPI_finish();
+        connected = false;
+
+        elog(DEBUG1, "Orochi Auth: ensured audit log partitions for %04d-%02d and %04d-%02d",
+             current_year, current_month, next_year, next_month);
+    }
+    PG_CATCH();
+    {
+        if (connected)
+            SPI_finish();
+
+        /* Log but don't fail - partition management should not break auth */
+        elog(WARNING, "Orochi Auth: failed to ensure audit partitions");
+        FlushErrorState();
+    }
+    PG_END_TRY();
 }
 
 /*
  * orochi_auth_archive_audit_partitions
- *    Archive old audit log partitions
+ *    Archive audit log partitions older than retention period
+ *
+ * This function detaches and optionally drops partitions that are older
+ * than the configured retention period (orochi_auth_audit_retention_days).
  */
 void
 orochi_auth_archive_audit_partitions(void)
 {
-    /* TODO: Archive partitions older than retention period */
+    int             ret;
+    StringInfoData  query;
+    bool            connected = false;
+    TimestampTz     now;
+    TimestampTz     retention_cutoff;
+    struct pg_tm    tm;
+    fsec_t          fsec;
+    int             cutoff_year, cutoff_month;
+    int             i;
+
+    if (!orochi_auth_audit_enabled)
+        return;
+
+    /* Calculate the retention cutoff date */
+    now = GetCurrentTimestamp();
+    retention_cutoff = now - ((int64) orochi_auth_audit_retention_days * USECS_PER_DAY);
+
+    if (timestamp2tm(retention_cutoff, NULL, &tm, &fsec, NULL, NULL) != 0)
+    {
+        elog(WARNING, "Orochi Auth: failed to decode retention cutoff timestamp");
+        return;
+    }
+
+    cutoff_year = tm.tm_year;
+    cutoff_month = tm.tm_mon;
+
+    elog(LOG, "Orochi Auth: archiving audit partitions older than %04d-%02d (retention: %d days)",
+         cutoff_year, cutoff_month, orochi_auth_audit_retention_days);
+
+    PG_TRY();
+    {
+        ret = SPI_connect();
+        if (ret != SPI_OK_CONNECT)
+        {
+            elog(WARNING, "Orochi Auth: SPI_connect failed for partition archival: %d", ret);
+            PG_RE_THROW();
+        }
+        connected = true;
+
+        initStringInfo(&query);
+
+        /*
+         * Query pg_inherits to find all partitions of the audit log table
+         * that are older than the retention cutoff.
+         */
+        appendStringInfoString(&query,
+            "SELECT c.relname, c.oid "
+            "FROM pg_inherits i "
+            "JOIN pg_class c ON i.inhrelid = c.oid "
+            "JOIN pg_class p ON i.inhparent = p.oid "
+            "JOIN pg_namespace n ON p.relnamespace = n.oid "
+            "WHERE n.nspname = 'orochi' "
+            "  AND p.relname = 'orochi_auth_audit_log' "
+            "  AND c.relname ~ '^orochi_auth_audit_log_y[0-9]{4}m[0-9]{2}$' "
+            "ORDER BY c.relname");
+
+        ret = SPI_execute(query.data, true, 0);
+        if (ret != SPI_OK_SELECT)
+        {
+            elog(WARNING, "Orochi Auth: failed to query audit partitions: %d", ret);
+            pfree(query.data);
+            SPI_finish();
+            return;
+        }
+
+        /* Process each partition found */
+        for (i = 0; i < SPI_processed; i++)
+        {
+            char   *partition_name;
+            int     part_year, part_month;
+            bool    isnull;
+
+            partition_name = SPI_getvalue(SPI_tuptable->vals[i],
+                                          SPI_tuptable->tupdesc, 1);
+            if (partition_name == NULL)
+                continue;
+
+            /* Parse year and month from partition name: orochi_auth_audit_log_yYYYYmMM */
+            if (sscanf(partition_name, "orochi_auth_audit_log_y%4dm%2d",
+                       &part_year, &part_month) != 2)
+            {
+                elog(DEBUG1, "Orochi Auth: skipping non-matching partition: %s", partition_name);
+                continue;
+            }
+
+            /* Check if partition is older than retention cutoff */
+            if (part_year < cutoff_year ||
+                (part_year == cutoff_year && part_month < cutoff_month))
+            {
+                StringInfoData  detach_query;
+
+                elog(LOG, "Orochi Auth: archiving old partition %s (cutoff: %04d-%02d)",
+                     partition_name, cutoff_year, cutoff_month);
+
+                initStringInfo(&detach_query);
+
+                /*
+                 * Detach the partition from the parent table.
+                 * The partition remains as a standalone table that can be
+                 * exported to cold storage (S3, etc.) before being dropped.
+                 */
+                appendStringInfo(&detach_query,
+                    "ALTER TABLE orochi.orochi_auth_audit_log "
+                    "DETACH PARTITION orochi.%s",
+                    partition_name);
+
+                ret = SPI_execute(detach_query.data, false, 0);
+                if (ret == SPI_OK_UTILITY)
+                {
+                    elog(LOG, "Orochi Auth: detached partition %s", partition_name);
+
+                    /*
+                     * Optionally drop the detached partition after archival.
+                     * In production, you might want to:
+                     * 1. Export to S3/cold storage first
+                     * 2. Verify the export succeeded
+                     * 3. Then drop the table
+                     *
+                     * For now, we drop immediately. A more sophisticated
+                     * implementation could use a separate background process
+                     * for the export step.
+                     */
+                    resetStringInfo(&detach_query);
+                    appendStringInfo(&detach_query,
+                        "DROP TABLE IF EXISTS orochi.%s",
+                        partition_name);
+
+                    ret = SPI_execute(detach_query.data, false, 0);
+                    if (ret == SPI_OK_UTILITY)
+                    {
+                        elog(LOG, "Orochi Auth: dropped archived partition %s", partition_name);
+                    }
+                    else
+                    {
+                        elog(WARNING, "Orochi Auth: failed to drop partition %s: %d",
+                             partition_name, ret);
+                    }
+                }
+                else
+                {
+                    elog(WARNING, "Orochi Auth: failed to detach partition %s: %d",
+                         partition_name, ret);
+                }
+
+                pfree(detach_query.data);
+            }
+        }
+
+        pfree(query.data);
+        SPI_finish();
+        connected = false;
+    }
+    PG_CATCH();
+    {
+        if (connected)
+            SPI_finish();
+
+        /* Log but don't fail */
+        elog(WARNING, "Orochi Auth: failed to archive audit partitions");
+        FlushErrorState();
+    }
+    PG_END_TRY();
 }
 
 /* ============================================================
@@ -1217,6 +1621,9 @@ orochi_auth_key_rotation_worker_main(Datum main_arg)
 
         /* Refresh signing key cache */
         orochi_auth_refresh_signing_key_cache();
+
+        /* Archive old audit log partitions (runs daily) */
+        orochi_auth_archive_audit_partitions();
 
         CHECK_FOR_INTERRUPTS();
     }

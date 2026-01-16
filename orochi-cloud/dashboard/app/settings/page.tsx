@@ -42,7 +42,7 @@ import {
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { userApi } from "@/lib/api";
+import { userApi, notificationApi, twoFactorApi, type TwoFactorSetup, type TwoFactorStatus } from "@/lib/api";
 import { getStoredUser, logout } from "@/lib/auth";
 import type { User as UserType } from "@/types";
 
@@ -72,15 +72,48 @@ export default function SettingsPage(): React.JSX.Element {
   const [emailNotifications, setEmailNotifications] = React.useState(true);
   const [alertNotifications, setAlertNotifications] = React.useState(true);
   const [marketingEmails, setMarketingEmails] = React.useState(false);
+  const [isLoadingNotifications, setIsLoadingNotifications] = React.useState(false);
+
+  // 2FA state
+  const [twoFactorStatus, setTwoFactorStatus] = React.useState<TwoFactorStatus | null>(null);
+  const [twoFactorSetup, setTwoFactorSetup] = React.useState<TwoFactorSetup | null>(null);
+  const [show2FADialog, setShow2FADialog] = React.useState(false);
+  const [twoFactorCode, setTwoFactorCode] = React.useState("");
+  const [backupCodes, setBackupCodes] = React.useState<string[]>([]);
+  const [showBackupCodes, setShowBackupCodes] = React.useState(false);
+  const [is2FALoading, setIs2FALoading] = React.useState(false);
 
   React.useEffect(() => {
-    const storedUser = getStoredUser();
-    if (storedUser) {
-      setUser(storedUser);
-      setName(storedUser.name);
-      setEmail(storedUser.email);
-    }
-    setIsLoading(false);
+    const loadData = async (): Promise<void> => {
+      const storedUser = getStoredUser();
+      if (storedUser) {
+        setUser(storedUser);
+        setName(storedUser.name);
+        setEmail(storedUser.email);
+      }
+
+      // Load notification preferences
+      try {
+        const notifResponse = await notificationApi.get();
+        setEmailNotifications(notifResponse.data.emailNotifications);
+        setAlertNotifications(notifResponse.data.alertNotifications);
+        setMarketingEmails(notifResponse.data.marketingEmails);
+      } catch {
+        // Use defaults if API fails
+      }
+
+      // Load 2FA status
+      try {
+        const tfaResponse = await twoFactorApi.getStatus();
+        setTwoFactorStatus(tfaResponse.data);
+      } catch {
+        // Use defaults if API fails
+      }
+
+      setIsLoading(false);
+    };
+
+    loadData();
   }, []);
 
   const handleUpdateProfile = async (): Promise<void> => {
@@ -153,6 +186,115 @@ export default function SettingsPage(): React.JSX.Element {
       .join("")
       .toUpperCase()
       .slice(0, 2);
+  };
+
+  const handleNotificationChange = async (
+    type: "email" | "alert" | "marketing",
+    value: boolean
+  ): Promise<void> => {
+    const newPrefs = {
+      emailNotifications: type === "email" ? value : emailNotifications,
+      alertNotifications: type === "alert" ? value : alertNotifications,
+      marketingEmails: type === "marketing" ? value : marketingEmails,
+    };
+
+    // Update local state immediately
+    if (type === "email") setEmailNotifications(value);
+    if (type === "alert") setAlertNotifications(value);
+    if (type === "marketing") setMarketingEmails(value);
+
+    setIsLoadingNotifications(true);
+    try {
+      await notificationApi.update(newPrefs);
+      toast({ title: "Notification preferences updated" });
+    } catch (error) {
+      // Revert on error
+      if (type === "email") setEmailNotifications(!value);
+      if (type === "alert") setAlertNotifications(!value);
+      if (type === "marketing") setMarketingEmails(!value);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to update preferences",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingNotifications(false);
+    }
+  };
+
+  const handleEnable2FA = async (): Promise<void> => {
+    setIs2FALoading(true);
+    try {
+      const response = await twoFactorApi.enable();
+      setTwoFactorSetup(response.data);
+      setShow2FADialog(true);
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to enable 2FA",
+        variant: "destructive",
+      });
+    } finally {
+      setIs2FALoading(false);
+    }
+  };
+
+  const handleVerify2FA = async (): Promise<void> => {
+    if (twoFactorCode.length !== 6) {
+      toast({
+        title: "Error",
+        description: "Please enter a 6-digit code",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIs2FALoading(true);
+    try {
+      const response = await twoFactorApi.verify(twoFactorCode);
+      setBackupCodes(response.data.backupCodes);
+      setShowBackupCodes(true);
+      setTwoFactorStatus({ enabled: true, enabledAt: new Date().toISOString() });
+      setShow2FADialog(false);
+      setTwoFactorSetup(null);
+      setTwoFactorCode("");
+      toast({ title: "Two-factor authentication enabled" });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Invalid verification code",
+        variant: "destructive",
+      });
+    } finally {
+      setIs2FALoading(false);
+    }
+  };
+
+  const handleDisable2FA = async (): Promise<void> => {
+    if (twoFactorCode.length !== 6) {
+      toast({
+        title: "Error",
+        description: "Please enter your 2FA code to disable",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIs2FALoading(true);
+    try {
+      await twoFactorApi.disable(twoFactorCode);
+      setTwoFactorStatus({ enabled: false });
+      setTwoFactorCode("");
+      toast({ title: "Two-factor authentication disabled" });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to disable 2FA",
+        variant: "destructive",
+      });
+    } finally {
+      setIs2FALoading(false);
+    }
   };
 
   if (isLoading) {
@@ -360,7 +502,7 @@ export default function SettingsPage(): React.JSX.Element {
                   Add an extra layer of security to your account
                 </CardDescription>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
@@ -369,12 +511,58 @@ export default function SettingsPage(): React.JSX.Element {
                     <div>
                       <p className="font-medium">Authenticator App</p>
                       <p className="text-sm text-muted-foreground">
-                        Use an authenticator app to generate one-time codes
+                        {twoFactorStatus?.enabled
+                          ? "Two-factor authentication is enabled"
+                          : "Use an authenticator app to generate one-time codes"
+                        }
                       </p>
                     </div>
                   </div>
-                  <Button variant="outline">Enable</Button>
+                  {twoFactorStatus?.enabled ? (
+                    <div className="flex items-center gap-2">
+                      <Check className="h-4 w-4 text-green-600" />
+                      <span className="text-sm text-green-600">Enabled</span>
+                    </div>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      onClick={handleEnable2FA}
+                      disabled={is2FALoading}
+                    >
+                      {is2FALoading ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : null}
+                      Enable
+                    </Button>
+                  )}
                 </div>
+                {twoFactorStatus?.enabled && (
+                  <div className="pt-4 border-t">
+                    <p className="text-sm font-medium mb-2">Disable 2FA</p>
+                    <p className="text-sm text-muted-foreground mb-3">
+                      Enter your current 2FA code to disable two-factor authentication.
+                    </p>
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="Enter 6-digit code"
+                        value={twoFactorCode}
+                        onChange={(e) => setTwoFactorCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                        maxLength={6}
+                        className="w-40"
+                      />
+                      <Button
+                        variant="destructive"
+                        onClick={handleDisable2FA}
+                        disabled={is2FALoading || twoFactorCode.length !== 6}
+                      >
+                        {is2FALoading ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : null}
+                        Disable 2FA
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -424,7 +612,8 @@ export default function SettingsPage(): React.JSX.Element {
                   </div>
                   <Switch
                     checked={emailNotifications}
-                    onCheckedChange={setEmailNotifications}
+                    onCheckedChange={(checked) => handleNotificationChange("email", checked)}
+                    disabled={isLoadingNotifications}
                   />
                 </div>
                 <Separator />
@@ -437,7 +626,8 @@ export default function SettingsPage(): React.JSX.Element {
                   </div>
                   <Switch
                     checked={alertNotifications}
-                    onCheckedChange={setAlertNotifications}
+                    onCheckedChange={(checked) => handleNotificationChange("alert", checked)}
+                    disabled={isLoadingNotifications}
                   />
                 </div>
                 <Separator />
@@ -450,13 +640,129 @@ export default function SettingsPage(): React.JSX.Element {
                   </div>
                   <Switch
                     checked={marketingEmails}
-                    onCheckedChange={setMarketingEmails}
+                    onCheckedChange={(checked) => handleNotificationChange("marketing", checked)}
+                    disabled={isLoadingNotifications}
                   />
                 </div>
               </CardContent>
             </Card>
           </TabsContent>
         </Tabs>
+
+        {/* 2FA Setup Dialog */}
+        <Dialog open={show2FADialog} onOpenChange={setShow2FADialog}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Set up Two-Factor Authentication</DialogTitle>
+              <DialogDescription>
+                Scan the QR code with your authenticator app, then enter the
+                verification code.
+              </DialogDescription>
+            </DialogHeader>
+            {twoFactorSetup && (
+              <div className="space-y-4 py-4">
+                <div className="flex justify-center">
+                  <div className="p-4 bg-white rounded-lg">
+                    <img
+                      src={twoFactorSetup.qrCodeUrl}
+                      alt="2FA QR Code"
+                      className="w-48 h-48"
+                    />
+                  </div>
+                </div>
+                <div className="text-center">
+                  <p className="text-sm text-muted-foreground mb-1">
+                    Or enter this code manually:
+                  </p>
+                  <code className="text-sm bg-muted px-2 py-1 rounded font-mono">
+                    {twoFactorSetup.manualEntryKey}
+                  </code>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="verifyCode">Verification Code</Label>
+                  <Input
+                    id="verifyCode"
+                    placeholder="Enter 6-digit code"
+                    value={twoFactorCode}
+                    onChange={(e) => setTwoFactorCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                    maxLength={6}
+                    className="text-center text-lg tracking-widest"
+                  />
+                </div>
+              </div>
+            )}
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShow2FADialog(false);
+                  setTwoFactorSetup(null);
+                  setTwoFactorCode("");
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleVerify2FA}
+                disabled={is2FALoading || twoFactorCode.length !== 6}
+              >
+                {is2FALoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Verifying...
+                  </>
+                ) : (
+                  "Verify & Enable"
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Backup Codes Dialog */}
+        <Dialog open={showBackupCodes} onOpenChange={setShowBackupCodes}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Save Your Backup Codes</DialogTitle>
+              <DialogDescription>
+                Store these codes in a safe place. You can use them to access
+                your account if you lose your authenticator device.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="py-4">
+              <Alert>
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>
+                  Each code can only be used once. Keep them secure!
+                </AlertDescription>
+              </Alert>
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                {backupCodes.map((code, index) => (
+                  <code
+                    key={index}
+                    className="bg-muted px-3 py-2 rounded text-center font-mono text-sm"
+                  >
+                    {code}
+                  </code>
+                ))}
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  navigator.clipboard.writeText(backupCodes.join("\n"));
+                  toast({ title: "Backup codes copied to clipboard" });
+                }}
+              >
+                Copy Codes
+              </Button>
+              <Button onClick={() => setShowBackupCodes(false)}>
+                I&apos;ve Saved My Codes
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Delete Account Dialog */}
         <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>

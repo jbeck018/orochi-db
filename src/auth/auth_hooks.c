@@ -26,6 +26,11 @@
 #include "utils/guc.h"
 #include "utils/memutils.h"
 #include "utils/builtins.h"
+#include "executor/spi.h"
+#include "catalog/namespace.h"
+#include "lib/stringinfo.h"
+#include "access/htup_details.h"
+#include "utils/timestamp.h"
 
 #include "auth.h"
 
@@ -500,6 +505,519 @@ orochi_auth_is_jwt_format(const char *token)
 }
 
 /* ============================================================
+ * API Keys Database Operations
+ * ============================================================ */
+
+/*
+ * API Key Info structure for list results
+ */
+typedef struct OrochiApiKeyInfo
+{
+    int64       key_id;
+    char        prefix[OROCHI_AUTH_API_KEY_PREFIX_SIZE + 1];
+    char        name[256];
+    char        user_id[OROCHI_AUTH_USER_ID_SIZE + 1];
+    char        tenant_id[OROCHI_AUTH_TENANT_ID_SIZE + 1];
+    TimestampTz created_at;
+    TimestampTz last_used_at;
+    TimestampTz expires_at;
+    bool        is_revoked;
+    bool        has_last_used;
+    bool        has_expires;
+} OrochiApiKeyInfo;
+
+/*
+ * orochi_auth_ensure_api_keys_table
+ *    Create the API keys table if it doesn't exist
+ */
+static void
+orochi_auth_ensure_api_keys_table(void)
+{
+    static bool table_checked = false;
+    int ret;
+
+    const char *create_table_sql =
+        "CREATE TABLE IF NOT EXISTS orochi.orochi_api_keys ("
+        "    key_id BIGSERIAL PRIMARY KEY,"
+        "    user_id TEXT NOT NULL,"
+        "    tenant_id TEXT,"
+        "    name TEXT NOT NULL,"
+        "    prefix TEXT NOT NULL,"
+        "    key_hash TEXT NOT NULL UNIQUE,"
+        "    scopes BIGINT NOT NULL DEFAULT 0,"
+        "    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),"
+        "    last_used_at TIMESTAMPTZ,"
+        "    expires_at TIMESTAMPTZ,"
+        "    is_revoked BOOLEAN NOT NULL DEFAULT FALSE,"
+        "    revoked_at TIMESTAMPTZ"
+        ");"
+        "CREATE INDEX IF NOT EXISTS idx_api_keys_user ON orochi.orochi_api_keys(user_id);"
+        "CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON orochi.orochi_api_keys(key_hash);"
+        "CREATE INDEX IF NOT EXISTS idx_api_keys_prefix ON orochi.orochi_api_keys(prefix);";
+
+    /* Only check once per session */
+    if (table_checked)
+        return;
+
+    SPI_connect();
+
+    /* Check if orochi schema exists first */
+    ret = SPI_execute("SELECT 1 FROM pg_namespace WHERE nspname = 'orochi'", true, 1);
+    if (ret != SPI_OK_SELECT || SPI_processed == 0)
+    {
+        /* Create schema if needed */
+        ret = SPI_execute("CREATE SCHEMA IF NOT EXISTS orochi", false, 0);
+        if (ret != SPI_OK_UTILITY)
+        {
+            SPI_finish();
+            elog(WARNING, "Failed to create orochi schema for API keys");
+            return;
+        }
+    }
+
+    /* Create the table */
+    ret = SPI_execute(create_table_sql, false, 0);
+    if (ret != SPI_OK_UTILITY)
+    {
+        SPI_finish();
+        elog(WARNING, "Failed to create orochi_api_keys table");
+        return;
+    }
+
+    SPI_finish();
+    table_checked = true;
+
+    elog(DEBUG1, "Orochi API keys table ensured");
+}
+
+/*
+ * orochi_auth_store_api_key
+ *    Store a new API key in the database
+ *
+ * Parameters:
+ *   user_id    - User ID who owns the key
+ *   tenant_id  - Tenant ID (may be NULL)
+ *   name       - Display name for the key
+ *   prefix     - Key prefix for identification (e.g., "orochi_k")
+ *   key_hash   - SHA-256 hash of the full API key
+ *   scopes     - Permission scopes bitmask
+ *   expires_at - Expiration timestamp (0 for no expiry)
+ *
+ * Returns: The generated key_id, or -1 on error
+ */
+int64
+orochi_auth_store_api_key(const char *user_id,
+                          const char *tenant_id,
+                          const char *name,
+                          const char *prefix,
+                          const char *key_hash,
+                          int64 scopes,
+                          TimestampTz expires_at)
+{
+    StringInfoData query;
+    int ret;
+    int64 key_id = -1;
+
+    if (user_id == NULL || name == NULL || prefix == NULL || key_hash == NULL)
+    {
+        elog(WARNING, "orochi_auth_store_api_key: NULL parameter");
+        return -1;
+    }
+
+    /* Ensure the table exists */
+    orochi_auth_ensure_api_keys_table();
+
+    initStringInfo(&query);
+
+    if (expires_at != 0)
+    {
+        appendStringInfo(&query,
+            "INSERT INTO orochi.orochi_api_keys "
+            "(user_id, tenant_id, name, prefix, key_hash, scopes, expires_at) "
+            "VALUES (%s, %s, %s, %s, %s, %ld, '%s'::timestamptz) "
+            "RETURNING key_id",
+            quote_literal_cstr(user_id),
+            tenant_id ? quote_literal_cstr(tenant_id) : "NULL",
+            quote_literal_cstr(name),
+            quote_literal_cstr(prefix),
+            quote_literal_cstr(key_hash),
+            scopes,
+            timestamptz_to_str(expires_at));
+    }
+    else
+    {
+        appendStringInfo(&query,
+            "INSERT INTO orochi.orochi_api_keys "
+            "(user_id, tenant_id, name, prefix, key_hash, scopes) "
+            "VALUES (%s, %s, %s, %s, %s, %ld) "
+            "RETURNING key_id",
+            quote_literal_cstr(user_id),
+            tenant_id ? quote_literal_cstr(tenant_id) : "NULL",
+            quote_literal_cstr(name),
+            quote_literal_cstr(prefix),
+            quote_literal_cstr(key_hash),
+            scopes);
+    }
+
+    SPI_connect();
+    ret = SPI_execute(query.data, false, 1);
+
+    if (ret == SPI_OK_INSERT_RETURNING && SPI_processed > 0)
+    {
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        bool isnull;
+        key_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+    }
+    else
+    {
+        elog(WARNING, "Failed to store API key: SPI result %d", ret);
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
+    if (key_id > 0)
+        elog(DEBUG1, "Stored API key %ld for user %s", key_id, user_id);
+
+    return key_id;
+}
+
+/*
+ * orochi_auth_revoke_api_key_db
+ *    Mark an API key as revoked in the database
+ *
+ * Parameters:
+ *   key_id    - ID of the key to revoke (if known)
+ *   prefix    - Key prefix to identify the key (alternative to key_id)
+ *   user_id   - User ID for ownership verification
+ *
+ * Returns: true if key was revoked, false otherwise
+ */
+bool
+orochi_auth_revoke_api_key_db(int64 key_id, const char *prefix, const char *user_id)
+{
+    StringInfoData query;
+    int ret;
+    bool success = false;
+
+    if (user_id == NULL)
+    {
+        elog(WARNING, "orochi_auth_revoke_api_key_db: NULL user_id");
+        return false;
+    }
+
+    if (key_id <= 0 && (prefix == NULL || strlen(prefix) == 0))
+    {
+        elog(WARNING, "orochi_auth_revoke_api_key_db: must specify key_id or prefix");
+        return false;
+    }
+
+    /* Ensure the table exists */
+    orochi_auth_ensure_api_keys_table();
+
+    initStringInfo(&query);
+
+    if (key_id > 0)
+    {
+        /* Revoke by key_id */
+        appendStringInfo(&query,
+            "UPDATE orochi.orochi_api_keys "
+            "SET is_revoked = TRUE, revoked_at = NOW() "
+            "WHERE key_id = %ld AND user_id = %s AND is_revoked = FALSE",
+            key_id,
+            quote_literal_cstr(user_id));
+    }
+    else
+    {
+        /* Revoke by prefix (the key_id passed in is actually the prefix string) */
+        appendStringInfo(&query,
+            "UPDATE orochi.orochi_api_keys "
+            "SET is_revoked = TRUE, revoked_at = NOW() "
+            "WHERE prefix = %s AND user_id = %s AND is_revoked = FALSE",
+            quote_literal_cstr(prefix),
+            quote_literal_cstr(user_id));
+    }
+
+    SPI_connect();
+    ret = SPI_execute(query.data, false, 0);
+
+    if (ret == SPI_OK_UPDATE && SPI_processed > 0)
+    {
+        success = true;
+        elog(DEBUG1, "Revoked API key for user %s", user_id);
+    }
+    else if (ret == SPI_OK_UPDATE)
+    {
+        elog(WARNING, "API key not found or already revoked");
+    }
+    else
+    {
+        elog(WARNING, "Failed to revoke API key: SPI result %d", ret);
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
+    return success;
+}
+
+/*
+ * orochi_auth_update_api_key_usage
+ *    Update the last_used_at timestamp for an API key
+ */
+void
+orochi_auth_update_api_key_usage(const char *key_hash)
+{
+    StringInfoData query;
+
+    if (key_hash == NULL)
+        return;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "UPDATE orochi.orochi_api_keys "
+        "SET last_used_at = NOW() "
+        "WHERE key_hash = %s AND is_revoked = FALSE",
+        quote_literal_cstr(key_hash));
+
+    SPI_connect();
+    SPI_execute(query.data, false, 0);
+    SPI_finish();
+
+    pfree(query.data);
+}
+
+/*
+ * orochi_auth_list_api_keys_db
+ *    Query API keys for a user from the database
+ *
+ * Parameters:
+ *   user_id       - User ID to list keys for
+ *   include_revoked - Whether to include revoked keys
+ *   keys_out      - Output array of API key info structures
+ *   max_keys      - Maximum number of keys to return
+ *
+ * Returns: Number of keys found
+ */
+int
+orochi_auth_list_api_keys_db(const char *user_id,
+                             bool include_revoked,
+                             OrochiApiKeyInfo **keys_out,
+                             int max_keys)
+{
+    StringInfoData query;
+    int ret;
+    int key_count = 0;
+    uint64 i;
+
+    if (user_id == NULL || keys_out == NULL || max_keys <= 0)
+    {
+        elog(WARNING, "orochi_auth_list_api_keys_db: invalid parameters");
+        return 0;
+    }
+
+    /* Ensure the table exists */
+    orochi_auth_ensure_api_keys_table();
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "SELECT key_id, prefix, name, user_id, tenant_id, "
+        "created_at, last_used_at, expires_at, is_revoked "
+        "FROM orochi.orochi_api_keys "
+        "WHERE user_id = %s",
+        quote_literal_cstr(user_id));
+
+    if (!include_revoked)
+    {
+        appendStringInfoString(&query, " AND is_revoked = FALSE");
+    }
+
+    appendStringInfo(&query, " ORDER BY created_at DESC LIMIT %d", max_keys);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, true, max_keys);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0)
+    {
+        key_count = (int) SPI_processed;
+        *keys_out = (OrochiApiKeyInfo *) palloc0(sizeof(OrochiApiKeyInfo) * key_count);
+
+        for (i = 0; i < SPI_processed; i++)
+        {
+            HeapTuple tuple = SPI_tuptable->vals[i];
+            TupleDesc tupdesc = SPI_tuptable->tupdesc;
+            bool isnull;
+            OrochiApiKeyInfo *key = &((*keys_out)[i]);
+            char *str_val;
+
+            /* key_id */
+            key->key_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+
+            /* prefix */
+            str_val = SPI_getvalue(tuple, tupdesc, 2);
+            if (str_val != NULL)
+            {
+                strlcpy(key->prefix, str_val, sizeof(key->prefix));
+                pfree(str_val);
+            }
+
+            /* name */
+            str_val = SPI_getvalue(tuple, tupdesc, 3);
+            if (str_val != NULL)
+            {
+                strlcpy(key->name, str_val, sizeof(key->name));
+                pfree(str_val);
+            }
+
+            /* user_id */
+            str_val = SPI_getvalue(tuple, tupdesc, 4);
+            if (str_val != NULL)
+            {
+                strlcpy(key->user_id, str_val, sizeof(key->user_id));
+                pfree(str_val);
+            }
+
+            /* tenant_id */
+            str_val = SPI_getvalue(tuple, tupdesc, 5);
+            if (str_val != NULL)
+            {
+                strlcpy(key->tenant_id, str_val, sizeof(key->tenant_id));
+                pfree(str_val);
+            }
+
+            /* created_at */
+            key->created_at = DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 6, &isnull));
+
+            /* last_used_at */
+            SPI_getbinval(tuple, tupdesc, 7, &isnull);
+            key->has_last_used = !isnull;
+            if (!isnull)
+                key->last_used_at = DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 7, &isnull));
+
+            /* expires_at */
+            SPI_getbinval(tuple, tupdesc, 8, &isnull);
+            key->has_expires = !isnull;
+            if (!isnull)
+                key->expires_at = DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 8, &isnull));
+
+            /* is_revoked */
+            key->is_revoked = DatumGetBool(SPI_getbinval(tuple, tupdesc, 9, &isnull));
+        }
+    }
+    else
+    {
+        *keys_out = NULL;
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
+    elog(DEBUG1, "Listed %d API keys for user %s", key_count, user_id);
+
+    return key_count;
+}
+
+/*
+ * orochi_auth_lookup_api_key_db
+ *    Look up an API key by its hash
+ *
+ * Returns: The API key info if found and valid, NULL otherwise
+ */
+OrochiApiKeyInfo *
+orochi_auth_lookup_api_key_db(const char *key_hash)
+{
+    StringInfoData query;
+    OrochiApiKeyInfo *key = NULL;
+    int ret;
+
+    if (key_hash == NULL)
+        return NULL;
+
+    /* Ensure the table exists */
+    orochi_auth_ensure_api_keys_table();
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "SELECT key_id, prefix, name, user_id, tenant_id, "
+        "created_at, last_used_at, expires_at, is_revoked "
+        "FROM orochi.orochi_api_keys "
+        "WHERE key_hash = %s",
+        quote_literal_cstr(key_hash));
+
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 1);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0)
+    {
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        bool isnull;
+        char *str_val;
+
+        key = (OrochiApiKeyInfo *) palloc0(sizeof(OrochiApiKeyInfo));
+
+        /* key_id */
+        key->key_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+
+        /* prefix */
+        str_val = SPI_getvalue(tuple, tupdesc, 2);
+        if (str_val != NULL)
+        {
+            strlcpy(key->prefix, str_val, sizeof(key->prefix));
+            pfree(str_val);
+        }
+
+        /* name */
+        str_val = SPI_getvalue(tuple, tupdesc, 3);
+        if (str_val != NULL)
+        {
+            strlcpy(key->name, str_val, sizeof(key->name));
+            pfree(str_val);
+        }
+
+        /* user_id */
+        str_val = SPI_getvalue(tuple, tupdesc, 4);
+        if (str_val != NULL)
+        {
+            strlcpy(key->user_id, str_val, sizeof(key->user_id));
+            pfree(str_val);
+        }
+
+        /* tenant_id */
+        str_val = SPI_getvalue(tuple, tupdesc, 5);
+        if (str_val != NULL)
+        {
+            strlcpy(key->tenant_id, str_val, sizeof(key->tenant_id));
+            pfree(str_val);
+        }
+
+        /* created_at */
+        key->created_at = DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 6, &isnull));
+
+        /* last_used_at */
+        SPI_getbinval(tuple, tupdesc, 7, &isnull);
+        key->has_last_used = !isnull;
+        if (!isnull)
+            key->last_used_at = DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 7, &isnull));
+
+        /* expires_at */
+        SPI_getbinval(tuple, tupdesc, 8, &isnull);
+        key->has_expires = !isnull;
+        if (!isnull)
+            key->expires_at = DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 8, &isnull));
+
+        /* is_revoked */
+        key->is_revoked = DatumGetBool(SPI_getbinval(tuple, tupdesc, 9, &isnull));
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
+    return key;
+}
+
+/* ============================================================
  * Additional SQL Functions
  * ============================================================ */
 
@@ -591,8 +1109,11 @@ orochi_auth_create_api_key(PG_FUNCTION_ARGS)
     text       *name_text;
     char       *name;
     char       *user_id;
+    char       *tenant_id;
     char        api_key[128];
     char        prefix[OROCHI_AUTH_API_KEY_PREFIX_SIZE + 1];
+    char        key_hash[OROCHI_AUTH_TOKEN_HASH_SIZE + 1];
+    int64       key_id;
 
     if (PG_ARGISNULL(0))
         ereport(ERROR,
@@ -609,20 +1130,35 @@ orochi_auth_create_api_key(PG_FUNCTION_ARGS)
                 (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                  errmsg("must be authenticated to create API key")));
 
-    /* Generate API key */
+    /* Get current tenant */
+    tenant_id = orochi_auth_get_current_tenant_id();
+
+    /* Generate API key with prefix */
     snprintf(prefix, sizeof(prefix), "orochi_k");
     orochi_auth_generate_token(api_key + 9, 32);
     memcpy(api_key, prefix, 8);
     api_key[8] = '_';
     api_key[41] = '\0';
 
-    /*
-     * TODO: Store API key hash in database.
-     * For now, just return the generated key.
-     */
+    /* Hash the API key for secure storage */
+    orochi_auth_hash_token(api_key, key_hash);
+
+    /* Store API key hash in database */
+    key_id = orochi_auth_store_api_key(user_id,
+                                        tenant_id,
+                                        name,
+                                        prefix,
+                                        key_hash,
+                                        0,      /* default scopes */
+                                        0);     /* no expiry */
+
+    if (key_id < 0)
+        ereport(ERROR,
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("failed to store API key in database")));
 
     /* Audit log */
-    orochi_auth_audit_log(orochi_auth_get_current_tenant_id(),
+    orochi_auth_audit_log(tenant_id,
                            user_id, NULL,
                            OROCHI_AUDIT_API_KEY_CREATED,
                            NULL, NULL,
@@ -635,13 +1171,20 @@ PG_FUNCTION_INFO_V1(orochi_auth_revoke_api_key);
 /*
  * orochi_auth_revoke_api_key
  *    Revoke an API key
+ *
+ * The key_id parameter can be either:
+ *   - A numeric key ID (as text)
+ *   - An API key prefix string (e.g., "orochi_k")
  */
 Datum
 orochi_auth_revoke_api_key(PG_FUNCTION_ARGS)
 {
     text       *key_id_text;
-    char       *key_id;
+    char       *key_id_str;
     char       *user_id;
+    int64       numeric_key_id = 0;
+    char       *endptr;
+    bool        revoked;
 
     if (PG_ARGISNULL(0))
         ereport(ERROR,
@@ -649,7 +1192,7 @@ orochi_auth_revoke_api_key(PG_FUNCTION_ARGS)
                  errmsg("API key ID cannot be null")));
 
     key_id_text = PG_GETARG_TEXT_PP(0);
-    key_id = text_to_cstring(key_id_text);
+    key_id_str = text_to_cstring(key_id_text);
 
     user_id = orochi_auth_get_current_user_id();
     if (user_id == NULL)
@@ -657,31 +1200,69 @@ orochi_auth_revoke_api_key(PG_FUNCTION_ARGS)
                 (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                  errmsg("must be authenticated to revoke API key")));
 
-    /*
-     * TODO: Mark API key as revoked in database.
-     */
+    /* Try to parse as numeric ID first */
+    numeric_key_id = strtoll(key_id_str, &endptr, 10);
+    if (*endptr != '\0')
+    {
+        /* Not a number, treat as prefix string */
+        numeric_key_id = 0;
+    }
+
+    /* Mark API key as revoked in database */
+    if (numeric_key_id > 0)
+    {
+        revoked = orochi_auth_revoke_api_key_db(numeric_key_id, NULL, user_id);
+    }
+    else
+    {
+        revoked = orochi_auth_revoke_api_key_db(0, key_id_str, user_id);
+    }
+
+    if (!revoked)
+        ereport(ERROR,
+                (errcode(ERRCODE_NO_DATA_FOUND),
+                 errmsg("API key not found or already revoked"),
+                 errdetail("Key identifier: %s", key_id_str)));
 
     /* Audit log */
     orochi_auth_audit_log(orochi_auth_get_current_tenant_id(),
                            user_id, NULL,
                            OROCHI_AUDIT_API_KEY_REVOKED,
                            NULL, NULL,
-                           "api_key", key_id);
+                           "api_key", key_id_str);
 
     PG_RETURN_VOID();
 }
+
+/*
+ * Context structure for orochi_auth_list_api_keys SRF
+ */
+typedef struct ApiKeyListContext
+{
+    OrochiApiKeyInfo *keys;
+    int              key_count;
+} ApiKeyListContext;
 
 PG_FUNCTION_INFO_V1(orochi_auth_list_api_keys);
 /*
  * orochi_auth_list_api_keys
  *    List API keys for the current user
+ *
+ * Returns a set of records with columns:
+ *   - key_id (bigint)
+ *   - prefix (text)
+ *   - name (text)
+ *   - created_at (timestamptz)
+ *   - last_used_at (timestamptz, nullable)
+ *   - is_revoked (boolean)
  */
 Datum
 orochi_auth_list_api_keys(PG_FUNCTION_ARGS)
 {
-    FuncCallContext *funcctx;
-    TupleDesc        tupdesc;
-    char            *user_id;
+    FuncCallContext   *funcctx;
+    TupleDesc          tupdesc;
+    char              *user_id;
+    ApiKeyListContext *ctx;
 
     user_id = orochi_auth_get_current_user_id();
     if (user_id == NULL)
@@ -692,6 +1273,8 @@ orochi_auth_list_api_keys(PG_FUNCTION_ARGS)
     if (SRF_IS_FIRSTCALL())
     {
         MemoryContext oldcontext;
+        OrochiApiKeyInfo *keys = NULL;
+        int key_count;
 
         funcctx = SRF_FIRSTCALL_INIT();
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
@@ -703,21 +1286,60 @@ orochi_auth_list_api_keys(PG_FUNCTION_ARGS)
 
         funcctx->tuple_desc = BlessTupleDesc(tupdesc);
 
-        /*
-         * TODO: Query database for API keys.
-         * For now, return empty set.
-         */
-        funcctx->max_calls = 0;
+        /* Query database for API keys */
+        key_count = orochi_auth_list_api_keys_db(user_id,
+                                                  false,  /* don't include revoked */
+                                                  &keys,
+                                                  OROCHI_AUTH_MAX_API_KEYS_PER_USER);
+
+        /* Store context for subsequent calls */
+        ctx = (ApiKeyListContext *) palloc(sizeof(ApiKeyListContext));
+        ctx->keys = keys;
+        ctx->key_count = key_count;
+
+        funcctx->user_fctx = ctx;
+        funcctx->max_calls = key_count;
 
         MemoryContextSwitchTo(oldcontext);
     }
 
     funcctx = SRF_PERCALL_SETUP();
+    ctx = (ApiKeyListContext *) funcctx->user_fctx;
 
     if (funcctx->call_cntr < funcctx->max_calls)
     {
-        /* Would return API key info here */
-        SRF_RETURN_NEXT(funcctx, (Datum) 0);
+        Datum           values[6];
+        bool            nulls[6];
+        HeapTuple       tuple;
+        OrochiApiKeyInfo *key;
+
+        key = &(ctx->keys[funcctx->call_cntr]);
+
+        memset(nulls, 0, sizeof(nulls));
+
+        /* key_id */
+        values[0] = Int64GetDatum(key->key_id);
+
+        /* prefix */
+        values[1] = CStringGetTextDatum(key->prefix);
+
+        /* name */
+        values[2] = CStringGetTextDatum(key->name);
+
+        /* created_at */
+        values[3] = TimestampTzGetDatum(key->created_at);
+
+        /* last_used_at (nullable) */
+        if (key->has_last_used)
+            values[4] = TimestampTzGetDatum(key->last_used_at);
+        else
+            nulls[4] = true;
+
+        /* is_revoked */
+        values[5] = BoolGetDatum(key->is_revoked);
+
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     }
 
     SRF_RETURN_DONE(funcctx);

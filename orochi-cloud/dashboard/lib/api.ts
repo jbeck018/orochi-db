@@ -174,5 +174,137 @@ export const userApi = {
   },
 };
 
+// Providers and Tiers API
+export const configApi = {
+  getProviders: async (): Promise<ApiResponse<ProviderOption[]>> => {
+    return fetchWithAuth<ApiResponse<ProviderOption[]>>("/api/v1/config/providers");
+  },
+
+  getTiers: async (): Promise<ApiResponse<TierOption[]>> => {
+    return fetchWithAuth<ApiResponse<TierOption[]>>("/api/v1/config/tiers");
+  },
+
+  getSystemHealth: async (): Promise<ApiResponse<SystemHealth>> => {
+    return fetchWithAuth<ApiResponse<SystemHealth>>("/api/v1/config/health");
+  },
+};
+
+// Notification Preferences API
+export const notificationApi = {
+  get: async (): Promise<ApiResponse<NotificationPreferences>> => {
+    return fetchWithAuth<ApiResponse<NotificationPreferences>>("/api/v1/users/me/notifications");
+  },
+
+  update: async (preferences: NotificationPreferences): Promise<ApiResponse<NotificationPreferences>> => {
+    return fetchWithAuth<ApiResponse<NotificationPreferences>>("/api/v1/users/me/notifications", {
+      method: "PUT",
+      body: JSON.stringify(preferences),
+    });
+  },
+};
+
+// Two-Factor Authentication API
+export const twoFactorApi = {
+  getStatus: async (): Promise<ApiResponse<TwoFactorStatus>> => {
+    return fetchWithAuth<ApiResponse<TwoFactorStatus>>("/api/v1/users/me/2fa");
+  },
+
+  enable: async (): Promise<ApiResponse<TwoFactorSetup>> => {
+    return fetchWithAuth<ApiResponse<TwoFactorSetup>>("/api/v1/users/me/2fa/enable", {
+      method: "POST",
+    });
+  },
+
+  verify: async (code: string): Promise<ApiResponse<{ backupCodes: string[] }>> => {
+    return fetchWithAuth<ApiResponse<{ backupCodes: string[] }>>("/api/v1/users/me/2fa/verify", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    });
+  },
+
+  disable: async (code: string): Promise<void> => {
+    await fetchWithAuth<void>("/api/v1/users/me/2fa/disable", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    });
+  },
+};
+
+// Password Reset API
+export const passwordResetApi = {
+  requestReset: async (email: string): Promise<void> => {
+    await fetch(`${API_URL}/api/v1/auth/forgot-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+  },
+
+  resetPassword: async (token: string, newPassword: string): Promise<void> => {
+    const response = await fetch(`${API_URL}/api/v1/auth/reset-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, newPassword }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: "Password reset failed" }));
+      throw new ApiError(error.error ?? "Password reset failed", response.status);
+    }
+  },
+};
+
+// Types for new APIs
+export interface ProviderOption {
+  id: string;
+  name: string;
+  regions: RegionOption[];
+}
+
+export interface RegionOption {
+  id: string;
+  name: string;
+  location: string;
+}
+
+export interface TierOption {
+  id: string;
+  name: string;
+  description: string;
+  price: string;
+  features: string[];
+  limits: {
+    vcpu: number;
+    memoryGb: number;
+    storageGb: number;
+  };
+}
+
+export interface SystemHealth {
+  status: "operational" | "degraded" | "outage";
+  services: {
+    name: string;
+    status: "operational" | "degraded" | "outage";
+  }[];
+  lastUpdated: string;
+}
+
+export interface NotificationPreferences {
+  emailNotifications: boolean;
+  alertNotifications: boolean;
+  marketingEmails: boolean;
+}
+
+export interface TwoFactorStatus {
+  enabled: boolean;
+  enabledAt?: string;
+}
+
+export interface TwoFactorSetup {
+  secret: string;
+  qrCodeUrl: string;
+  manualEntryKey: string;
+}
+
 // Export error class
 export { ApiError };
