@@ -32,3 +32,10 @@ Thumbs.db
 .claude-flow/daemon-state.json
 .claude-flow/daemon.pid
 .claude/memory.db
+
+# Compiled test binaries
+test/unit/test_approx
+test/unit/test_pipelines
+test/unit/test_raft
+test/unit/test_vectorized
+test/unit/run_tests
