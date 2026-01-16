@@ -23,3 +23,12 @@ output_iso/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Claude-flow runtime data (keep config, ignore runtime)
+.swarm/
+.claude-flow/logs/
+.claude-flow/sessions/
+.claude-flow/data/
+.claude-flow/daemon-state.json
+.claude-flow/daemon.pid
+.claude/memory.db
