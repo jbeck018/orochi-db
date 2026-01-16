@@ -1495,6 +1495,10 @@ static CDCKafkaSinkConfig *
 parse_kafka_sink_config(const char *json)
 {
     CDCKafkaSinkConfig *config;
+    Jsonb      *jb;
+    JsonbIterator *it;
+    JsonbValue  key, val;
+    JsonbIteratorToken r;
 
     config = palloc0(sizeof(CDCKafkaSinkConfig));
 
@@ -1506,7 +1510,132 @@ parse_kafka_sink_config(const char *json)
     config->retry_backoff_ms = CDC_KAFKA_DEFAULT_RETRY_BACKOFF_MS;
     config->partition = -1;
 
-    /* TODO: Parse JSON and populate config fields */
+    if (json == NULL || strlen(json) == 0)
+        return config;
+
+    /* Parse JSON string to Jsonb */
+    PG_TRY();
+    {
+        Datum jsonb_datum = DirectFunctionCall1(jsonb_in, CStringGetDatum(json));
+        jb = DatumGetJsonbP(jsonb_datum);
+    }
+    PG_CATCH();
+    {
+        FlushErrorState();
+        elog(WARNING, "CDC Kafka config: invalid JSON, using defaults");
+        return config;
+    }
+    PG_END_TRY();
+
+    /* Iterate through JSON object */
+    it = JsonbIteratorInit(&jb->root);
+    r = JsonbIteratorNext(&it, &val, false);
+
+    if (r != WJB_BEGIN_OBJECT)
+        return config;
+
+    while ((r = JsonbIteratorNext(&it, &key, true)) == WJB_KEY)
+    {
+        char *keystr;
+
+        /* Get key string */
+        if (key.type != jbvString)
+            continue;
+        keystr = pnstrdup(key.val.string.val, key.val.string.len);
+
+        /* Get value */
+        r = JsonbIteratorNext(&it, &val, true);
+
+        /* Extract fields based on key name */
+        if (strcmp(keystr, "brokers") == 0 || strcmp(keystr, "bootstrap_servers") == 0)
+        {
+            if (val.type == jbvString)
+                config->bootstrap_servers = pnstrdup(val.val.string.val, val.val.string.len);
+        }
+        else if (strcmp(keystr, "topic") == 0)
+        {
+            if (val.type == jbvString)
+                config->topic = pnstrdup(val.val.string.val, val.val.string.len);
+        }
+        else if (strcmp(keystr, "client_id") == 0 || strcmp(keystr, "key_field") == 0)
+        {
+            if (val.type == jbvString)
+                config->key_field = pnstrdup(val.val.string.val, val.val.string.len);
+        }
+        else if (strcmp(keystr, "partition") == 0)
+        {
+            if (val.type == jbvNumeric)
+                config->partition = DatumGetInt32(DirectFunctionCall1(numeric_int4,
+                                                  NumericGetDatum(val.val.numeric)));
+        }
+        else if (strcmp(keystr, "batch_size") == 0)
+        {
+            if (val.type == jbvNumeric)
+                config->batch_size = DatumGetInt32(DirectFunctionCall1(numeric_int4,
+                                                   NumericGetDatum(val.val.numeric)));
+        }
+        else if (strcmp(keystr, "linger_ms") == 0)
+        {
+            if (val.type == jbvNumeric)
+                config->linger_ms = DatumGetInt32(DirectFunctionCall1(numeric_int4,
+                                                  NumericGetDatum(val.val.numeric)));
+        }
+        else if (strcmp(keystr, "compression_type") == 0 || strcmp(keystr, "compression") == 0)
+        {
+            if (val.type == jbvString)
+                config->compression_type = pnstrdup(val.val.string.val, val.val.string.len);
+        }
+        else if (strcmp(keystr, "security_protocol") == 0 || strcmp(keystr, "security") == 0)
+        {
+            if (val.type == jbvString)
+                config->security_protocol = pnstrdup(val.val.string.val, val.val.string.len);
+        }
+        else if (strcmp(keystr, "sasl_mechanism") == 0)
+        {
+            if (val.type == jbvString)
+                config->sasl_mechanism = pnstrdup(val.val.string.val, val.val.string.len);
+        }
+        else if (strcmp(keystr, "sasl_username") == 0 || strcmp(keystr, "username") == 0)
+        {
+            if (val.type == jbvString)
+                config->sasl_username = pnstrdup(val.val.string.val, val.val.string.len);
+        }
+        else if (strcmp(keystr, "sasl_password") == 0 || strcmp(keystr, "password") == 0)
+        {
+            if (val.type == jbvString)
+                config->sasl_password = pnstrdup(val.val.string.val, val.val.string.len);
+        }
+        else if (strcmp(keystr, "acks") == 0)
+        {
+            if (val.type == jbvNumeric)
+                config->acks = DatumGetInt32(DirectFunctionCall1(numeric_int4,
+                                             NumericGetDatum(val.val.numeric)));
+            else if (val.type == jbvString)
+            {
+                /* Handle "all" as -1 */
+                char *acks_str = pnstrdup(val.val.string.val, val.val.string.len);
+                if (strcmp(acks_str, "all") == 0)
+                    config->acks = -1;
+                else
+                    config->acks = atoi(acks_str);
+                pfree(acks_str);
+            }
+        }
+        else if (strcmp(keystr, "retries") == 0)
+        {
+            if (val.type == jbvNumeric)
+                config->retries = DatumGetInt32(DirectFunctionCall1(numeric_int4,
+                                                NumericGetDatum(val.val.numeric)));
+        }
+        else if (strcmp(keystr, "retry_backoff_ms") == 0)
+        {
+            if (val.type == jbvNumeric)
+                config->retry_backoff_ms = DatumGetInt32(DirectFunctionCall1(numeric_int4,
+                                                         NumericGetDatum(val.val.numeric)));
+        }
+
+        pfree(keystr);
+    }
 
     return config;
 }
@@ -1515,6 +1644,10 @@ static CDCWebhookSinkConfig *
 parse_webhook_sink_config(const char *json)
 {
     CDCWebhookSinkConfig *config;
+    Jsonb      *jb;
+    JsonbIterator *it;
+    JsonbValue  key, val;
+    JsonbIteratorToken r;
 
     config = palloc0(sizeof(CDCWebhookSinkConfig));
 
@@ -1528,7 +1661,173 @@ parse_webhook_sink_config(const char *json)
     config->batch_size = CDC_DEFAULT_BATCH_SIZE;
     config->batch_timeout_ms = CDC_DEFAULT_BATCH_TIMEOUT_MS;
 
-    /* TODO: Parse JSON and populate config fields */
+    if (json == NULL || strlen(json) == 0)
+        return config;
+
+    /* Parse JSON string to Jsonb */
+    PG_TRY();
+    {
+        Datum jsonb_datum = DirectFunctionCall1(jsonb_in, CStringGetDatum(json));
+        jb = DatumGetJsonbP(jsonb_datum);
+    }
+    PG_CATCH();
+    {
+        FlushErrorState();
+        elog(WARNING, "CDC Webhook config: invalid JSON, using defaults");
+        return config;
+    }
+    PG_END_TRY();
+
+    /* Iterate through JSON object */
+    it = JsonbIteratorInit(&jb->root);
+    r = JsonbIteratorNext(&it, &val, false);
+
+    if (r != WJB_BEGIN_OBJECT)
+        return config;
+
+    while ((r = JsonbIteratorNext(&it, &key, true)) == WJB_KEY)
+    {
+        char *keystr;
+
+        /* Get key string */
+        if (key.type != jbvString)
+            continue;
+        keystr = pnstrdup(key.val.string.val, key.val.string.len);
+
+        /* Get value */
+        r = JsonbIteratorNext(&it, &val, true);
+
+        /* Extract fields based on key name */
+        if (strcmp(keystr, "url") == 0 || strcmp(keystr, "endpoint") == 0)
+        {
+            if (val.type == jbvString)
+                config->url = pnstrdup(val.val.string.val, val.val.string.len);
+        }
+        else if (strcmp(keystr, "method") == 0)
+        {
+            if (val.type == jbvString)
+            {
+                pfree(config->method);
+                config->method = pnstrdup(val.val.string.val, val.val.string.len);
+            }
+        }
+        else if (strcmp(keystr, "content_type") == 0)
+        {
+            if (val.type == jbvString)
+            {
+                pfree(config->content_type);
+                config->content_type = pnstrdup(val.val.string.val, val.val.string.len);
+            }
+        }
+        else if (strcmp(keystr, "headers") == 0)
+        {
+            /* Headers can be an object or array */
+            if (val.type == jbvBinary)
+            {
+                JsonbIterator *headers_it;
+                JsonbValue header_key, header_val;
+                JsonbIteratorToken hr;
+                List *header_list = NIL;
+                ListCell *lc;
+                int i;
+
+                headers_it = JsonbIteratorInit((JsonbContainer *)val.val.binary.data);
+                hr = JsonbIteratorNext(&headers_it, &header_val, false);
+
+                if (hr == WJB_BEGIN_OBJECT)
+                {
+                    /* Object format: {"key": "value", ...} */
+                    while ((hr = JsonbIteratorNext(&headers_it, &header_key, true)) == WJB_KEY)
+                    {
+                        hr = JsonbIteratorNext(&headers_it, &header_val, true);
+                        if (header_key.type == jbvString && header_val.type == jbvString)
+                        {
+                            StringInfoData hdr;
+                            initStringInfo(&hdr);
+                            appendStringInfo(&hdr, "%.*s=%.*s",
+                                           header_key.val.string.len, header_key.val.string.val,
+                                           header_val.val.string.len, header_val.val.string.val);
+                            header_list = lappend(header_list, hdr.data);
+                        }
+                    }
+                }
+                else if (hr == WJB_BEGIN_ARRAY)
+                {
+                    /* Array format: ["Header: Value", ...] */
+                    while ((hr = JsonbIteratorNext(&headers_it, &header_val, true)) != WJB_END_ARRAY)
+                    {
+                        if (hr == WJB_ELEM && header_val.type == jbvString)
+                        {
+                            header_list = lappend(header_list,
+                                                  pnstrdup(header_val.val.string.val,
+                                                          header_val.val.string.len));
+                        }
+                    }
+                }
+
+                /* Convert list to array */
+                config->num_headers = list_length(header_list);
+                if (config->num_headers > 0)
+                {
+                    config->headers = palloc(sizeof(char *) * config->num_headers);
+                    i = 0;
+                    foreach(lc, header_list)
+                    {
+                        config->headers[i++] = (char *)lfirst(lc);
+                    }
+                }
+                list_free(header_list);
+            }
+        }
+        else if (strcmp(keystr, "auth_type") == 0 || strcmp(keystr, "auth") == 0)
+        {
+            if (val.type == jbvString)
+                config->auth_type = pnstrdup(val.val.string.val, val.val.string.len);
+        }
+        else if (strcmp(keystr, "auth_credentials") == 0 || strcmp(keystr, "credentials") == 0 ||
+                 strcmp(keystr, "token") == 0 || strcmp(keystr, "api_key") == 0)
+        {
+            if (val.type == jbvString)
+                config->auth_credentials = pnstrdup(val.val.string.val, val.val.string.len);
+        }
+        else if (strcmp(keystr, "timeout_ms") == 0 || strcmp(keystr, "timeout") == 0)
+        {
+            if (val.type == jbvNumeric)
+                config->timeout_ms = DatumGetInt32(DirectFunctionCall1(numeric_int4,
+                                                   NumericGetDatum(val.val.numeric)));
+        }
+        else if (strcmp(keystr, "retry_count") == 0 || strcmp(keystr, "retries") == 0)
+        {
+            if (val.type == jbvNumeric)
+                config->retry_count = DatumGetInt32(DirectFunctionCall1(numeric_int4,
+                                                    NumericGetDatum(val.val.numeric)));
+        }
+        else if (strcmp(keystr, "retry_delay_ms") == 0)
+        {
+            if (val.type == jbvNumeric)
+                config->retry_delay_ms = DatumGetInt32(DirectFunctionCall1(numeric_int4,
+                                                       NumericGetDatum(val.val.numeric)));
+        }
+        else if (strcmp(keystr, "batch_mode") == 0 || strcmp(keystr, "batch") == 0)
+        {
+            if (val.type == jbvBool)
+                config->batch_mode = val.val.boolean;
+        }
+        else if (strcmp(keystr, "batch_size") == 0)
+        {
+            if (val.type == jbvNumeric)
+                config->batch_size = DatumGetInt32(DirectFunctionCall1(numeric_int4,
+                                                   NumericGetDatum(val.val.numeric)));
+        }
+        else if (strcmp(keystr, "batch_timeout_ms") == 0)
+        {
+            if (val.type == jbvNumeric)
+                config->batch_timeout_ms = DatumGetInt32(DirectFunctionCall1(numeric_int4,
+                                                         NumericGetDatum(val.val.numeric)));
+        }
+
+        pfree(keystr);
+    }
 
     return config;
 }
@@ -1537,6 +1836,10 @@ static CDCFileSinkConfig *
 parse_file_sink_config(const char *json)
 {
     CDCFileSinkConfig *config;
+    Jsonb      *jb;
+    JsonbIterator *it;
+    JsonbValue  key, val;
+    JsonbIteratorToken r;
 
     config = palloc0(sizeof(CDCFileSinkConfig));
 
@@ -1547,7 +1850,106 @@ parse_file_sink_config(const char *json)
     config->flush_immediate = false;
     config->pretty_print = false;
 
-    /* TODO: Parse JSON and populate config fields */
+    if (json == NULL || strlen(json) == 0)
+        return config;
+
+    /* Parse JSON string to Jsonb */
+    PG_TRY();
+    {
+        Datum jsonb_datum = DirectFunctionCall1(jsonb_in, CStringGetDatum(json));
+        jb = DatumGetJsonbP(jsonb_datum);
+    }
+    PG_CATCH();
+    {
+        FlushErrorState();
+        elog(WARNING, "CDC File config: invalid JSON, using defaults");
+        return config;
+    }
+    PG_END_TRY();
+
+    /* Iterate through JSON object */
+    it = JsonbIteratorInit(&jb->root);
+    r = JsonbIteratorNext(&it, &val, false);
+
+    if (r != WJB_BEGIN_OBJECT)
+        return config;
+
+    while ((r = JsonbIteratorNext(&it, &key, true)) == WJB_KEY)
+    {
+        char *keystr;
+
+        /* Get key string */
+        if (key.type != jbvString)
+            continue;
+        keystr = pnstrdup(key.val.string.val, key.val.string.len);
+
+        /* Get value */
+        r = JsonbIteratorNext(&it, &val, true);
+
+        /* Extract fields based on key name */
+        if (strcmp(keystr, "path") == 0 || strcmp(keystr, "file_path") == 0 ||
+            strcmp(keystr, "file") == 0)
+        {
+            if (val.type == jbvString)
+                config->file_path = pnstrdup(val.val.string.val, val.val.string.len);
+        }
+        else if (strcmp(keystr, "format") == 0 || strcmp(keystr, "rotation_pattern") == 0 ||
+                 strcmp(keystr, "pattern") == 0)
+        {
+            if (val.type == jbvString)
+                config->rotation_pattern = pnstrdup(val.val.string.val, val.val.string.len);
+        }
+        else if (strcmp(keystr, "max_file_size") == 0 || strcmp(keystr, "max_size") == 0)
+        {
+            if (val.type == jbvNumeric)
+                config->max_file_size = DatumGetInt64(DirectFunctionCall1(numeric_int8,
+                                                      NumericGetDatum(val.val.numeric)));
+            else if (val.type == jbvString)
+            {
+                /* Parse size strings like "100MB", "1GB" */
+                char *size_str = pnstrdup(val.val.string.val, val.val.string.len);
+                char *endptr;
+                int64 size = strtoll(size_str, &endptr, 10);
+
+                if (endptr != size_str)
+                {
+                    /* Check for size suffix */
+                    if (*endptr == 'K' || *endptr == 'k')
+                        size *= 1024;
+                    else if (*endptr == 'M' || *endptr == 'm')
+                        size *= 1024 * 1024;
+                    else if (*endptr == 'G' || *endptr == 'g')
+                        size *= 1024 * 1024 * 1024;
+                }
+                config->max_file_size = size;
+                pfree(size_str);
+            }
+        }
+        else if (strcmp(keystr, "max_files") == 0 || strcmp(keystr, "rotation_count") == 0)
+        {
+            if (val.type == jbvNumeric)
+                config->max_files = DatumGetInt32(DirectFunctionCall1(numeric_int4,
+                                                  NumericGetDatum(val.val.numeric)));
+        }
+        else if (strcmp(keystr, "append_mode") == 0 || strcmp(keystr, "append") == 0)
+        {
+            if (val.type == jbvBool)
+                config->append_mode = val.val.boolean;
+        }
+        else if (strcmp(keystr, "flush_immediate") == 0 || strcmp(keystr, "flush") == 0 ||
+                 strcmp(keystr, "sync") == 0)
+        {
+            if (val.type == jbvBool)
+                config->flush_immediate = val.val.boolean;
+        }
+        else if (strcmp(keystr, "pretty_print") == 0 || strcmp(keystr, "pretty") == 0)
+        {
+            if (val.type == jbvBool)
+                config->pretty_print = val.val.boolean;
+        }
+
+        pfree(keystr);
+    }
 
     return config;
 }
