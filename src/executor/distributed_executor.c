@@ -900,23 +900,65 @@ orochi_execute_aggregate_pushdown(DistributedExecutorState *state,
                                   AggPushdownPlan *agg_plan)
 {
     ListCell *lc;
+    ListCell *task_lc;
     List *partial_results = NIL;
+    int task_idx = 0;
 
     /* Phase 1: Execute partial aggregations on workers */
-    foreach(lc, agg_plan->worker_queries)
+    forboth(lc, agg_plan->worker_queries, task_lc, state->tasks)
     {
         const char *query = (const char *) lfirst(lc);
+        RemoteTask *task = (RemoteTask *) lfirst(task_lc);
         PartialAggResult *partial = palloc0(sizeof(PartialAggResult));
+        PGconn *conn;
+        PGresult *res;
 
-        /* Execute partial aggregate query */
-        /* TODO: Actually execute on worker */
-        partial->shard_id = 0;  /* Set from context */
-        partial->count = 0;
-        partial->sum = 0;
-        partial->min_val = 0;
-        partial->max_val = 0;
+        partial->shard_id = task->fragment->shard_id;
+
+        /* Get connection to worker */
+        conn = (PGconn *) orochi_get_worker_connection(task->fragment->node_id);
+        if (conn == NULL)
+        {
+            elog(WARNING, "Failed to connect to worker for aggregate pushdown");
+            partial->count = 0;
+            partial->sum = 0;
+            partial->min_val = 0;
+            partial->max_val = 0;
+            partial_results = lappend(partial_results, partial);
+            continue;
+        }
+
+        /* Execute partial aggregate query on worker */
+        res = PQexec(conn, query);
+
+        if (PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) > 0)
+        {
+            /* Parse result - expected format: count, sum, min, max */
+            int nfields = PQnfields(res);
+
+            if (nfields >= 1 && !PQgetisnull(res, 0, 0))
+                partial->count = atoll(PQgetvalue(res, 0, 0));
+            if (nfields >= 2 && !PQgetisnull(res, 0, 1))
+                partial->sum = atoll(PQgetvalue(res, 0, 1));
+            if (nfields >= 3 && !PQgetisnull(res, 0, 2))
+                partial->min_val = atoll(PQgetvalue(res, 0, 2));
+            if (nfields >= 4 && !PQgetisnull(res, 0, 3))
+                partial->max_val = atoll(PQgetvalue(res, 0, 3));
+
+            elog(DEBUG1, "Partial aggregate from shard %ld: count=%ld, sum=%ld",
+                 partial->shard_id, partial->count, partial->sum);
+        }
+        else
+        {
+            elog(WARNING, "Aggregate query failed on shard %ld: %s",
+                 partial->shard_id, PQerrorMessage(conn));
+        }
+
+        PQclear(res);
+        orochi_release_worker_connection(conn);
 
         partial_results = lappend(partial_results, partial);
+        task_idx++;
     }
 
     /* Phase 2: Combine partial results at coordinator */

@@ -762,9 +762,32 @@ orochi_drop_chunks_older_than(Oid hypertable_oid, Interval *older_than)
 void
 orochi_drop_chunk(int64 chunk_id)
 {
-    /* TODO: Drop physical chunk table */
+    StringInfoData query;
+    char chunk_table_name[NAMEDATALEN * 2];
+    int ret;
+
+    /* Build chunk table name: _orochi_internal._chunk_<id> */
+    snprintf(chunk_table_name, sizeof(chunk_table_name),
+             "_orochi_internal._chunk_%ld", chunk_id);
+
+    /* Connect to SPI to execute DROP TABLE */
+    SPI_connect();
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "DROP TABLE IF EXISTS %s CASCADE",
+        chunk_table_name);
+
+    ret = SPI_execute(query.data, false, 0);
+    if (ret != SPI_OK_UTILITY)
+        elog(WARNING, "Failed to drop chunk table %s", chunk_table_name);
+
+    pfree(query.data);
+    SPI_finish();
+
+    /* Delete chunk metadata from catalog */
     orochi_catalog_delete_chunk(chunk_id);
-    elog(DEBUG1, "Dropped chunk %ld", chunk_id);
+    elog(DEBUG1, "Dropped chunk %ld (table %s)", chunk_id, chunk_table_name);
 }
 
 /* ============================================================
@@ -1576,8 +1599,31 @@ Datum
 orochi_remove_compression_policy_sql(PG_FUNCTION_ARGS)
 {
     Oid hypertable_oid = PG_GETARG_OID(0);
-    /* TODO: Implement policy removal */
-    elog(NOTICE, "Removed compression policy from hypertable %u", hypertable_oid);
+    StringInfoData query;
+    int ret;
+    bool removed = false;
+
+    /* Remove compression policy (policy_type = 0) from catalog */
+    SPI_connect();
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "DELETE FROM orochi.orochi_policies "
+        "WHERE hypertable_oid = %u AND policy_type = 0",
+        hypertable_oid);
+
+    ret = SPI_execute(query.data, false, 0);
+    if (ret == SPI_OK_DELETE && SPI_processed > 0)
+        removed = true;
+
+    pfree(query.data);
+    SPI_finish();
+
+    if (removed)
+        elog(NOTICE, "Removed compression policy from hypertable %u", hypertable_oid);
+    else
+        elog(NOTICE, "No compression policy found for hypertable %u", hypertable_oid);
+
     PG_RETURN_VOID();
 }
 
@@ -1596,8 +1642,31 @@ Datum
 orochi_remove_retention_policy_sql(PG_FUNCTION_ARGS)
 {
     Oid hypertable_oid = PG_GETARG_OID(0);
-    /* TODO: Implement policy removal */
-    elog(NOTICE, "Removed retention policy from hypertable %u", hypertable_oid);
+    StringInfoData query;
+    int ret;
+    bool removed = false;
+
+    /* Remove retention policy (policy_type = 1) from catalog */
+    SPI_connect();
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "DELETE FROM orochi.orochi_policies "
+        "WHERE hypertable_oid = %u AND policy_type = 1",
+        hypertable_oid);
+
+    ret = SPI_execute(query.data, false, 0);
+    if (ret == SPI_OK_DELETE && SPI_processed > 0)
+        removed = true;
+
+    pfree(query.data);
+    SPI_finish();
+
+    if (removed)
+        elog(NOTICE, "Removed retention policy from hypertable %u", hypertable_oid);
+    else
+        elog(NOTICE, "No retention policy found for hypertable %u", hypertable_oid);
+
     PG_RETURN_VOID();
 }
 

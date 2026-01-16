@@ -26,8 +26,10 @@
 #include "utils/datum.h"
 #include "utils/fmgroids.h"
 #include "utils/memutils.h"
+#include "utils/hashutils.h"
 #include "utils/rel.h"
 #include "utils/syscache.h"
+#include "utils/typcache.h"
 
 #include "../orochi.h"
 #include "../core/catalog.h"
@@ -187,7 +189,57 @@ columnar_select_compression(Oid type_oid, Datum *sample_values, int sample_count
         case TEXTOID:
         case VARCHAROID:
         case BPCHAROID:
-            /* TODO: Analyze cardinality for dictionary encoding */
+            /*
+             * Analyze cardinality for dictionary encoding.
+             * If the ratio of unique values to total values is below a threshold,
+             * dictionary encoding is more efficient.
+             */
+            if (sample_values != NULL && sample_count > 0)
+            {
+                HTAB       *seen_values;
+                HASHCTL     hash_ctl;
+                int         unique_count = 0;
+                int         i;
+                double      cardinality_ratio;
+
+                /* Create a hash table to count unique values */
+                memset(&hash_ctl, 0, sizeof(hash_ctl));
+                hash_ctl.keysize = sizeof(uint32);
+                hash_ctl.entrysize = sizeof(uint32);
+                hash_ctl.hcxt = CurrentMemoryContext;
+
+                seen_values = hash_create("CardinalityCheck",
+                                         sample_count,
+                                         &hash_ctl,
+                                         HASH_ELEM | HASH_CONTEXT | HASH_BLOBS);
+
+                for (i = 0; i < sample_count; i++)
+                {
+                    uint32 hash_val;
+                    bool found;
+
+                    /* Compute hash of the text value */
+                    hash_val = DatumGetUInt32(hash_any((unsigned char *)
+                                              DatumGetPointer(sample_values[i]),
+                                              VARSIZE_ANY_EXHDR(DatumGetPointer(sample_values[i]))));
+
+                    hash_search(seen_values, &hash_val, HASH_ENTER, &found);
+                    if (!found)
+                        unique_count++;
+                }
+
+                hash_destroy(seen_values);
+
+                /* Calculate cardinality ratio */
+                cardinality_ratio = (double) unique_count / (double) sample_count;
+
+                /*
+                 * Use dictionary encoding if cardinality is low (< 10% unique values)
+                 * or if there are very few unique values (< 256 for byte-sized index)
+                 */
+                if (cardinality_ratio < 0.1 || unique_count < 256)
+                    return OROCHI_COMPRESS_DICTIONARY;
+            }
             return OROCHI_COMPRESS_ZSTD;
 
         default:
@@ -306,12 +358,45 @@ columnar_write_row(ColumnarWriteState *state, Datum *values, bool *nulls)
             }
 
             /* Update min/max statistics */
-            if (buf->count == 0 || !buf->has_nulls)
+            if (buf->count == 0)
             {
+                /* First non-null value: initialize min/max */
                 buf->min_value = buf->values[buf->count];
                 buf->max_value = buf->values[buf->count];
             }
-            /* TODO: Compare and update min/max */
+            else
+            {
+                /*
+                 * Compare current value with min/max and update.
+                 * Use the appropriate comparison based on type.
+                 */
+                Oid             cmp_proc;
+                TypeCacheEntry *typentry;
+                Datum           curr_value = buf->values[buf->count];
+                int             cmp_result;
+
+                typentry = lookup_type_cache(attr->atttypid,
+                                            TYPECACHE_CMP_PROC | TYPECACHE_CMP_PROC_FINFO);
+
+                if (OidIsValid(typentry->cmp_proc))
+                {
+                    /* Compare with min value */
+                    cmp_result = DatumGetInt32(FunctionCall2Coll(&typentry->cmp_proc_finfo,
+                                                                  attr->attcollation,
+                                                                  curr_value,
+                                                                  buf->min_value));
+                    if (cmp_result < 0)
+                        buf->min_value = curr_value;
+
+                    /* Compare with max value */
+                    cmp_result = DatumGetInt32(FunctionCall2Coll(&typentry->cmp_proc_finfo,
+                                                                  attr->attcollation,
+                                                                  curr_value,
+                                                                  buf->max_value));
+                    if (cmp_result > 0)
+                        buf->max_value = curr_value;
+                }
+            }
         }
         else
         {
@@ -890,7 +975,19 @@ columnar_seek_to_row(ColumnarReadState *state, int64 row_number)
 
             /* Calculate chunk group and row within */
             int64 row_in_stripe = row_number - stripe->first_row_number;
-            /* TODO: Find correct chunk group */
+
+            /*
+             * Calculate the chunk group index based on row position.
+             * Each chunk group contains chunk_group_row_limit rows.
+             */
+            int32 chunk_group_row_limit = COLUMNAR_DEFAULT_CHUNK_GROUP_ROW_LIMIT;
+            int32 chunk_group_index = (int32)(row_in_stripe / chunk_group_row_limit);
+            int64 row_in_chunk = row_in_stripe % chunk_group_row_limit;
+
+            /* Load the correct chunk group */
+            state->current_chunk_group_index = chunk_group_index;
+            load_chunk_group(state, chunk_group_index);
+            state->current_row_in_chunk = row_in_chunk;
 
             return true;
         }

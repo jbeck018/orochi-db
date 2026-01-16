@@ -21,12 +21,36 @@
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/snapmgr.h"
+#include "utils/timestamp.h"
 
 #include "../orochi.h"
 #include "catalog.h"
 
 /* Cache for schema OID */
 static Oid OrochiSchemaOid = InvalidOid;
+
+/*
+ * Helper function to format an Interval as SQL literal
+ */
+static char *
+format_interval_literal(Interval *interval)
+{
+    char *str;
+    StringInfoData buf;
+
+    if (interval == NULL)
+        return "NULL";
+
+    /* Use PostgreSQL's interval_out to get string representation */
+    str = DatumGetCString(DirectFunctionCall1(interval_out,
+                                               IntervalPGetDatum(interval)));
+
+    initStringInfo(&buf);
+    appendStringInfo(&buf, "INTERVAL '%s'", str);
+
+    pfree(str);
+    return buf.data;
+}
 
 /* Forward declarations */
 static void ensure_catalog_initialized(void);
@@ -307,7 +331,7 @@ orochi_catalog_register_table(OrochiTableInfo *table_info)
         table_info->is_distributed ? "TRUE" : "FALSE",
         table_info->is_timeseries ? "TRUE" : "FALSE",
         table_info->time_column ? quote_literal_cstr(table_info->time_column) : "NULL",
-        table_info->chunk_interval ? "INTERVAL '1 day'" : "NULL",  /* TODO: proper interval */
+        format_interval_literal(table_info->chunk_interval),
         (int) table_info->compression,
         table_info->compression_level);
 
@@ -931,9 +955,9 @@ orochi_catalog_create_tiering_policy(OrochiTieringPolicy *policy)
         "enabled = EXCLUDED.enabled "
         "RETURNING policy_id",
         policy->table_oid,
-        policy->hot_to_warm ? "INTERVAL '1 day'" : "NULL",  /* TODO: proper intervals */
-        policy->warm_to_cold ? "INTERVAL '7 days'" : "NULL",
-        policy->cold_to_frozen ? "INTERVAL '30 days'" : "NULL",
+        format_interval_literal(policy->hot_to_warm),
+        format_interval_literal(policy->warm_to_cold),
+        format_interval_literal(policy->cold_to_frozen),
         policy->compress_on_tier ? "TRUE" : "FALSE",
         policy->enabled ? "TRUE" : "FALSE");
 
