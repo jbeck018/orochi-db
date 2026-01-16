@@ -590,6 +590,47 @@ CREATE TABLE IF NOT EXISTS orochi.orochi_policies (
     UNIQUE(hypertable_oid, policy_type)
 );
 
+-- Columnar storage stripes
+CREATE TABLE IF NOT EXISTS orochi.orochi_stripes (
+    stripe_id BIGSERIAL PRIMARY KEY,
+    table_oid OID NOT NULL REFERENCES orochi.orochi_tables(table_oid) ON DELETE CASCADE,
+    first_row_number BIGINT NOT NULL,
+    row_count BIGINT NOT NULL,
+    column_count INTEGER NOT NULL,
+    chunk_group_count INTEGER NOT NULL DEFAULT 1,
+    data_offset BIGINT,
+    data_size BIGINT,
+    metadata_offset BIGINT,
+    metadata_size BIGINT,
+    compression INTEGER NOT NULL DEFAULT 0,  -- 0=none, 1=lz4, 2=zstd, etc.
+    is_flushed BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Columnar storage column chunks (for skip list/predicate pushdown)
+CREATE TABLE IF NOT EXISTS orochi.orochi_column_chunks (
+    chunk_id BIGSERIAL PRIMARY KEY,
+    stripe_id BIGINT NOT NULL REFERENCES orochi.orochi_stripes(stripe_id) ON DELETE CASCADE,
+    chunk_group_index INTEGER NOT NULL,
+    column_index SMALLINT NOT NULL,
+    column_type OID NOT NULL,
+    value_count BIGINT NOT NULL,
+    null_count BIGINT NOT NULL DEFAULT 0,
+    has_nulls BOOLEAN NOT NULL DEFAULT FALSE,
+    compressed_size BIGINT NOT NULL,
+    decompressed_size BIGINT NOT NULL,
+    compression INTEGER NOT NULL DEFAULT 0,
+    -- Min/max statistics for predicate pushdown
+    min_value BYTEA,
+    max_value BYTEA,
+    min_is_null BOOLEAN NOT NULL DEFAULT FALSE,
+    max_is_null BOOLEAN NOT NULL DEFAULT FALSE,
+    -- Storage location
+    data_offset BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(stripe_id, chunk_group_index, column_index)
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_shards_table ON orochi.orochi_shards(table_oid);
 CREATE INDEX IF NOT EXISTS idx_shards_node ON orochi.orochi_shards(node_id);
@@ -598,6 +639,10 @@ CREATE INDEX IF NOT EXISTS idx_chunks_range ON orochi.orochi_chunks(range_start,
 CREATE INDEX IF NOT EXISTS idx_dimensions_hypertable ON orochi.orochi_dimensions(hypertable_oid);
 CREATE INDEX IF NOT EXISTS idx_policies_hypertable ON orochi.orochi_policies(hypertable_oid);
 CREATE INDEX IF NOT EXISTS idx_policies_active ON orochi.orochi_policies(is_active) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_stripes_table ON orochi.orochi_stripes(table_oid);
+CREATE INDEX IF NOT EXISTS idx_stripes_flushed ON orochi.orochi_stripes(is_flushed) WHERE is_flushed = TRUE;
+CREATE INDEX IF NOT EXISTS idx_column_chunks_stripe ON orochi.orochi_column_chunks(stripe_id);
+CREATE INDEX IF NOT EXISTS idx_column_chunks_stats ON orochi.orochi_column_chunks(stripe_id, column_index);
 
 -- ============================================================
 -- Information Views

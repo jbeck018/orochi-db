@@ -276,6 +276,13 @@ extern void orochi_catalog_update_stripe_status(int64 stripe_id, bool is_flushed
 extern void orochi_catalog_create_column_chunk(OrochiColumnChunk *chunk);
 
 /*
+ * Update column chunk min/max statistics
+ */
+extern void orochi_catalog_update_column_stats(int64 stripe_id, int16 column_index,
+                                               Datum min_value, Datum max_value,
+                                               Oid type_oid);
+
+/*
  * Get column chunks for a stripe
  */
 extern List *orochi_catalog_get_stripe_columns(int64 stripe_id);

@@ -1399,7 +1399,166 @@ orochi_catalog_delete_continuous_agg(Oid view_oid)
 void
 orochi_catalog_create_column_chunk(OrochiColumnChunk *chunk)
 {
-    /* TODO: Implement column chunk creation */
+    StringInfoData query;
+    int ret;
+
+    if (chunk == NULL)
+        return;
+
+    initStringInfo(&query);
+
+    /* Convert min/max Datum values to bytea for storage */
+    appendStringInfo(&query,
+        "INSERT INTO orochi.orochi_column_chunks "
+        "(stripe_id, chunk_group_index, column_index, column_type, "
+        "value_count, null_count, has_nulls, compressed_size, decompressed_size, "
+        "compression, min_is_null, max_is_null) "
+        "VALUES (%ld, 0, %d, %u, %ld, %ld, %s, %ld, %ld, %d, %s, %s) "
+        "ON CONFLICT (stripe_id, chunk_group_index, column_index) DO UPDATE SET "
+        "value_count = EXCLUDED.value_count, "
+        "null_count = EXCLUDED.null_count, "
+        "has_nulls = EXCLUDED.has_nulls, "
+        "compressed_size = EXCLUDED.compressed_size, "
+        "decompressed_size = EXCLUDED.decompressed_size, "
+        "compression = EXCLUDED.compression",
+        chunk->stripe_id,
+        chunk->column_index,
+        (unsigned int) INT8OID, /* Default to int8 for now */
+        chunk->value_count,
+        chunk->null_count,
+        chunk->has_nulls ? "TRUE" : "FALSE",
+        chunk->compressed_size,
+        chunk->decompressed_size,
+        (int) chunk->compression,
+        "FALSE",
+        "FALSE");
+
+    SPI_connect();
+    ret = SPI_execute(query.data, false, 0);
+    if (ret != SPI_OK_INSERT && ret != SPI_OK_UPDATE)
+    {
+        ereport(WARNING,
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("failed to create column chunk: %d", ret)));
+    }
+    SPI_finish();
+    pfree(query.data);
+}
+
+/*
+ * orochi_catalog_update_column_stats
+ *
+ * Update min/max statistics for a column chunk.
+ */
+void
+orochi_catalog_update_column_stats(int64 stripe_id, int16 column_index,
+                                   Datum min_value, Datum max_value,
+                                   Oid type_oid)
+{
+    StringInfoData query;
+    int ret;
+    char *min_str = NULL;
+    char *max_str = NULL;
+    Oid out_func;
+    bool is_varlena;
+
+    /* Get the output function for the type */
+    getTypeOutputInfo(type_oid, &out_func, &is_varlena);
+
+    /* Convert Datum values to text representation */
+    min_str = OidOutputFunctionCall(out_func, min_value);
+    max_str = OidOutputFunctionCall(out_func, max_value);
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "UPDATE orochi.orochi_column_chunks SET "
+        "column_type = %u, "
+        "min_value = E'\\\\x%s', "
+        "max_value = E'\\\\x%s', "
+        "min_is_null = FALSE, "
+        "max_is_null = FALSE "
+        "WHERE stripe_id = %ld AND column_index = %d",
+        (unsigned int) type_oid,
+        min_str,
+        max_str,
+        stripe_id,
+        column_index);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, false, 0);
+    if (ret != SPI_OK_UPDATE)
+    {
+        ereport(WARNING,
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("failed to update column stats for stripe %ld column %d",
+                        stripe_id, column_index)));
+    }
+    SPI_finish();
+
+    pfree(query.data);
+    if (min_str) pfree(min_str);
+    if (max_str) pfree(max_str);
+}
+
+/*
+ * orochi_catalog_get_stripe_columns
+ *
+ * Get all column chunks for a stripe.
+ */
+List *
+orochi_catalog_get_stripe_columns(int64 stripe_id)
+{
+    StringInfoData query;
+    List *result = NIL;
+    int ret;
+    uint64 i;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "SELECT chunk_id, stripe_id, chunk_group_index, column_index, column_type, "
+        "value_count, null_count, has_nulls, compressed_size, decompressed_size, "
+        "compression, min_value, max_value, min_is_null, max_is_null "
+        "FROM orochi.orochi_column_chunks WHERE stripe_id = %ld "
+        "ORDER BY chunk_group_index, column_index",
+        stripe_id);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 0);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0)
+    {
+        for (i = 0; i < SPI_processed; i++)
+        {
+            HeapTuple tuple = SPI_tuptable->vals[i];
+            TupleDesc tupdesc = SPI_tuptable->tupdesc;
+            bool isnull;
+            OrochiColumnChunk *chunk;
+
+            chunk = (OrochiColumnChunk *) palloc0(sizeof(OrochiColumnChunk));
+
+            chunk->chunk_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+            chunk->stripe_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 2, &isnull));
+            /* chunk_group_index at col 3 */
+            chunk->column_index = DatumGetInt16(SPI_getbinval(tuple, tupdesc, 4, &isnull));
+            /* column_type at col 5 - not in struct currently */
+            chunk->value_count = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 6, &isnull));
+            chunk->null_count = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 7, &isnull));
+            chunk->has_nulls = DatumGetBool(SPI_getbinval(tuple, tupdesc, 8, &isnull));
+            chunk->compressed_size = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 9, &isnull));
+            chunk->decompressed_size = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 10, &isnull));
+            chunk->compression = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 11, &isnull));
+
+            /* min_value and max_value need special handling for BYTEA to Datum */
+            /* For now, leave them as 0 - proper implementation would decode bytea */
+
+            result = lappend(result, chunk);
+        }
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
+    return result;
 }
 
 void
