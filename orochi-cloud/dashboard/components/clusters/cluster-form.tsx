@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
+import { useNavigate } from "@tanstack/react-router";
 import { Loader2, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,12 +29,11 @@ import {
   PROVIDERS,
   TIER_OPTIONS,
   type CloudProvider,
-  type ClusterTier,
   type CreateClusterForm,
 } from "@/types";
 
 export function ClusterForm(): React.JSX.Element {
-  const router = useRouter();
+  const navigate = useNavigate();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -64,7 +63,7 @@ export function ClusterForm(): React.JSX.Element {
         title: "Cluster created",
         description: `${formData.name} is being provisioned`,
       });
-      router.push(`/clusters/${response.data.id}`);
+      navigate({ to: "/clusters/$id", params: { id: response.data.id } });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create cluster");
     } finally {
@@ -353,7 +352,7 @@ export function ClusterForm(): React.JSX.Element {
         <Button
           type="button"
           variant="outline"
-          onClick={() => router.back()}
+          onClick={() => window.history.back()}
           disabled={isLoading}
         >
           Cancel

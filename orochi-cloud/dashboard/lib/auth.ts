@@ -1,5 +1,3 @@
-"use client";
-
 import type { AuthTokens, User, LoginCredentials, RegisterCredentials } from "@/types";
 
 const TOKEN_KEY = "orochi_auth_tokens";
@@ -63,7 +61,7 @@ export function getAuthHeader(): Record<string, string> {
 }
 
 // API Functions
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
 
 export async function login(credentials: LoginCredentials): Promise<{ tokens: AuthTokens; user: User }> {
   const response = await fetch(`${API_URL}/api/v1/auth/login`, {

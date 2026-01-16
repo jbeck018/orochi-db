@@ -1,8 +1,5 @@
-"use client";
-
 import * as React from "react";
-import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
   Database,
   Settings,
@@ -11,16 +8,11 @@ import {
   Square,
   RefreshCw,
   Trash2,
-  ExternalLink,
   AlertCircle,
-  CheckCircle,
-  Clock,
-  Server,
   HardDrive,
   Cpu,
   MemoryStick,
   Users,
-  Zap,
 } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
@@ -56,17 +48,19 @@ import { clusterApi } from "@/lib/api";
 import {
   formatBytes,
   formatDate,
-  formatRelativeTime,
   copyToClipboard,
   getStatusColor,
 } from "@/lib/utils";
 import type { Cluster, ClusterMetrics, ClusterMetricsHistory } from "@/types";
 
-export default function ClusterDetailPage(): React.JSX.Element {
-  const params = useParams();
-  const router = useRouter();
+export const Route = createFileRoute("/clusters/$id")({
+  component: ClusterDetailPage,
+});
+
+function ClusterDetailPage(): React.JSX.Element {
+  const { id: clusterId } = Route.useParams();
+  const navigate = useNavigate();
   const { toast } = useToast();
-  const clusterId = params.id as string;
 
   const [cluster, setCluster] = React.useState<Cluster | null>(null);
   const [metrics, setMetrics] = React.useState<ClusterMetrics | null>(null);
@@ -142,7 +136,7 @@ export default function ClusterDetailPage(): React.JSX.Element {
     try {
       await clusterApi.delete(clusterId);
       toast({ title: "Cluster deleted" });
-      router.push("/clusters");
+      navigate({ to: "/clusters" });
     } catch (error) {
       toast({
         title: "Error",
@@ -197,7 +191,7 @@ export default function ClusterDetailPage(): React.JSX.Element {
             The cluster you're looking for doesn't exist or has been deleted.
           </p>
           <Button asChild>
-            <Link href="/clusters">Back to Clusters</Link>
+            <Link to="/clusters">Back to Clusters</Link>
           </Button>
         </div>
       </DashboardLayout>
@@ -262,7 +256,7 @@ export default function ClusterDetailPage(): React.JSX.Element {
               </>
             )}
             <Button variant="outline" asChild>
-              <Link href={`/clusters/${clusterId}/settings`}>
+              <Link to="/clusters/$id/settings" params={{ id: clusterId }}>
                 <Settings className="mr-2 h-4 w-4" />
                 Settings
               </Link>
@@ -418,7 +412,7 @@ export default function ClusterDetailPage(): React.JSX.Element {
                     className="w-full justify-start"
                     asChild
                   >
-                    <Link href={`/clusters/${clusterId}/settings`}>
+                    <Link to="/clusters/$id/settings" params={{ id: clusterId }}>
                       <Settings className="mr-2 h-4 w-4" />
                       Cluster Settings
                     </Link>

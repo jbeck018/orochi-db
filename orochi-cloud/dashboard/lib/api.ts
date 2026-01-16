@@ -1,5 +1,3 @@
-"use client";
-
 import { getAuthHeader, refreshTokens, clearAuth } from "./auth";
 import type {
   Cluster,
@@ -13,7 +11,7 @@ import type {
   PaginatedResponse,
 } from "@/types";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
 
 class ApiError extends Error {
   constructor(
@@ -31,10 +29,10 @@ async function fetchWithAuth<T>(
   options: RequestInit = {}
 ): Promise<T> {
   const url = `${API_URL}${endpoint}`;
-  const headers = {
+  const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...getAuthHeader(),
-    ...options.headers,
+    ...(options.headers as Record<string, string>),
   };
 
   let response = await fetch(url, { ...options, headers });

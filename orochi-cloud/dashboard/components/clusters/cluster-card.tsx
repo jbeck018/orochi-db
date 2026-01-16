@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
+import { Link } from "@tanstack/react-router";
 import {
   Database,
   MoreVertical,
@@ -117,7 +117,7 @@ export function ClusterCard({ cluster, metrics, onRefresh }: ClusterCardProps): 
             </div>
             <div>
               <CardTitle className="text-lg">
-                <Link href={`/clusters/${cluster.id}`} className="hover:underline">
+                <Link to="/clusters/$id" params={{ id: cluster.id }} className="hover:underline">
                   {cluster.name}
                 </Link>
               </CardTitle>
@@ -134,13 +134,13 @@ export function ClusterCard({ cluster, metrics, onRefresh }: ClusterCardProps): 
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem asChild>
-                <Link href={`/clusters/${cluster.id}`}>
+                <Link to="/clusters/$id" params={{ id: cluster.id }}>
                   <ExternalLink className="mr-2 h-4 w-4" />
                   View Details
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild>
-                <Link href={`/clusters/${cluster.id}/settings`}>
+                <Link to="/clusters/$id/settings" params={{ id: cluster.id }}>
                   <Settings className="mr-2 h-4 w-4" />
                   Settings
                 </Link>

@@ -1,8 +1,5 @@
-"use client";
-
 import * as React from "react";
-import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Loader2, Save, AlertCircle, Trash2 } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
@@ -24,7 +21,6 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Separator } from "@/components/ui/separator";
 import {
   Dialog,
   DialogContent,
@@ -38,11 +34,14 @@ import { useToast } from "@/hooks/use-toast";
 import { clusterApi } from "@/lib/api";
 import type { Cluster, UpdateClusterForm } from "@/types";
 
-export default function ClusterSettingsPage(): React.JSX.Element {
-  const params = useParams();
-  const router = useRouter();
+export const Route = createFileRoute("/clusters/$id/settings")({
+  component: ClusterSettingsPage,
+});
+
+function ClusterSettingsPage(): React.JSX.Element {
+  const { id: clusterId } = Route.useParams();
+  const navigate = useNavigate();
   const { toast } = useToast();
-  const clusterId = params.id as string;
 
   const [cluster, setCluster] = React.useState<Cluster | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -113,7 +112,7 @@ export default function ClusterSettingsPage(): React.JSX.Element {
     try {
       await clusterApi.delete(clusterId);
       toast({ title: "Cluster deleted" });
-      router.push("/clusters");
+      navigate({ to: "/clusters" });
     } catch (error) {
       toast({
         title: "Error",
@@ -145,7 +144,7 @@ export default function ClusterSettingsPage(): React.JSX.Element {
           <AlertCircle className="h-12 w-12 text-muted-foreground mb-4" />
           <h2 className="text-xl font-semibold">Cluster not found</h2>
           <Button asChild className="mt-4">
-            <Link href="/clusters">Back to Clusters</Link>
+            <Link to="/clusters">Back to Clusters</Link>
           </Button>
         </div>
       </DashboardLayout>
@@ -158,7 +157,7 @@ export default function ClusterSettingsPage(): React.JSX.Element {
         {/* Header */}
         <div className="flex items-center gap-4">
           <Button variant="ghost" size="icon" asChild>
-            <Link href={`/clusters/${clusterId}`}>
+            <Link to="/clusters/$id" params={{ id: clusterId }}>
               <ArrowLeft className="h-5 w-5" />
             </Link>
           </Button>
@@ -421,7 +420,7 @@ export default function ClusterSettingsPage(): React.JSX.Element {
         {/* Save Button */}
         <div className="flex justify-end gap-4">
           <Button variant="outline" asChild>
-            <Link href={`/clusters/${clusterId}`}>Cancel</Link>
+            <Link to="/clusters/$id" params={{ id: clusterId }}>Cancel</Link>
           </Button>
           <Button onClick={handleSave} disabled={!hasChanges || isSaving}>
             {isSaving ? (

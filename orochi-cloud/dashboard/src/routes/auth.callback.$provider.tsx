@@ -1,9 +1,6 @@
-"use client";
-
 import * as React from "react";
-import { useRouter, useSearchParams, useParams } from "next/navigation";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Loader2, AlertCircle } from "lucide-react";
-import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -14,15 +11,35 @@ import {
 } from "@/components/ui/card";
 import { handleOAuthCallback, type OAuthProvider } from "@/lib/auth";
 
-export default function OAuthCallbackPage(): React.JSX.Element {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const params = useParams();
+export const Route = createFileRoute("/auth/callback/$provider")({
+  component: OAuthCallbackPage,
+  validateSearch: (
+    search: Record<string, unknown>
+  ): { code?: string; error?: string; error_description?: string } => {
+    return {
+      code: typeof search.code === "string" ? search.code : undefined,
+      error: typeof search.error === "string" ? search.error : undefined,
+      error_description:
+        typeof search.error_description === "string"
+          ? search.error_description
+          : undefined,
+    };
+  },
+  head: () => ({
+    meta: [
+      {
+        name: "description",
+        content: "Completing OAuth authentication",
+      },
+    ],
+    title: "Authenticating - Orochi Cloud",
+  }),
+});
 
-  const provider = params.provider as OAuthProvider;
-  const code = searchParams.get("code");
-  const error = searchParams.get("error");
-  const errorDescription = searchParams.get("error_description");
+function OAuthCallbackPage(): React.JSX.Element {
+  const navigate = useNavigate();
+  const { provider } = Route.useParams();
+  const { code, error, error_description: errorDescription } = Route.useSearch();
 
   const [isLoading, setIsLoading] = React.useState(true);
   const [authError, setAuthError] = React.useState<string | null>(null);
@@ -48,16 +65,18 @@ export default function OAuthCallbackPage(): React.JSX.Element {
       }
 
       try {
-        await handleOAuthCallback(provider, code);
-        router.push("/");
+        await handleOAuthCallback(provider as OAuthProvider, code);
+        navigate({ to: "/" });
       } catch (err) {
-        setAuthError(err instanceof Error ? err.message : "Authentication failed");
+        setAuthError(
+          err instanceof Error ? err.message : "Authentication failed"
+        );
         setIsLoading(false);
       }
     };
 
     authenticate();
-  }, [code, error, errorDescription, provider, router]);
+  }, [code, error, errorDescription, provider, navigate]);
 
   if (isLoading) {
     return (
@@ -88,14 +107,17 @@ export default function OAuthCallbackPage(): React.JSX.Element {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Link href="/login">
+          <Link to="/login">
             <Button className="w-full">Try again</Button>
           </Link>
           <p className="text-center text-sm text-muted-foreground">
             Having trouble?{" "}
-            <Link href="mailto:support@orochi.dev" className="text-primary hover:underline">
+            <a
+              href="mailto:support@orochi.dev"
+              className="text-primary hover:underline"
+            >
               Contact support
-            </Link>
+            </a>
           </p>
         </CardContent>
       </Card>

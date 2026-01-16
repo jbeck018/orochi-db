@@ -48,13 +48,14 @@ export function useClusterMetrics({
     }
   }, [clusterId, enabled, period]);
 
-  React.useEffect(() => {
+  React.useEffect((): (() => void) | undefined => {
     fetchMetrics();
 
     if (enabled && pollInterval > 0) {
       const interval = setInterval(fetchMetrics, pollInterval);
       return () => clearInterval(interval);
     }
+    return undefined;
   }, [fetchMetrics, enabled, pollInterval]);
 
   const setHistoryPeriod = async (newPeriod: "1h" | "6h" | "24h" | "7d" | "30d"): Promise<void> => {

@@ -1,12 +1,16 @@
-import Link from "next/link";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-export default function PrivacyPolicyPage(): React.JSX.Element {
+export const Route = createFileRoute("/privacy")({
+  component: PrivacyPolicyPage,
+});
+
+function PrivacyPolicyPage(): React.JSX.Element {
   return (
     <div className="min-h-screen bg-background">
       <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6 lg:px-8">
-        <Link href="/">
+        <Link to="/">
           <Button variant="ghost" className="mb-8">
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back to Home

@@ -1,7 +1,5 @@
-"use client";
-
 import * as React from "react";
-import Link from "next/link";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowLeft, Mail, Loader2, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,7 +14,20 @@ import {
 } from "@/components/ui/card";
 import { passwordResetApi } from "@/lib/api";
 
-export default function ForgotPasswordPage(): React.JSX.Element {
+export const Route = createFileRoute("/forgot-password")({
+  component: ForgotPasswordPage,
+  head: () => ({
+    meta: [
+      {
+        name: "description",
+        content: "Reset your Orochi Cloud password",
+      },
+    ],
+    title: "Forgot Password - Orochi Cloud",
+  }),
+});
+
+function ForgotPasswordPage(): React.JSX.Element {
   const [email, setEmail] = React.useState("");
   const [isLoading, setIsLoading] = React.useState(false);
   const [isSubmitted, setIsSubmitted] = React.useState(false);
@@ -62,7 +73,7 @@ export default function ForgotPasswordPage(): React.JSX.Element {
               </button>
               .
             </p>
-            <Link href="/login">
+            <Link to="/login">
               <Button variant="outline" className="w-full">
                 <ArrowLeft className="mr-2 h-4 w-4" />
                 Back to login
@@ -83,8 +94,8 @@ export default function ForgotPasswordPage(): React.JSX.Element {
           </div>
           <CardTitle>Forgot your password?</CardTitle>
           <CardDescription>
-            Enter your email address and we&apos;ll send you a link to reset your
-            password.
+            Enter your email address and we&apos;ll send you a link to reset
+            your password.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -125,7 +136,7 @@ export default function ForgotPasswordPage(): React.JSX.Element {
               )}
             </Button>
 
-            <Link href="/login">
+            <Link to="/login">
               <Button variant="ghost" className="w-full">
                 <ArrowLeft className="mr-2 h-4 w-4" />
                 Back to login

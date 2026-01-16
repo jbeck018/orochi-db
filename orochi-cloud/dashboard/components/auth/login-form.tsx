@@ -1,18 +1,16 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
-import Link from "next/link";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { login, getOAuthUrl } from "@/lib/auth";
-import { cn } from "@/lib/utils";
 
 export function LoginForm(): React.JSX.Element {
-  const router = useRouter();
+  const navigate = useNavigate();
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [showPassword, setShowPassword] = React.useState(false);
@@ -26,7 +24,7 @@ export function LoginForm(): React.JSX.Element {
 
     try {
       await login({ email, password });
-      router.push("/");
+      navigate({ to: "/" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred");
     } finally {
@@ -60,7 +58,7 @@ export function LoginForm(): React.JSX.Element {
         <div className="flex items-center justify-between">
           <Label htmlFor="password">Password</Label>
           <Link
-            href="/forgot-password"
+            to="/forgot-password"
             className="text-sm text-primary hover:underline"
           >
             Forgot password?
@@ -162,7 +160,7 @@ export function LoginForm(): React.JSX.Element {
 
       <p className="text-center text-sm text-muted-foreground">
         Don't have an account?{" "}
-        <Link href="/register" className="text-primary hover:underline">
+        <Link to="/register" className="text-primary hover:underline">
           Sign up
         </Link>
       </p>

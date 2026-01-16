@@ -1,8 +1,5 @@
-"use client";
-
 import * as React from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import Link from "next/link";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { Eye, EyeOff, Loader2, Check, X, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,10 +27,26 @@ const passwordRequirements: PasswordRequirement[] = [
   { label: "Contains number", test: (p) => /[0-9]/.test(p) },
 ];
 
-export default function ResetPasswordPage(): React.JSX.Element {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const token = searchParams.get("token");
+export const Route = createFileRoute("/reset-password")({
+  component: ResetPasswordPage,
+  validateSearch: (search: Record<string, unknown>): { token?: string } => {
+    return {
+      token: typeof search.token === "string" ? search.token : undefined,
+    };
+  },
+  head: () => ({
+    meta: [
+      {
+        name: "description",
+        content: "Reset your Orochi Cloud password",
+      },
+    ],
+    title: "Reset Password - Orochi Cloud",
+  }),
+});
+
+function ResetPasswordPage(): React.JSX.Element {
+  const { token } = Route.useSearch();
 
   const [password, setPassword] = React.useState("");
   const [confirmPassword, setConfirmPassword] = React.useState("");
@@ -42,7 +55,9 @@ export default function ResetPasswordPage(): React.JSX.Element {
   const [isSuccess, setIsSuccess] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  const isPasswordValid = passwordRequirements.every((req) => req.test(password));
+  const isPasswordValid = passwordRequirements.every((req) =>
+    req.test(password)
+  );
   const passwordsMatch = password === confirmPassword && password.length > 0;
 
   const handleSubmit = async (e: React.FormEvent): Promise<void> => {
@@ -87,7 +102,7 @@ export default function ResetPasswordPage(): React.JSX.Element {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Link href="/forgot-password">
+            <Link to="/forgot-password">
               <Button className="w-full">Request a new reset link</Button>
             </Link>
           </CardContent>
@@ -110,7 +125,7 @@ export default function ResetPasswordPage(): React.JSX.Element {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Link href="/login">
+            <Link to="/login">
               <Button className="w-full">Sign in with new password</Button>
             </Link>
           </CardContent>
@@ -127,9 +142,7 @@ export default function ResetPasswordPage(): React.JSX.Element {
             <Lock className="h-6 w-6 text-primary" />
           </div>
           <CardTitle>Reset your password</CardTitle>
-          <CardDescription>
-            Enter your new password below.
-          </CardDescription>
+          <CardDescription>Enter your new password below.</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -206,7 +219,9 @@ export default function ResetPasswordPage(): React.JSX.Element {
                 autoComplete="new-password"
               />
               {confirmPassword.length > 0 && !passwordsMatch && (
-                <p className="text-xs text-destructive">Passwords do not match</p>
+                <p className="text-xs text-destructive">
+                  Passwords do not match
+                </p>
               )}
             </div>
 

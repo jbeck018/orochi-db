@@ -1,8 +1,7 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { Link, useLocation } from "@tanstack/react-router";
 import {
   LayoutDashboard,
   Database,
@@ -43,7 +42,8 @@ const navItems: NavItem[] = [
 ];
 
 export function Sidebar({ open, onClose }: SidebarProps): React.JSX.Element {
-  const pathname = usePathname();
+  const location = useLocation();
+  const pathname = location.pathname;
 
   return (
     <>
@@ -74,7 +74,7 @@ export function Sidebar({ open, onClose }: SidebarProps): React.JSX.Element {
           {/* Create cluster button */}
           <div className="p-4">
             <Button asChild className="w-full">
-              <Link href="/clusters/new">
+              <Link to="/clusters/new">
                 <Plus className="mr-2 h-4 w-4" />
                 New Cluster
               </Link>
@@ -91,7 +91,7 @@ export function Sidebar({ open, onClose }: SidebarProps): React.JSX.Element {
               return (
                 <Link
                   key={item.href}
-                  href={item.href}
+                  to={item.href}
                   onClick={onClose}
                   className={cn(
                     "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",

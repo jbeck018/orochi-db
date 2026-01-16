@@ -1,7 +1,5 @@
-"use client";
-
 import * as React from "react";
-import { useRouter } from "next/navigation";
+import { useNavigate } from "@tanstack/react-router";
 import {
   getStoredUser,
   getStoredTokens,
@@ -30,7 +28,7 @@ interface AuthProviderProps {
 }
 
 export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element {
-  const router = useRouter();
+  const navigate = useNavigate();
   const [user, setUser] = React.useState<User | null>(null);
   const [tokens, setTokens] = React.useState<AuthTokens | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -61,7 +59,7 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
     await logoutFn();
     setUser(null);
     setTokens(null);
-    router.push("/login");
+    navigate({ to: "/login" });
   };
 
   const value: AuthContextValue = {

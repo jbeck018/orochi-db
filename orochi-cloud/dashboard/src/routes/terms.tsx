@@ -1,12 +1,16 @@
-import Link from "next/link";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-export default function TermsOfServicePage(): React.JSX.Element {
+export const Route = createFileRoute("/terms")({
+  component: TermsOfServicePage,
+});
+
+function TermsOfServicePage(): React.JSX.Element {
   return (
     <div className="min-h-screen bg-background">
       <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6 lg:px-8">
-        <Link href="/">
+        <Link to="/">
           <Button variant="ghost" className="mb-8">
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back to Home
@@ -79,7 +83,7 @@ export default function TermsOfServicePage(): React.JSX.Element {
           <section className="mt-8">
             <h2 className="text-2xl font-semibold mb-4">7. Data and Privacy</h2>
             <p>
-              Your use of the Service is also governed by our <Link href="/privacy" className="text-primary hover:underline">Privacy Policy</Link>. You retain ownership of all data you store in the Service. We implement industry-standard security measures to protect your data.
+              Your use of the Service is also governed by our <Link to="/privacy" className="text-primary hover:underline">Privacy Policy</Link>. You retain ownership of all data you store in the Service. We implement industry-standard security measures to protect your data.
             </p>
           </section>
 

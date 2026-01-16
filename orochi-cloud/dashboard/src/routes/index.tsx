@@ -1,13 +1,10 @@
-"use client";
-
 import * as React from "react";
-import Link from "next/link";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   Database,
   Plus,
   Activity,
   HardDrive,
-  Cpu,
   Users,
   TrendingUp,
   AlertCircle,
@@ -27,6 +24,10 @@ import { clusterApi, configApi, type SystemHealth } from "@/lib/api";
 import { formatBytes } from "@/lib/utils";
 import type { Cluster, ClusterMetrics } from "@/types";
 
+export const Route = createFileRoute("/")({
+  component: DashboardPage,
+});
+
 interface DashboardStats {
   totalClusters: number;
   runningClusters: number;
@@ -34,7 +35,7 @@ interface DashboardStats {
   totalConnections: number;
 }
 
-export default function DashboardPage(): React.JSX.Element {
+function DashboardPage(): React.JSX.Element {
   const [clusters, setClusters] = React.useState<Cluster[]>([]);
   const [metrics, setMetrics] = React.useState<Record<string, ClusterMetrics>>({});
   const [stats, setStats] = React.useState<DashboardStats | null>(null);
@@ -114,7 +115,7 @@ export default function DashboardPage(): React.JSX.Element {
             </p>
           </div>
           <Button asChild>
-            <Link href="/clusters/new">
+            <Link to="/clusters/new">
               <Plus className="mr-2 h-4 w-4" />
               New Cluster
             </Link>
@@ -229,7 +230,7 @@ export default function DashboardPage(): React.JSX.Element {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-semibold">Recent Clusters</h2>
             <Button variant="outline" size="sm" asChild>
-              <Link href="/clusters">View all</Link>
+              <Link to="/clusters">View all</Link>
             </Button>
           </div>
 
@@ -267,7 +268,7 @@ export default function DashboardPage(): React.JSX.Element {
                   Create your first cluster to get started
                 </p>
                 <Button asChild>
-                  <Link href="/clusters/new">
+                  <Link to="/clusters/new">
                     <Plus className="mr-2 h-4 w-4" />
                     Create Cluster
                   </Link>
@@ -280,7 +281,7 @@ export default function DashboardPage(): React.JSX.Element {
         {/* Quick Actions */}
         <div className="grid gap-4 md:grid-cols-3">
           <Card className="hover:shadow-md transition-shadow cursor-pointer">
-            <Link href="/clusters/new">
+            <Link to="/clusters/new">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Plus className="h-5 w-5 text-primary" />
@@ -294,7 +295,7 @@ export default function DashboardPage(): React.JSX.Element {
           </Card>
 
           <Card className="hover:shadow-md transition-shadow cursor-pointer">
-            <Link href="/docs">
+            <a href="https://docs.orochi.cloud" target="_blank" rel="noopener noreferrer">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <TrendingUp className="h-5 w-5 text-primary" />
@@ -304,11 +305,11 @@ export default function DashboardPage(): React.JSX.Element {
                   Learn how to use Orochi Cloud features
                 </CardDescription>
               </CardHeader>
-            </Link>
+            </a>
           </Card>
 
           <Card className="hover:shadow-md transition-shadow cursor-pointer">
-            <Link href="/support">
+            <a href="https://support.orochi.cloud" target="_blank" rel="noopener noreferrer">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <AlertCircle className="h-5 w-5 text-primary" />
@@ -318,7 +319,7 @@ export default function DashboardPage(): React.JSX.Element {
                   Contact our team for assistance
                 </CardDescription>
               </CardHeader>
-            </Link>
+            </a>
           </Card>
         </div>
       </div>

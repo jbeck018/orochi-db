@@ -1,7 +1,5 @@
-"use client";
-
 import * as React from "react";
-import Link from "next/link";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   Database,
   Plus,
@@ -17,9 +15,7 @@ import { Input } from "@/components/ui/input";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import {
   Select,
@@ -34,9 +30,13 @@ import { clusterApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { Cluster, ClusterMetrics, ClusterStatus } from "@/types";
 
+export const Route = createFileRoute("/clusters/")({
+  component: ClustersPage,
+});
+
 type ViewMode = "grid" | "list";
 
-export default function ClustersPage(): React.JSX.Element {
+function ClustersPage(): React.JSX.Element {
   const [clusters, setClusters] = React.useState<Cluster[]>([]);
   const [metrics, setMetrics] = React.useState<Record<string, ClusterMetrics>>({});
   const [isLoading, setIsLoading] = React.useState(true);
@@ -101,7 +101,7 @@ export default function ClustersPage(): React.JSX.Element {
             </p>
           </div>
           <Button asChild>
-            <Link href="/clusters/new">
+            <Link to="/clusters/new">
               <Plus className="mr-2 h-4 w-4" />
               New Cluster
             </Link>
@@ -234,7 +234,7 @@ export default function ClustersPage(): React.JSX.Element {
                     Create your first cluster to get started
                   </p>
                   <Button asChild>
-                    <Link href="/clusters/new">
+                    <Link to="/clusters/new">
                       <Plus className="mr-2 h-4 w-4" />
                       Create Cluster
                     </Link>

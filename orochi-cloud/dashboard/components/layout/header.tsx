@@ -1,8 +1,7 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useTheme } from "next-themes";
 import {
   Database,
@@ -31,7 +30,7 @@ interface HeaderProps {
 }
 
 export function Header({ onMenuClick }: HeaderProps): React.JSX.Element {
-  const router = useRouter();
+  const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
   const [user, setUser] = React.useState<UserType | null>(null);
   const [mounted, setMounted] = React.useState(false);
@@ -43,7 +42,7 @@ export function Header({ onMenuClick }: HeaderProps): React.JSX.Element {
 
   const handleLogout = async (): Promise<void> => {
     await logout();
-    router.push("/login");
+    navigate({ to: "/login" });
   };
 
   const getInitials = (name: string): string => {
@@ -68,7 +67,7 @@ export function Header({ onMenuClick }: HeaderProps): React.JSX.Element {
           <span className="sr-only">Toggle menu</span>
         </Button>
 
-        <Link href="/" className="flex items-center space-x-2">
+        <Link to="/" className="flex items-center space-x-2">
           <Database className="h-6 w-6 text-primary" />
           <span className="font-bold text-xl hidden sm:inline-block">
             Orochi Cloud
@@ -117,13 +116,13 @@ export function Header({ onMenuClick }: HeaderProps): React.JSX.Element {
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem asChild>
-                  <Link href="/settings" className="cursor-pointer">
+                  <Link to="/settings" className="cursor-pointer">
                     <User className="mr-2 h-4 w-4" />
                     Profile
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
-                  <Link href="/settings" className="cursor-pointer">
+                  <Link to="/settings" className="cursor-pointer">
                     <Settings className="mr-2 h-4 w-4" />
                     Settings
                   </Link>

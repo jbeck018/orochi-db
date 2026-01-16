@@ -1,6 +1,7 @@
-import type { Metadata } from "next";
+import * as React from "react";
+import { createFileRoute } from "@tanstack/react-router";
 import { Database } from "lucide-react";
-import { RegisterForm } from "@/components/auth/register-form";
+import { LoginForm } from "@/components/auth/login-form";
 import {
   Card,
   CardContent,
@@ -9,12 +10,20 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-export const metadata: Metadata = {
-  title: "Sign Up - Orochi Cloud",
-  description: "Create your Orochi Cloud account",
-};
+export const Route = createFileRoute("/login")({
+  component: LoginPage,
+  head: () => ({
+    meta: [
+      {
+        name: "description",
+        content: "Sign in to your Orochi Cloud account",
+      },
+    ],
+    title: "Sign In - Orochi Cloud",
+  }),
+});
 
-export default function RegisterPage(): React.JSX.Element {
+function LoginPage(): React.JSX.Element {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
       <div className="w-full max-w-md space-y-6">
@@ -23,20 +32,18 @@ export default function RegisterPage(): React.JSX.Element {
             <Database className="h-10 w-10 text-primary" />
             <span className="text-3xl font-bold">Orochi Cloud</span>
           </div>
-          <p className="text-muted-foreground">
-            PostgreSQL HTAP Platform
-          </p>
+          <p className="text-muted-foreground">PostgreSQL HTAP Platform</p>
         </div>
 
         <Card>
           <CardHeader className="space-y-1">
-            <CardTitle className="text-2xl text-center">Create an account</CardTitle>
+            <CardTitle className="text-2xl text-center">Welcome back</CardTitle>
             <CardDescription className="text-center">
-              Get started with Orochi Cloud today
+              Sign in to your account to continue
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <RegisterForm />
+            <LoginForm />
           </CardContent>
         </Card>
       </div>

@@ -1,8 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
-import Link from "next/link";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { Eye, EyeOff, Loader2, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,7 +23,7 @@ const passwordRequirements: PasswordRequirement[] = [
 ];
 
 export function RegisterForm(): React.JSX.Element {
-  const router = useRouter();
+  const navigate = useNavigate();
   const [name, setName] = React.useState("");
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
@@ -54,7 +53,7 @@ export function RegisterForm(): React.JSX.Element {
 
     try {
       await register({ name, email, password });
-      router.push("/");
+      navigate({ to: "/" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred");
     } finally {
@@ -237,18 +236,18 @@ export function RegisterForm(): React.JSX.Element {
 
       <p className="text-center text-sm text-muted-foreground">
         Already have an account?{" "}
-        <Link href="/login" className="text-primary hover:underline">
+        <Link to="/login" className="text-primary hover:underline">
           Sign in
         </Link>
       </p>
 
       <p className="text-center text-xs text-muted-foreground">
         By creating an account, you agree to our{" "}
-        <Link href="/terms" className="underline hover:text-foreground">
+        <Link to="/terms" className="underline hover:text-foreground">
           Terms of Service
         </Link>{" "}
         and{" "}
-        <Link href="/privacy" className="underline hover:text-foreground">
+        <Link to="/privacy" className="underline hover:text-foreground">
           Privacy Policy
         </Link>
         .

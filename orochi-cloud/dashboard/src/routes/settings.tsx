@@ -1,10 +1,7 @@
-"use client";
-
 import * as React from "react";
-import { useRouter } from "next/navigation";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   User,
-  Mail,
   Lock,
   Bell,
   Shield,
@@ -46,8 +43,12 @@ import { userApi, notificationApi, twoFactorApi, type TwoFactorSetup, type TwoFa
 import { getStoredUser, logout } from "@/lib/auth";
 import type { User as UserType } from "@/types";
 
-export default function SettingsPage(): React.JSX.Element {
-  const router = useRouter();
+export const Route = createFileRoute("/settings")({
+  component: SettingsPage,
+});
+
+function SettingsPage(): React.JSX.Element {
+  const navigate = useNavigate();
   const { toast } = useToast();
 
   const [user, setUser] = React.useState<UserType | null>(null);
@@ -166,7 +167,7 @@ export default function SettingsPage(): React.JSX.Element {
     try {
       await userApi.deleteAccount(deletePassword);
       await logout();
-      router.push("/login");
+      navigate({ to: "/login" });
     } catch (error) {
       toast({
         title: "Error",
@@ -758,7 +759,7 @@ export default function SettingsPage(): React.JSX.Element {
                 Copy Codes
               </Button>
               <Button onClick={() => setShowBackupCodes(false)}>
-                I&apos;ve Saved My Codes
+                I've Saved My Codes
               </Button>
             </DialogFooter>
           </DialogContent>

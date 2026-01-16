@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
+import { useNavigate } from "@tanstack/react-router";
 import { Header } from "./header";
 import { Sidebar } from "./sidebar";
 import { isAuthenticated } from "@/lib/auth";
@@ -11,17 +11,17 @@ interface DashboardLayoutProps {
 }
 
 export function DashboardLayout({ children }: DashboardLayoutProps): React.JSX.Element {
-  const router = useRouter();
+  const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(true);
 
   React.useEffect(() => {
     if (!isAuthenticated()) {
-      router.push("/login");
+      navigate({ to: "/login" });
     } else {
       setIsLoading(false);
     }
-  }, [router]);
+  }, [navigate]);
 
   if (isLoading) {
     return (

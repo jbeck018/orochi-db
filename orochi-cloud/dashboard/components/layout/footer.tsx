@@ -1,5 +1,5 @@
 import * as React from "react";
-import Link from "next/link";
+import { Link } from "@tanstack/react-router";
 
 export function Footer(): React.JSX.Element {
   const currentYear = new Date().getFullYear();
@@ -13,32 +13,38 @@ export function Footer(): React.JSX.Element {
           </p>
         </div>
         <div className="flex items-center gap-4 text-sm text-muted-foreground">
-          <Link
-            href="/docs"
+          <a
+            href="https://docs.orochi.cloud"
+            target="_blank"
+            rel="noopener noreferrer"
             className="hover:text-foreground transition-colors"
           >
             Documentation
-          </Link>
-          <Link
-            href="/support"
+          </a>
+          <a
+            href="https://support.orochi.cloud"
+            target="_blank"
+            rel="noopener noreferrer"
             className="hover:text-foreground transition-colors"
           >
             Support
-          </Link>
-          <Link
-            href="/status"
+          </a>
+          <a
+            href="https://status.orochi.cloud"
+            target="_blank"
+            rel="noopener noreferrer"
             className="hover:text-foreground transition-colors"
           >
             Status
-          </Link>
+          </a>
           <Link
-            href="/privacy"
+            to="/privacy"
             className="hover:text-foreground transition-colors"
           >
             Privacy
           </Link>
           <Link
-            href="/terms"
+            to="/terms"
             className="hover:text-foreground transition-colors"
           >
             Terms
