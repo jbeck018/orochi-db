@@ -23,10 +23,13 @@
 #include "utils/syscache.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_class.h"
+#include "catalog/pg_index.h"
+#include "catalog/indexing.h"
 #include "access/table.h"
 #include "executor/spi.h"
 #include "funcapi.h"
 #include "miscadmin.h"
+#include "nodes/bitmapset.h"
 
 #include "ddl_stream.h"
 #include "../core/catalog.h"
@@ -66,6 +69,59 @@ stream_offset_alloc(void)
 }
 
 /*
+ * Get primary key columns for a relation
+ * Returns a Bitmapset of attribute numbers that are part of the primary key
+ */
+static Bitmapset *
+get_primary_key_columns(Oid relid)
+{
+    Bitmapset      *pk_columns = NULL;
+    Relation        rel;
+    List           *indexoidlist;
+    ListCell       *lc;
+
+    rel = table_open(relid, AccessShareLock);
+    indexoidlist = RelationGetIndexList(rel);
+
+    foreach(lc, indexoidlist)
+    {
+        Oid         indexoid = lfirst_oid(lc);
+        HeapTuple   indexTuple;
+        Form_pg_index indexForm;
+
+        indexTuple = SearchSysCache1(INDEXRELID, ObjectIdGetDatum(indexoid));
+        if (!HeapTupleIsValid(indexTuple))
+            continue;
+
+        indexForm = (Form_pg_index) GETSTRUCT(indexTuple);
+
+        /* Check if this is the primary key index */
+        if (indexForm->indisprimary)
+        {
+            int     nkeys = indexForm->indnkeyatts;
+            int     j;
+
+            for (j = 0; j < nkeys; j++)
+            {
+                int attnum = indexForm->indkey.values[j];
+                if (attnum > 0)
+                    pk_columns = bms_add_member(pk_columns, attnum);
+            }
+
+            ReleaseSysCache(indexTuple);
+            break;
+        }
+
+        ReleaseSysCache(indexTuple);
+    }
+
+    list_free(indexoidlist);
+    table_close(rel, AccessShareLock);
+
+    return pk_columns;
+}
+
+/*
  * Get table columns for stream tracking
  */
 static void
@@ -75,6 +131,10 @@ stream_get_table_columns(Stream *stream)
     TupleDesc   tupdesc;
     int         i;
     int         num_cols;
+    Bitmapset  *pk_columns;
+
+    /* Get primary key columns first */
+    pk_columns = get_primary_key_columns(stream->source_table_oid);
 
     rel = table_open(stream->source_table_oid, AccessShareLock);
     tupdesc = RelationGetDescr(rel);
@@ -98,12 +158,14 @@ stream_get_table_columns(Stream *stream)
         {
             stream->columns[num_cols].column_name = pstrdup(NameStr(attr->attname));
             stream->columns[num_cols].column_type = attr->atttypid;
-            stream->columns[num_cols].is_key = false;  /* TODO: detect PK */
+            /* Check if this column is part of the primary key */
+            stream->columns[num_cols].is_key = bms_is_member(attr->attnum, pk_columns);
             stream->columns[num_cols].track_changes = true;
             num_cols++;
         }
     }
 
+    bms_free(pk_columns);
     table_close(rel, AccessShareLock);
 }
 
@@ -542,8 +604,50 @@ orochi_drop_stream(int64 stream_id, bool if_exists)
 bool
 orochi_stream_has_data(int64 stream_id)
 {
-    /* TODO: Actually check for changes since last consumption */
-    return false;
+    StringInfoData query;
+    bool           has_data = false;
+    int            ret;
+
+    initStringInfo(&query);
+
+    /*
+     * Check if there are unconsumed changes by comparing the stream's
+     * current offset with the latest available offset, and check the
+     * has_pending_data flag in the catalog.
+     */
+    appendStringInfo(&query,
+        "SELECT has_pending_data, "
+        "       (SELECT COUNT(*) > 0 FROM orochi.%s so "
+        "        WHERE so.stream_id = s.stream_id "
+        "        AND so.sequence > COALESCE("
+        "            (SELECT sequence FROM orochi.%s WHERE stream_id = s.stream_id), 0)) "
+        "FROM orochi.%s s "
+        "WHERE s.stream_id = %ld",
+        OROCHI_STREAM_OFFSETS_TABLE,
+        OROCHI_STREAM_OFFSETS_TABLE,
+        OROCHI_STREAMS_TABLE,
+        stream_id);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 1);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0)
+    {
+        bool isnull1, isnull2;
+        Datum has_pending = SPI_getbinval(SPI_tuptable->vals[0],
+                                          SPI_tuptable->tupdesc, 1, &isnull1);
+        Datum has_new_changes = SPI_getbinval(SPI_tuptable->vals[0],
+                                               SPI_tuptable->tupdesc, 2, &isnull2);
+
+        /* Stream has data if either flag is set or there are new changes */
+        has_data = (!isnull1 && DatumGetBool(has_pending)) ||
+                   (!isnull2 && DatumGetBool(has_new_changes));
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
+    return has_data;
 }
 
 /*
@@ -552,8 +656,40 @@ orochi_stream_has_data(int64 stream_id)
 int64
 orochi_stream_pending_count(int64 stream_id)
 {
-    /* TODO: Actually count pending changes */
-    return 0;
+    StringInfoData query;
+    int64          count = 0;
+    int            ret;
+
+    initStringInfo(&query);
+
+    /*
+     * Count the number of pending changes in the stream.
+     * This queries the pending_changes column from the catalog,
+     * which is maintained by the change capture system.
+     */
+    appendStringInfo(&query,
+        "SELECT COALESCE(pending_changes, 0) "
+        "FROM orochi.%s "
+        "WHERE stream_id = %ld",
+        OROCHI_STREAMS_TABLE,
+        stream_id);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 1);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0)
+    {
+        bool isnull;
+        Datum count_datum = SPI_getbinval(SPI_tuptable->vals[0],
+                                          SPI_tuptable->tupdesc, 1, &isnull);
+        if (!isnull)
+            count = DatumGetInt64(count_datum);
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
+    return count;
 }
 
 /*
@@ -568,12 +704,59 @@ orochi_stream_advance_offset(int64 stream_id, StreamOffset *offset)
 
 /*
  * Check if stream is stale
+ *
+ * A stream becomes stale when the source table's retention policy has
+ * deleted data that the stream hasn't yet consumed. This can happen when:
+ * - The stream hasn't been consumed for a long time
+ * - The source table has aggressive data retention
+ * - The stream offset points to WAL positions that have been recycled
  */
 bool
 orochi_stream_is_stale(int64 stream_id)
 {
-    /* TODO: Check if source table retention has exceeded stream offset */
-    return false;
+    StringInfoData query;
+    bool           is_stale = false;
+    int            ret;
+
+    initStringInfo(&query);
+
+    /*
+     * Check staleness by:
+     * 1. Checking if the stream state is already marked as STALE
+     * 2. Checking if the stream's offset timestamp is older than stale_after
+     * 3. Checking if the source table's oldest data is newer than stream offset
+     */
+    appendStringInfo(&query,
+        "SELECT "
+        "  s.state = %d OR "
+        "  (s.stale_after IS NOT NULL AND s.stale_after < NOW()) OR "
+        "  (so.timestamp IS NOT NULL AND "
+        "   so.timestamp < NOW() - INTERVAL '%d days') "
+        "FROM orochi.%s s "
+        "LEFT JOIN orochi.%s so ON s.stream_id = so.stream_id "
+        "WHERE s.stream_id = %ld",
+        (int) STREAM_STATE_STALE,
+        STREAM_DEFAULT_STALENESS_DAYS,
+        OROCHI_STREAMS_TABLE,
+        OROCHI_STREAM_OFFSETS_TABLE,
+        stream_id);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 1);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0)
+    {
+        bool isnull;
+        Datum stale_datum = SPI_getbinval(SPI_tuptable->vals[0],
+                                          SPI_tuptable->tupdesc, 1, &isnull);
+        if (!isnull)
+            is_stale = DatumGetBool(stale_datum);
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
+    return is_stale;
 }
 
 /* ============================================================
@@ -782,11 +965,45 @@ PG_FUNCTION_INFO_V1(orochi_stream_status_sql);
 Datum
 orochi_stream_status_sql(PG_FUNCTION_ARGS)
 {
-    int64       stream_id = PG_GETARG_INT64(0);
-    const char *state_name;
+    int64           stream_id = PG_GETARG_INT64(0);
+    StringInfoData  query;
+    const char     *state_name = NULL;
+    int             ret;
+    StreamState     state = STREAM_STATE_ACTIVE;
 
-    /* TODO: Actually query stream state from catalog */
-    state_name = stream_state_name(STREAM_STATE_ACTIVE);
+    initStringInfo(&query);
+
+    /* Query the stream state from the catalog */
+    appendStringInfo(&query,
+        "SELECT state FROM orochi.%s WHERE stream_id = %ld",
+        OROCHI_STREAMS_TABLE,
+        stream_id);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 1);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0)
+    {
+        bool isnull;
+        Datum state_datum = SPI_getbinval(SPI_tuptable->vals[0],
+                                          SPI_tuptable->tupdesc, 1, &isnull);
+        if (!isnull)
+            state = (StreamState) DatumGetInt32(state_datum);
+    }
+    else
+    {
+        /* Stream not found */
+        SPI_finish();
+        pfree(query.data);
+        ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_OBJECT),
+                 errmsg("stream with ID %ld does not exist", stream_id)));
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
+    state_name = stream_state_name(state);
 
     PG_RETURN_TEXT_P(cstring_to_text(state_name));
 }

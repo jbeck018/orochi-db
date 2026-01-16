@@ -798,28 +798,212 @@ orochi_drop_dynamic_table(int64 dynamic_table_id, bool if_exists)
 }
 
 /*
+ * Load dynamic table from catalog
+ */
+static DynamicTable *
+dynamic_table_load_from_catalog(int64 dynamic_table_id)
+{
+    StringInfoData query;
+    DynamicTable  *dt = NULL;
+    int            ret;
+
+    initStringInfo(&query);
+
+    appendStringInfo(&query,
+        "SELECT table_name, table_schema, query_text, refresh_mode, "
+        "       state, target_lag "
+        "FROM orochi.%s "
+        "WHERE dynamic_table_id = %ld",
+        OROCHI_DYNAMIC_TABLES_TABLE,
+        dynamic_table_id);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 1);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0)
+    {
+        bool isnull;
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+
+        dt = palloc0(sizeof(DynamicTable));
+        dt->dynamic_table_id = dynamic_table_id;
+
+        Datum name_datum = SPI_getbinval(tuple, tupdesc, 1, &isnull);
+        if (!isnull)
+            dt->table_name = pstrdup(TextDatumGetCString(name_datum));
+
+        Datum schema_datum = SPI_getbinval(tuple, tupdesc, 2, &isnull);
+        if (!isnull)
+            dt->table_schema = pstrdup(TextDatumGetCString(schema_datum));
+
+        Datum query_datum = SPI_getbinval(tuple, tupdesc, 3, &isnull);
+        if (!isnull)
+            dt->query_text = pstrdup(TextDatumGetCString(query_datum));
+
+        Datum mode_datum = SPI_getbinval(tuple, tupdesc, 4, &isnull);
+        if (!isnull)
+            dt->refresh_mode = (DynamicTableRefreshMode) DatumGetInt32(mode_datum);
+
+        Datum state_datum = SPI_getbinval(tuple, tupdesc, 5, &isnull);
+        if (!isnull)
+            dt->state = (DynamicTableState) DatumGetInt32(state_datum);
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
+    return dt;
+}
+
+/*
  * Refresh a dynamic table
  */
 int64
 orochi_refresh_dynamic_table(int64 dynamic_table_id)
 {
-    int64 refresh_id;
+    int64           refresh_id;
+    DynamicTable   *dt;
+    int             ret;
+    bool            success = true;
+    char           *error_msg = NULL;
+    StringInfoData  refresh_query;
+    StringInfoData  update_query;
 
+    /* Load dynamic table definition */
+    dt = dynamic_table_load_from_catalog(dynamic_table_id);
+    if (dt == NULL)
+    {
+        ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_OBJECT),
+                 errmsg("dynamic table with ID %ld does not exist", dynamic_table_id)));
+    }
+
+    /* Check if dynamic table is in a refreshable state */
+    if (dt->state == DYNAMIC_STATE_SUSPENDED)
+    {
+        dynamic_table_free(dt);
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 errmsg("dynamic table %s is suspended", dt->table_name)));
+    }
+
+    /* Create refresh record */
     refresh_id = ddl_catalog_create_refresh(dynamic_table_id);
 
-    elog(LOG, "started dynamic table %ld refresh %ld",
-         dynamic_table_id, refresh_id);
+    elog(LOG, "started dynamic table %ld (%s) refresh %ld",
+         dynamic_table_id, dt->table_name, refresh_id);
 
-    /*
-     * TODO: Actual refresh would:
-     * 1. Load dynamic table definition
-     * 2. Check source freshness
-     * 3. Execute query into materialization table
-     * 4. Update statistics
-     */
+    /* Update state to refreshing */
+    initStringInfo(&update_query);
+    appendStringInfo(&update_query,
+        "UPDATE orochi.%s SET state = %d WHERE dynamic_table_id = %ld",
+        OROCHI_DYNAMIC_TABLES_TABLE,
+        (int) DYNAMIC_STATE_REFRESHING,
+        dynamic_table_id);
 
-    /* For now, mark as succeeded */
-    ddl_catalog_finish_refresh(refresh_id, true, NULL);
+    SPI_connect();
+    SPI_execute(update_query.data, false, 0);
+    SPI_finish();
+
+    /* Execute the refresh based on mode */
+    SPI_connect();
+
+    PG_TRY();
+    {
+        initStringInfo(&refresh_query);
+
+        if (dt->refresh_mode == DYNAMIC_REFRESH_FULL)
+        {
+            /* Full refresh: truncate and insert */
+            appendStringInfo(&refresh_query,
+                "TRUNCATE TABLE %s.%s; "
+                "INSERT INTO %s.%s %s",
+                dt->table_schema, dt->table_name,
+                dt->table_schema, dt->table_name,
+                dt->query_text);
+        }
+        else
+        {
+            /* Incremental/Auto refresh: use INSERT ... ON CONFLICT or MERGE */
+            /* For simplicity, use INSERT for now */
+            appendStringInfo(&refresh_query,
+                "INSERT INTO %s.%s %s "
+                "ON CONFLICT DO NOTHING",
+                dt->table_schema, dt->table_name,
+                dt->query_text);
+        }
+
+        ret = SPI_execute(refresh_query.data, false, 0);
+
+        if (ret < 0)
+        {
+            success = false;
+            error_msg = psprintf("Refresh execution failed with code %d", ret);
+        }
+        else
+        {
+            elog(LOG, "dynamic table %ld refresh %ld completed, %lu rows",
+                 dynamic_table_id, refresh_id, (unsigned long) SPI_processed);
+        }
+
+        pfree(refresh_query.data);
+    }
+    PG_CATCH();
+    {
+        /* Capture error information */
+        ErrorData *edata = CopyErrorData();
+        FlushErrorState();
+
+        success = false;
+        error_msg = pstrdup(edata->message);
+        FreeErrorData(edata);
+    }
+    PG_END_TRY();
+
+    SPI_finish();
+
+    /* Update refresh record */
+    ddl_catalog_finish_refresh(refresh_id, success, error_msg);
+
+    /* Update dynamic table state and statistics */
+    resetStringInfo(&update_query);
+
+    if (success)
+    {
+        appendStringInfo(&update_query,
+            "UPDATE orochi.%s SET "
+            "state = %d, "
+            "last_refresh_at = NOW(), "
+            "next_refresh_at = NOW() + target_lag, "
+            "total_refreshes = total_refreshes + 1, "
+            "successful_refreshes = successful_refreshes + 1 "
+            "WHERE dynamic_table_id = %ld",
+            OROCHI_DYNAMIC_TABLES_TABLE,
+            (int) DYNAMIC_STATE_ACTIVE,
+            dynamic_table_id);
+    }
+    else
+    {
+        appendStringInfo(&update_query,
+            "UPDATE orochi.%s SET "
+            "state = %d, "
+            "total_refreshes = total_refreshes + 1, "
+            "failed_refreshes = failed_refreshes + 1 "
+            "WHERE dynamic_table_id = %ld",
+            OROCHI_DYNAMIC_TABLES_TABLE,
+            (int) DYNAMIC_STATE_FAILED,
+            dynamic_table_id);
+    }
+
+    SPI_connect();
+    SPI_execute(update_query.data, false, 0);
+    SPI_finish();
+
+    pfree(update_query.data);
+    if (error_msg)
+        pfree(error_msg);
+    dynamic_table_free(dt);
 
     return refresh_id;
 }
@@ -881,12 +1065,53 @@ dynamic_table_next_refresh(DynamicTable *dt)
 
 /*
  * Get current lag for a dynamic table
+ *
+ * The lag is calculated as the difference between the current time
+ * and the last refresh time. For a more accurate calculation, we would
+ * need to track source data timestamps, but this provides a reasonable
+ * approximation for most use cases.
  */
 Interval *
 orochi_get_current_lag(int64 dynamic_table_id)
 {
-    /* TODO: Calculate actual lag from source data timestamps */
-    return NULL;
+    StringInfoData query;
+    Interval      *lag = NULL;
+    int            ret;
+
+    initStringInfo(&query);
+
+    /*
+     * Calculate the lag as the difference between NOW() and last_refresh_at.
+     * If there's no refresh yet, use the difference from created_at.
+     */
+    appendStringInfo(&query,
+        "SELECT (NOW() - COALESCE(last_refresh_at, created_at))::interval "
+        "FROM orochi.%s "
+        "WHERE dynamic_table_id = %ld",
+        OROCHI_DYNAMIC_TABLES_TABLE,
+        dynamic_table_id);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 1);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0)
+    {
+        bool isnull;
+        Datum lag_datum = SPI_getbinval(SPI_tuptable->vals[0],
+                                        SPI_tuptable->tupdesc, 1, &isnull);
+        if (!isnull)
+        {
+            /* Copy the interval to our memory context */
+            Interval *src = DatumGetIntervalP(lag_datum);
+            lag = palloc(sizeof(Interval));
+            memcpy(lag, src, sizeof(Interval));
+        }
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
+    return lag;
 }
 
 /* ============================================================
@@ -1120,11 +1345,45 @@ PG_FUNCTION_INFO_V1(orochi_dynamic_table_status_sql);
 Datum
 orochi_dynamic_table_status_sql(PG_FUNCTION_ARGS)
 {
-    int64       dt_id = PG_GETARG_INT64(0);
-    const char *state_name;
+    int64              dt_id = PG_GETARG_INT64(0);
+    StringInfoData     query;
+    const char        *state_name;
+    int                ret;
+    DynamicTableState  state = DYNAMIC_STATE_ACTIVE;
 
-    /* TODO: Actually query state from catalog */
-    state_name = dynamic_table_state_name(DYNAMIC_STATE_ACTIVE);
+    initStringInfo(&query);
+
+    /* Query the dynamic table state from the catalog */
+    appendStringInfo(&query,
+        "SELECT state FROM orochi.%s WHERE dynamic_table_id = %ld",
+        OROCHI_DYNAMIC_TABLES_TABLE,
+        dt_id);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 1);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0)
+    {
+        bool isnull;
+        Datum state_datum = SPI_getbinval(SPI_tuptable->vals[0],
+                                          SPI_tuptable->tupdesc, 1, &isnull);
+        if (!isnull)
+            state = (DynamicTableState) DatumGetInt32(state_datum);
+    }
+    else
+    {
+        /* Dynamic table not found */
+        SPI_finish();
+        pfree(query.data);
+        ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_OBJECT),
+                 errmsg("dynamic table with ID %ld does not exist", dt_id)));
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
+    state_name = dynamic_table_state_name(state);
 
     PG_RETURN_TEXT_P(cstring_to_text(state_name));
 }

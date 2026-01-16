@@ -147,27 +147,235 @@ cron_expression_describe(const char *expr)
 }
 
 /*
+ * Parse a cron field and return the next matching value
+ * Returns -1 if no match is found in the valid range
+ */
+static int
+cron_parse_field(const char *field, int current, int min_val, int max_val)
+{
+    const char *p = field;
+    int         step = 1;
+    int         range_start = min_val;
+    int         range_end = max_val;
+
+    /* Handle wildcard */
+    if (*p == '*')
+    {
+        p++;
+        if (*p == '/')
+        {
+            p++;
+            step = atoi(p);
+        }
+        /* Find next value >= current that matches the step */
+        for (int v = current; v <= max_val; v++)
+        {
+            if ((v - min_val) % step == 0)
+                return v;
+        }
+        return min_val;  /* Wrap around */
+    }
+
+    /* Handle list (comma-separated values) */
+    while (*p)
+    {
+        int val = atoi(p);
+        if (val >= current && val <= max_val)
+            return val;
+
+        /* Skip to next comma or end */
+        while (*p && *p != ',')
+            p++;
+        if (*p == ',')
+            p++;
+    }
+
+    /* No match found - return first value for wrap around */
+    return atoi(field);
+}
+
+/*
  * Calculate next occurrence of a cron expression
+ *
+ * Cron format: MIN HOUR DAY MONTH WEEKDAY
+ *   MIN: 0-59
+ *   HOUR: 0-23
+ *   DAY: 1-31
+ *   MONTH: 1-12
+ *   WEEKDAY: 0-6 (0=Sunday)
  */
 TimestampTz
 cron_next_occurrence(const char *cron_expr, const char *timezone,
                      TimestampTz from)
 {
-    /*
-     * TODO: Implement proper cron parsing and next occurrence calculation.
-     * For now, return 1 hour from now as a placeholder.
-     */
+    char        fields[5][64];
+    int         field_idx = 0;
+    const char *p = cron_expr;
+    int         i = 0;
+    struct pg_tm tm_from;
+    fsec_t      fsec;
+    int         tz_offset;
     TimestampTz next;
-    Interval    one_hour;
+    int         next_minute, next_hour, next_day, next_month;
+    int         year;
+    int         iterations = 0;
+    const int   max_iterations = 366 * 24 * 60;  /* Max 1 year search */
 
-    one_hour.time = 3600 * USECS_PER_SEC;
-    one_hour.day = 0;
-    one_hour.month = 0;
+    /* Parse cron expression into 5 fields */
+    memset(fields, 0, sizeof(fields));
 
-    next = DatumGetTimestampTz(
-        DirectFunctionCall2(timestamptz_pl_interval,
-                            TimestampTzGetDatum(from),
-                            PointerGetDatum(&one_hour)));
+    while (*p && field_idx < 5)
+    {
+        while (*p && isspace(*p)) p++;
+
+        i = 0;
+        while (*p && !isspace(*p) && i < 63)
+            fields[field_idx][i++] = *p++;
+        fields[field_idx][i] = '\0';
+
+        field_idx++;
+    }
+
+    /* If we don't have 5 fields, return default (1 hour from now) */
+    if (field_idx < 5)
+    {
+        Interval one_hour;
+        one_hour.time = 3600 * USECS_PER_SEC;
+        one_hour.day = 0;
+        one_hour.month = 0;
+
+        return DatumGetTimestampTz(
+            DirectFunctionCall2(timestamptz_pl_interval,
+                                TimestampTzGetDatum(from),
+                                PointerGetDatum(&one_hour)));
+    }
+
+    /* Convert from timestamp to struct */
+    if (timestamp2tm(from, &tz_offset, &tm_from, &fsec, NULL, NULL) != 0)
+    {
+        /* Fallback on conversion error */
+        Interval one_hour;
+        one_hour.time = 3600 * USECS_PER_SEC;
+        one_hour.day = 0;
+        one_hour.month = 0;
+
+        return DatumGetTimestampTz(
+            DirectFunctionCall2(timestamptz_pl_interval,
+                                TimestampTzGetDatum(from),
+                                PointerGetDatum(&one_hour)));
+    }
+
+    /* Start from next minute */
+    tm_from.tm_min++;
+    if (tm_from.tm_min >= 60)
+    {
+        tm_from.tm_min = 0;
+        tm_from.tm_hour++;
+    }
+    if (tm_from.tm_hour >= 24)
+    {
+        tm_from.tm_hour = 0;
+        tm_from.tm_mday++;
+    }
+
+    year = tm_from.tm_year;
+
+    /* Find next matching time */
+    while (iterations < max_iterations)
+    {
+        iterations++;
+
+        /* Check month */
+        next_month = cron_parse_field(fields[3], tm_from.tm_mon, 1, 12);
+        if (next_month > tm_from.tm_mon)
+        {
+            tm_from.tm_mon = next_month;
+            tm_from.tm_mday = 1;
+            tm_from.tm_hour = 0;
+            tm_from.tm_min = 0;
+        }
+        else if (next_month < tm_from.tm_mon)
+        {
+            tm_from.tm_year++;
+            tm_from.tm_mon = next_month;
+            tm_from.tm_mday = 1;
+            tm_from.tm_hour = 0;
+            tm_from.tm_min = 0;
+            continue;
+        }
+
+        /* Check day */
+        next_day = cron_parse_field(fields[2], tm_from.tm_mday, 1, 31);
+        if (next_day > tm_from.tm_mday)
+        {
+            tm_from.tm_mday = next_day;
+            tm_from.tm_hour = 0;
+            tm_from.tm_min = 0;
+        }
+        else if (next_day < tm_from.tm_mday)
+        {
+            tm_from.tm_mon++;
+            if (tm_from.tm_mon > 12)
+            {
+                tm_from.tm_mon = 1;
+                tm_from.tm_year++;
+            }
+            tm_from.tm_mday = 1;
+            tm_from.tm_hour = 0;
+            tm_from.tm_min = 0;
+            continue;
+        }
+
+        /* Check hour */
+        next_hour = cron_parse_field(fields[1], tm_from.tm_hour, 0, 23);
+        if (next_hour > tm_from.tm_hour)
+        {
+            tm_from.tm_hour = next_hour;
+            tm_from.tm_min = 0;
+        }
+        else if (next_hour < tm_from.tm_hour)
+        {
+            tm_from.tm_mday++;
+            tm_from.tm_hour = 0;
+            tm_from.tm_min = 0;
+            continue;
+        }
+
+        /* Check minute */
+        next_minute = cron_parse_field(fields[0], tm_from.tm_min, 0, 59);
+        if (next_minute >= tm_from.tm_min)
+        {
+            tm_from.tm_min = next_minute;
+            break;  /* Found a match */
+        }
+        else
+        {
+            tm_from.tm_hour++;
+            if (tm_from.tm_hour >= 24)
+            {
+                tm_from.tm_hour = 0;
+                tm_from.tm_mday++;
+            }
+            tm_from.tm_min = 0;
+            continue;
+        }
+    }
+
+    /* Convert back to timestamp */
+    tm_from.tm_sec = 0;
+    if (tm2timestamp(&tm_from, 0, &tz_offset, &next) != 0)
+    {
+        /* Fallback on conversion error */
+        Interval one_hour;
+        one_hour.time = 3600 * USECS_PER_SEC;
+        one_hour.day = 0;
+        one_hour.month = 0;
+
+        return DatumGetTimestampTz(
+            DirectFunctionCall2(timestamptz_pl_interval,
+                                TimestampTzGetDatum(from),
+                                PointerGetDatum(&one_hour)));
+    }
 
     return next;
 }
@@ -202,11 +410,61 @@ ddl_parse_schedule(const char *schedule_str)
         return schedule;
     }
 
-    /* Check for interval format */
+    /* Check for interval format (e.g., "5 MINUTE", "1 HOUR", "30 SECONDS") */
     if (isdigit(*p))
     {
+        int   value;
+        char  unit[32];
+        int   unit_len = 0;
+
         schedule->type = SCHEDULE_TYPE_INTERVAL;
-        /* TODO: Parse interval */
+        schedule->interval = palloc0(sizeof(Interval));
+
+        /* Parse numeric value */
+        value = atoi(p);
+        while (*p && isdigit(*p)) p++;
+        while (*p && isspace(*p)) p++;
+
+        /* Parse unit */
+        while (*p && !isspace(*p) && unit_len < 31)
+            unit[unit_len++] = tolower(*p++);
+        unit[unit_len] = '\0';
+
+        /* Handle plural forms */
+        if (unit_len > 0 && unit[unit_len - 1] == 's')
+            unit[unit_len - 1] = '\0';
+
+        /* Convert to interval */
+        if (strcmp(unit, "second") == 0)
+        {
+            schedule->interval->time = value * USECS_PER_SEC;
+        }
+        else if (strcmp(unit, "minute") == 0)
+        {
+            schedule->interval->time = value * 60 * USECS_PER_SEC;
+        }
+        else if (strcmp(unit, "hour") == 0)
+        {
+            schedule->interval->time = value * 3600 * USECS_PER_SEC;
+        }
+        else if (strcmp(unit, "day") == 0)
+        {
+            schedule->interval->day = value;
+        }
+        else if (strcmp(unit, "week") == 0)
+        {
+            schedule->interval->day = value * 7;
+        }
+        else if (strcmp(unit, "month") == 0)
+        {
+            schedule->interval->month = value;
+        }
+        else
+        {
+            /* Default to minutes if unit not recognized */
+            schedule->interval->time = value * 60 * USECS_PER_SEC;
+        }
+
         return schedule;
     }
 
@@ -775,28 +1033,184 @@ orochi_drop_task(int64 task_id, bool if_exists)
 }
 
 /*
+ * Load task from catalog
+ */
+static Task *
+task_load_from_catalog(int64 task_id)
+{
+    StringInfoData query;
+    Task          *task = NULL;
+    int            ret;
+
+    initStringInfo(&query);
+
+    appendStringInfo(&query,
+        "SELECT task_name, task_schema, sql_text, schedule_type, "
+        "       cron_expression, timeout_seconds, state, error_limit, "
+        "       consecutive_failures "
+        "FROM orochi.%s "
+        "WHERE task_id = %ld",
+        OROCHI_TASKS_TABLE,
+        task_id);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 1);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0)
+    {
+        bool isnull;
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+
+        task = palloc0(sizeof(Task));
+        task->task_id = task_id;
+
+        Datum name_datum = SPI_getbinval(tuple, tupdesc, 1, &isnull);
+        if (!isnull)
+            task->task_name = pstrdup(TextDatumGetCString(name_datum));
+
+        Datum schema_datum = SPI_getbinval(tuple, tupdesc, 2, &isnull);
+        if (!isnull)
+            task->task_schema = pstrdup(TextDatumGetCString(schema_datum));
+
+        Datum sql_datum = SPI_getbinval(tuple, tupdesc, 3, &isnull);
+        if (!isnull)
+            task->sql_text = pstrdup(TextDatumGetCString(sql_datum));
+
+        Datum state_datum = SPI_getbinval(tuple, tupdesc, 7, &isnull);
+        if (!isnull)
+            task->state = (TaskState) DatumGetInt32(state_datum);
+
+        Datum failures_datum = SPI_getbinval(tuple, tupdesc, 9, &isnull);
+        if (!isnull)
+            task->consecutive_failures = DatumGetInt32(failures_datum);
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
+    return task;
+}
+
+/*
  * Execute a task
  */
 int64
 orochi_execute_task(int64 task_id)
 {
-    int64 run_id;
+    int64           run_id;
+    Task           *task;
+    int             ret;
+    TaskRunState    final_state = TASK_RUN_SUCCEEDED;
+    char           *error_msg = NULL;
+    StringInfoData  update_query;
 
+    /* Load task definition */
+    task = task_load_from_catalog(task_id);
+    if (task == NULL)
+    {
+        ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_OBJECT),
+                 errmsg("task with ID %ld does not exist", task_id)));
+    }
+
+    /* Check if task is in a runnable state */
+    if (task->state == TASK_STATE_SUSPENDED || task->state == TASK_STATE_FAILED)
+    {
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 errmsg("task %s is not in a runnable state", task->task_name)));
+    }
+
+    /* Create run record */
     run_id = ddl_catalog_create_task_run(task_id, GetCurrentTimestamp());
 
-    elog(LOG, "started task %ld run %ld", task_id, run_id);
+    elog(LOG, "started task %ld (%s) run %ld", task_id, task->task_name, run_id);
 
-    /*
-     * TODO: Actual execution would:
-     * 1. Load task definition
-     * 2. Check condition if any
-     * 3. Execute SQL
-     * 4. Handle errors
-     * 5. Update run status
-     */
+    /* Check condition if any */
+    if (task->condition != NULL && !task_condition_evaluate(task->condition))
+    {
+        /* Condition not met, skip execution */
+        ddl_catalog_finish_task_run(run_id, TASK_RUN_SKIPPED, "Condition not met");
+        elog(LOG, "skipped task %ld run %ld - condition not met", task_id, run_id);
+        task_free(task);
+        return run_id;
+    }
 
-    /* For now, mark as succeeded */
-    ddl_catalog_finish_task_run(run_id, TASK_RUN_SUCCEEDED, NULL);
+    /* Execute the SQL statement */
+    SPI_connect();
+
+    PG_TRY();
+    {
+        ret = SPI_execute(task->sql_text, false, 0);
+
+        if (ret < 0)
+        {
+            final_state = TASK_RUN_FAILED;
+            error_msg = psprintf("SPI execution failed with code %d", ret);
+        }
+        else
+        {
+            final_state = TASK_RUN_SUCCEEDED;
+            elog(LOG, "task %ld run %ld completed successfully, %lu rows affected",
+                 task_id, run_id, (unsigned long) SPI_processed);
+        }
+    }
+    PG_CATCH();
+    {
+        /* Capture error information */
+        ErrorData *edata = CopyErrorData();
+        FlushErrorState();
+
+        final_state = TASK_RUN_FAILED;
+        error_msg = pstrdup(edata->message);
+        FreeErrorData(edata);
+    }
+    PG_END_TRY();
+
+    SPI_finish();
+
+    /* Update run status */
+    ddl_catalog_finish_task_run(run_id, final_state, error_msg);
+
+    /* Update task state based on run result */
+    initStringInfo(&update_query);
+
+    if (final_state == TASK_RUN_SUCCEEDED)
+    {
+        /* Reset consecutive failures on success */
+        appendStringInfo(&update_query,
+            "UPDATE orochi.%s SET "
+            "consecutive_failures = 0, "
+            "last_run_at = NOW(), "
+            "next_run_at = %s "
+            "WHERE task_id = %ld",
+            OROCHI_TASKS_TABLE,
+            "NOW() + INTERVAL '1 hour'",  /* Will be recalculated by scheduler */
+            task_id);
+    }
+    else
+    {
+        /* Increment consecutive failures */
+        appendStringInfo(&update_query,
+            "UPDATE orochi.%s SET "
+            "consecutive_failures = consecutive_failures + 1, "
+            "state = CASE WHEN consecutive_failures + 1 >= error_limit THEN %d ELSE state END, "
+            "last_run_at = NOW() "
+            "WHERE task_id = %ld",
+            OROCHI_TASKS_TABLE,
+            (int) TASK_STATE_SUSPENDED,
+            task_id);
+    }
+
+    SPI_connect();
+    SPI_execute(update_query.data, false, 0);
+    SPI_finish();
+
+    pfree(update_query.data);
+    if (error_msg)
+        pfree(error_msg);
+    task_free(task);
 
     return run_id;
 }
@@ -807,7 +1221,38 @@ orochi_execute_task(int64 task_id)
 bool
 orochi_resume_task(int64 task_id)
 {
-    /* TODO: Update task state and schedule next run */
+    StringInfoData query;
+    int            ret;
+
+    initStringInfo(&query);
+
+    /* Update task state to STARTED and reset failure count */
+    appendStringInfo(&query,
+        "UPDATE orochi.%s SET "
+        "state = %d, "
+        "consecutive_failures = 0, "
+        "next_run_at = NOW() "
+        "WHERE task_id = %ld "
+        "RETURNING task_name",
+        OROCHI_TASKS_TABLE,
+        (int) TASK_STATE_STARTED,
+        task_id);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, false, 1);
+
+    if (ret != SPI_OK_UPDATE_RETURNING || SPI_processed == 0)
+    {
+        SPI_finish();
+        pfree(query.data);
+        ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_OBJECT),
+                 errmsg("task with ID %ld does not exist", task_id)));
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
     elog(LOG, "resumed task %ld", task_id);
     return true;
 }
@@ -818,7 +1263,37 @@ orochi_resume_task(int64 task_id)
 bool
 orochi_suspend_task(int64 task_id)
 {
-    /* TODO: Update task state */
+    StringInfoData query;
+    int            ret;
+
+    initStringInfo(&query);
+
+    /* Update task state to SUSPENDED */
+    appendStringInfo(&query,
+        "UPDATE orochi.%s SET "
+        "state = %d, "
+        "next_run_at = NULL "
+        "WHERE task_id = %ld "
+        "RETURNING task_name",
+        OROCHI_TASKS_TABLE,
+        (int) TASK_STATE_SUSPENDED,
+        task_id);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, false, 1);
+
+    if (ret != SPI_OK_UPDATE_RETURNING || SPI_processed == 0)
+    {
+        SPI_finish();
+        pfree(query.data);
+        ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_OBJECT),
+                 errmsg("task with ID %ld does not exist", task_id)));
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
     elog(LOG, "suspended task %ld", task_id);
     return true;
 }
@@ -885,11 +1360,82 @@ task_condition_evaluate(TaskCondition *condition)
     switch (condition->type)
     {
         case TASK_CONDITION_STREAM:
-            /* TODO: Check if stream has data */
-            return orochi_stream_has_data(condition->stream_id);
+            /* Check if stream has data using the stream functions */
+            if (condition->stream_id > 0)
+                return orochi_stream_has_data(condition->stream_id);
+            else if (condition->stream_name != NULL)
+            {
+                /* Look up stream by name to get ID */
+                StringInfoData query;
+                int64          stream_id = 0;
+                int            ret;
+
+                initStringInfo(&query);
+                appendStringInfo(&query,
+                    "SELECT stream_id FROM orochi.%s WHERE stream_name = '%s'",
+                    OROCHI_STREAMS_TABLE,
+                    condition->stream_name);
+
+                SPI_connect();
+                ret = SPI_execute(query.data, true, 1);
+
+                if (ret == SPI_OK_SELECT && SPI_processed > 0)
+                {
+                    bool isnull;
+                    Datum id_datum = SPI_getbinval(SPI_tuptable->vals[0],
+                                                   SPI_tuptable->tupdesc, 1, &isnull);
+                    if (!isnull)
+                        stream_id = DatumGetInt64(id_datum);
+                }
+
+                SPI_finish();
+                pfree(query.data);
+
+                if (stream_id > 0)
+                    return orochi_stream_has_data(stream_id);
+            }
+            return false;
 
         case TASK_CONDITION_EXPRESSION:
-            /* TODO: Execute SQL expression and check result */
+            /* Execute SQL expression and check result */
+            if (condition->expression != NULL)
+            {
+                StringInfoData query;
+                bool           result = false;
+                int            ret;
+
+                initStringInfo(&query);
+                /* Wrap the expression in a SELECT to evaluate it */
+                appendStringInfo(&query, "SELECT (%s)::boolean", condition->expression);
+
+                SPI_connect();
+
+                PG_TRY();
+                {
+                    ret = SPI_execute(query.data, true, 1);
+
+                    if (ret == SPI_OK_SELECT && SPI_processed > 0)
+                    {
+                        bool isnull;
+                        Datum result_datum = SPI_getbinval(SPI_tuptable->vals[0],
+                                                           SPI_tuptable->tupdesc, 1, &isnull);
+                        if (!isnull)
+                            result = DatumGetBool(result_datum);
+                    }
+                }
+                PG_CATCH();
+                {
+                    /* On error, treat condition as false */
+                    FlushErrorState();
+                    result = false;
+                }
+                PG_END_TRY();
+
+                SPI_finish();
+                pfree(query.data);
+
+                return result;
+            }
             return true;
 
         default:
@@ -1112,11 +1658,45 @@ PG_FUNCTION_INFO_V1(orochi_task_status_sql);
 Datum
 orochi_task_status_sql(PG_FUNCTION_ARGS)
 {
-    int64       task_id = PG_GETARG_INT64(0);
-    const char *state_name;
+    int64           task_id = PG_GETARG_INT64(0);
+    StringInfoData  query;
+    const char     *state_name;
+    int             ret;
+    TaskState       state = TASK_STATE_CREATED;
 
-    /* TODO: Actually query task state from catalog */
-    state_name = task_state_name(TASK_STATE_CREATED);
+    initStringInfo(&query);
+
+    /* Query the task state from the catalog */
+    appendStringInfo(&query,
+        "SELECT state FROM orochi.%s WHERE task_id = %ld",
+        OROCHI_TASKS_TABLE,
+        task_id);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 1);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0)
+    {
+        bool isnull;
+        Datum state_datum = SPI_getbinval(SPI_tuptable->vals[0],
+                                          SPI_tuptable->tupdesc, 1, &isnull);
+        if (!isnull)
+            state = (TaskState) DatumGetInt32(state_datum);
+    }
+    else
+    {
+        /* Task not found */
+        SPI_finish();
+        pfree(query.data);
+        ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_OBJECT),
+                 errmsg("task with ID %ld does not exist", task_id)));
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
+    state_name = task_state_name(state);
 
     PG_RETURN_TEXT_P(cstring_to_text(state_name));
 }

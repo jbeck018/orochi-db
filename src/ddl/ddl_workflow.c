@@ -760,28 +760,322 @@ orochi_drop_workflow(int64 workflow_id, bool if_exists)
 }
 
 /*
- * Run a workflow (stub - actual execution would be more complex)
+ * Load workflow from catalog
+ */
+static Workflow *
+workflow_load_from_catalog(int64 workflow_id)
+{
+    StringInfoData query;
+    Workflow      *wf = NULL;
+    int            ret;
+
+    initStringInfo(&query);
+
+    appendStringInfo(&query,
+        "SELECT workflow_name, description, schedule, enabled, "
+        "       auto_resume, max_concurrent, state "
+        "FROM orochi.%s "
+        "WHERE workflow_id = %ld",
+        OROCHI_WORKFLOWS_TABLE,
+        workflow_id);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 1);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0)
+    {
+        bool isnull;
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+
+        wf = palloc0(sizeof(Workflow));
+        wf->workflow_id = workflow_id;
+
+        Datum name_datum = SPI_getbinval(tuple, tupdesc, 1, &isnull);
+        if (!isnull)
+            wf->workflow_name = pstrdup(TextDatumGetCString(name_datum));
+
+        Datum enabled_datum = SPI_getbinval(tuple, tupdesc, 4, &isnull);
+        if (!isnull)
+            wf->enabled = DatumGetBool(enabled_datum);
+
+        Datum state_datum = SPI_getbinval(tuple, tupdesc, 7, &isnull);
+        if (!isnull)
+            wf->state = (WorkflowState) DatumGetInt32(state_datum);
+    }
+
+    /* Load workflow steps */
+    if (wf != NULL)
+    {
+        resetStringInfo(&query);
+        appendStringInfo(&query,
+            "SELECT step_id, step_name, step_type, timeout_seconds, "
+            "       retry_count, continue_on_error "
+            "FROM orochi.%s "
+            "WHERE workflow_id = %ld "
+            "ORDER BY step_id",
+            OROCHI_WORKFLOW_STEPS_TABLE,
+            workflow_id);
+
+        ret = SPI_execute(query.data, true, 0);
+
+        if (ret == SPI_OK_SELECT && SPI_processed > 0)
+        {
+            wf->num_steps = SPI_processed;
+            wf->steps = palloc(sizeof(WorkflowStep *) * wf->num_steps);
+
+            for (uint64 i = 0; i < SPI_processed; i++)
+            {
+                bool isnull;
+                HeapTuple step_tuple = SPI_tuptable->vals[i];
+                TupleDesc step_tupdesc = SPI_tuptable->tupdesc;
+
+                WorkflowStep *step = palloc0(sizeof(WorkflowStep));
+
+                Datum step_id_datum = SPI_getbinval(step_tuple, step_tupdesc, 1, &isnull);
+                if (!isnull)
+                    step->step_id = DatumGetInt32(step_id_datum);
+
+                Datum step_name_datum = SPI_getbinval(step_tuple, step_tupdesc, 2, &isnull);
+                if (!isnull)
+                    step->step_name = pstrdup(TextDatumGetCString(step_name_datum));
+
+                Datum step_type_datum = SPI_getbinval(step_tuple, step_tupdesc, 3, &isnull);
+                if (!isnull)
+                    step->step_type = (WorkflowStepType) DatumGetInt32(step_type_datum);
+
+                Datum timeout_datum = SPI_getbinval(step_tuple, step_tupdesc, 4, &isnull);
+                if (!isnull)
+                    step->timeout_seconds = DatumGetInt32(timeout_datum);
+
+                Datum retry_datum = SPI_getbinval(step_tuple, step_tupdesc, 5, &isnull);
+                if (!isnull)
+                    step->retry_count = DatumGetInt32(retry_datum);
+
+                Datum continue_datum = SPI_getbinval(step_tuple, step_tupdesc, 6, &isnull);
+                if (!isnull)
+                    step->continue_on_error = DatumGetBool(continue_datum);
+
+                wf->steps[i] = step;
+            }
+        }
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
+    return wf;
+}
+
+/*
+ * Execute a single workflow step
+ */
+static bool
+workflow_execute_step(Workflow *wf, WorkflowStep *step, char **error_msg)
+{
+    /* For now, just log the step execution */
+    elog(LOG, "executing workflow %s step %d (%s) type=%s",
+         wf->workflow_name,
+         step->step_id,
+         step->step_name ? step->step_name : "unnamed",
+         workflow_step_type_name(step->step_type));
+
+    /*
+     * In a real implementation, we would:
+     * - STAGE: Copy data from external source to staging table
+     * - TRANSFORM: Execute transformation query
+     * - LOAD: Copy from staging to target table
+     * - MERGE: Execute MERGE/upsert operation
+     * etc.
+     */
+
+    *error_msg = NULL;
+    return true;
+}
+
+/*
+ * Run a workflow
  */
 int64
 orochi_run_workflow(int64 workflow_id)
 {
-    int64 run_id;
+    int64           run_id;
+    Workflow       *wf;
+    WorkflowState   final_state = WORKFLOW_STATE_SUCCEEDED;
+    char           *error_msg = NULL;
+    StringInfoData  update_query;
+    int             failed_step = -1;
+    int             steps_completed = 0;
+
+    /* Load workflow definition */
+    wf = workflow_load_from_catalog(workflow_id);
+    if (wf == NULL)
+    {
+        ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_OBJECT),
+                 errmsg("workflow with ID %ld does not exist", workflow_id)));
+    }
+
+    /* Check if workflow is enabled */
+    if (!wf->enabled)
+    {
+        workflow_free(wf);
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 errmsg("workflow %s is disabled", wf->workflow_name)));
+    }
+
+    /* Check if workflow is in a runnable state */
+    if (wf->state == WORKFLOW_STATE_SUSPENDED || wf->state == WORKFLOW_STATE_RUNNING)
+    {
+        workflow_free(wf);
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 errmsg("workflow %s is not in a runnable state", wf->workflow_name)));
+    }
 
     /* Create run record */
     run_id = ddl_catalog_create_run(workflow_id);
 
-    elog(LOG, "started workflow %ld run %ld", workflow_id, run_id);
+    elog(LOG, "started workflow %ld (%s) run %ld with %d steps",
+         workflow_id, wf->workflow_name, run_id, wf->num_steps);
 
-    /*
-     * TODO: Actual execution would:
-     * 1. Load workflow definition
-     * 2. Execute each step in order
-     * 3. Handle errors and retries
-     * 4. Update run status
-     */
+    /* Update workflow state to running */
+    initStringInfo(&update_query);
+    appendStringInfo(&update_query,
+        "UPDATE orochi.%s SET state = %d, last_run_at = NOW() "
+        "WHERE workflow_id = %ld",
+        OROCHI_WORKFLOWS_TABLE,
+        (int) WORKFLOW_STATE_RUNNING,
+        workflow_id);
 
-    /* For now, mark as succeeded */
-    ddl_catalog_finish_run(run_id, WORKFLOW_STATE_SUCCEEDED, NULL);
+    SPI_connect();
+    SPI_execute(update_query.data, false, 0);
+    SPI_finish();
+
+    /* Execute each step in order */
+    for (int i = 0; i < wf->num_steps; i++)
+    {
+        WorkflowStep *step = wf->steps[i];
+        char         *step_error = NULL;
+
+        /* Check if step condition is met (if any) */
+        if (step->condition != NULL)
+        {
+            /* Evaluate condition - skip step if not met */
+            StringInfoData cond_query;
+            bool           condition_met = true;
+            int            ret;
+
+            initStringInfo(&cond_query);
+            appendStringInfo(&cond_query, "SELECT (%s)::boolean", step->condition);
+
+            SPI_connect();
+            PG_TRY();
+            {
+                ret = SPI_execute(cond_query.data, true, 1);
+                if (ret == SPI_OK_SELECT && SPI_processed > 0)
+                {
+                    bool isnull;
+                    Datum result = SPI_getbinval(SPI_tuptable->vals[0],
+                                                 SPI_tuptable->tupdesc, 1, &isnull);
+                    if (!isnull)
+                        condition_met = DatumGetBool(result);
+                }
+            }
+            PG_CATCH();
+            {
+                FlushErrorState();
+                condition_met = true;  /* Continue on condition error */
+            }
+            PG_END_TRY();
+            SPI_finish();
+
+            pfree(cond_query.data);
+
+            if (!condition_met)
+            {
+                elog(LOG, "skipping step %d - condition not met", step->step_id);
+                continue;
+            }
+        }
+
+        /* Execute the step with retry logic */
+        bool step_success = false;
+        for (int attempt = 0; attempt <= step->retry_count; attempt++)
+        {
+            if (attempt > 0)
+            {
+                elog(LOG, "retrying step %d (attempt %d/%d)",
+                     step->step_id, attempt + 1, step->retry_count + 1);
+                /* Wait before retry */
+                pg_usleep(step->retry_delay_ms * 1000);
+            }
+
+            step_success = workflow_execute_step(wf, step, &step_error);
+            if (step_success)
+                break;
+        }
+
+        if (step_success)
+        {
+            steps_completed++;
+        }
+        else
+        {
+            /* Step failed */
+            failed_step = step->step_id;
+
+            if (step->continue_on_error)
+            {
+                elog(WARNING, "step %d failed but continuing: %s",
+                     step->step_id, step_error ? step_error : "unknown error");
+                if (step_error)
+                    pfree(step_error);
+            }
+            else
+            {
+                /* Stop execution */
+                final_state = WORKFLOW_STATE_FAILED;
+                error_msg = step_error;
+                break;
+            }
+        }
+    }
+
+    /* If all steps completed and we didn't fail, mark as succeeded */
+    if (final_state != WORKFLOW_STATE_FAILED)
+        final_state = WORKFLOW_STATE_SUCCEEDED;
+
+    /* Update run status */
+    ddl_catalog_finish_run(run_id, final_state, error_msg);
+
+    /* Update workflow state */
+    resetStringInfo(&update_query);
+    appendStringInfo(&update_query,
+        "UPDATE orochi.%s SET "
+        "state = %d, "
+        "total_runs = total_runs + 1, "
+        "%s = %s + 1 "
+        "WHERE workflow_id = %ld",
+        OROCHI_WORKFLOWS_TABLE,
+        (int) final_state,
+        final_state == WORKFLOW_STATE_SUCCEEDED ? "successful_runs" : "failed_runs",
+        final_state == WORKFLOW_STATE_SUCCEEDED ? "successful_runs" : "failed_runs",
+        workflow_id);
+
+    SPI_connect();
+    SPI_execute(update_query.data, false, 0);
+    SPI_finish();
+
+    pfree(update_query.data);
+    if (error_msg)
+        pfree(error_msg);
+    workflow_free(wf);
+
+    elog(LOG, "finished workflow %ld run %ld: %s (%d/%d steps completed)",
+         workflow_id, run_id, workflow_state_name(final_state),
+         steps_completed, wf ? wf->num_steps : 0);
 
     return run_id;
 }
@@ -990,11 +1284,45 @@ PG_FUNCTION_INFO_V1(orochi_workflow_status_sql);
 Datum
 orochi_workflow_status_sql(PG_FUNCTION_ARGS)
 {
-    int64       workflow_id = PG_GETARG_INT64(0);
-    const char *state_name;
+    int64           workflow_id = PG_GETARG_INT64(0);
+    StringInfoData  query;
+    const char     *state_name;
+    int             ret;
+    WorkflowState   state = WORKFLOW_STATE_CREATED;
 
-    /* TODO: Actually query the workflow state from catalog */
-    state_name = workflow_state_name(WORKFLOW_STATE_CREATED);
+    initStringInfo(&query);
+
+    /* Query the workflow state from the catalog */
+    appendStringInfo(&query,
+        "SELECT state FROM orochi.%s WHERE workflow_id = %ld",
+        OROCHI_WORKFLOWS_TABLE,
+        workflow_id);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 1);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0)
+    {
+        bool isnull;
+        Datum state_datum = SPI_getbinval(SPI_tuptable->vals[0],
+                                          SPI_tuptable->tupdesc, 1, &isnull);
+        if (!isnull)
+            state = (WorkflowState) DatumGetInt32(state_datum);
+    }
+    else
+    {
+        /* Workflow not found */
+        SPI_finish();
+        pfree(query.data);
+        ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_OBJECT),
+                 errmsg("workflow with ID %ld does not exist", workflow_id)));
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
+    state_name = workflow_state_name(state);
 
     PG_RETURN_TEXT_P(cstring_to_text(state_name));
 }

@@ -11,9 +11,14 @@
 #include "postgres.h"
 #include "fmgr.h"
 #include "access/genam.h"
+#include "access/gin.h"
+#include "access/hash.h"
 #include "access/htup_details.h"
+#include "access/nbtree.h"
+#include "access/skey.h"
 #include "access/table.h"
 #include "access/tableam.h"
+#include "catalog/pg_am.h"
 #include "catalog/pg_operator.h"
 #include "catalog/pg_type.h"
 #include "executor/spi.h"
@@ -31,6 +36,12 @@
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/snapmgr.h"
+
+/* JSONB operator strategy numbers (from jsonb_gin_ops) */
+#define JsonbContainsStrategyNumber     7
+#define JsonbExistsStrategyNumber       9
+#define JsonbExistsAnyStrategyNumber    10
+#define JsonbExistsAllStrategyNumber    11
 
 #include "../orochi.h"
 #include "json_query.h"
@@ -725,10 +736,109 @@ json_query_apply_pushdown(JsonQueryExpr *expr, List *pushed_predicates)
 ScanKey
 json_query_to_scankey(JsonQueryExpr *expr, int *nkeys)
 {
-    /* Convert expression to scan keys for index scan */
-    /* Simplified implementation */
-    *nkeys = 0;
-    return NULL;
+    ScanKeyData *keys;
+    int          key_count = 0;
+    int          max_keys = 16;  /* Maximum number of scan keys */
+    ListCell    *lc;
+
+    if (expr == NULL)
+    {
+        *nkeys = 0;
+        return NULL;
+    }
+
+    keys = palloc(max_keys * sizeof(ScanKeyData));
+
+    switch (expr->type)
+    {
+        case JSON_EXPR_OPERATOR:
+            if (expr->right != NULL && expr->right->type == JSON_EXPR_CONST &&
+                !expr->right->const_isnull)
+            {
+                StrategyNumber strategy;
+                RegProcedure   proc = InvalidOid;
+
+                /* Determine strategy based on operator */
+                switch (expr->operator)
+                {
+                    case JSON_OP_EQ:
+                        strategy = BTEqualStrategyNumber;
+                        break;
+                    case JSON_OP_LT:
+                        strategy = BTLessStrategyNumber;
+                        break;
+                    case JSON_OP_LE:
+                        strategy = BTLessEqualStrategyNumber;
+                        break;
+                    case JSON_OP_GT:
+                        strategy = BTGreaterStrategyNumber;
+                        break;
+                    case JSON_OP_GE:
+                        strategy = BTGreaterEqualStrategyNumber;
+                        break;
+                    case JSON_OP_CONTAINS:
+                        strategy = JsonbContainsStrategyNumber;
+                        break;
+                    case JSON_OP_EXISTS:
+                        strategy = JsonbExistsStrategyNumber;
+                        break;
+                    default:
+                        goto done;
+                }
+
+                /* Get appropriate comparison procedure */
+                if (expr->right->const_type == TEXTOID)
+                    proc = F_TEXTEQ;
+                else if (expr->right->const_type == INT4OID)
+                    proc = F_INT4EQ;
+                else if (expr->right->const_type == JSONBOID)
+                    proc = F_JSONB_CONTAINS;
+
+                if (proc != InvalidOid && key_count < max_keys)
+                {
+                    ScanKeyInit(&keys[key_count],
+                                1,  /* Attribute number (first index column) */
+                                strategy,
+                                proc,
+                                expr->right->const_value);
+                    key_count++;
+                }
+            }
+            break;
+
+        case JSON_EXPR_AND:
+            /* Build keys for each AND clause */
+            foreach(lc, expr->children)
+            {
+                JsonQueryExpr *child = lfirst(lc);
+                int child_nkeys = 0;
+                ScanKey child_keys = json_query_to_scankey(child, &child_nkeys);
+
+                for (int i = 0; i < child_nkeys && key_count < max_keys; i++)
+                {
+                    memcpy(&keys[key_count], &child_keys[i], sizeof(ScanKeyData));
+                    key_count++;
+                }
+
+                if (child_keys)
+                    pfree(child_keys);
+            }
+            break;
+
+        default:
+            break;
+    }
+
+done:
+    if (key_count == 0)
+    {
+        pfree(keys);
+        *nkeys = 0;
+        return NULL;
+    }
+
+    *nkeys = key_count;
+    return keys;
 }
 
 /* ============================================================
@@ -831,11 +941,72 @@ void
 json_query_build_index_scan(JsonQueryExpr *expr, Oid index_oid,
                             ScanKey *keys, int *nkeys)
 {
-    /* Build scan keys for index scan */
+    Relation    index_rel;
+    ScanKey     base_keys;
+    int         base_nkeys;
+
     *keys = NULL;
     *nkeys = 0;
 
-    /* Simplified - in production would build proper scan keys */
+    if (expr == NULL || index_oid == InvalidOid)
+        return;
+
+    /* Get base scan keys from expression */
+    base_keys = json_query_to_scankey(expr, &base_nkeys);
+    if (base_keys == NULL || base_nkeys == 0)
+        return;
+
+    /* Validate keys against the index structure */
+    index_rel = index_open(index_oid, AccessShareLock);
+
+    /* GIN indexes need special handling for JSONB operators */
+    if (index_rel->rd_rel->relam == GIN_AM_OID)
+    {
+        /* Adjust keys for GIN-specific strategies */
+        for (int i = 0; i < base_nkeys; i++)
+        {
+            if (base_keys[i].sk_strategy == BTEqualStrategyNumber)
+            {
+                /* For GIN, containment check is more appropriate */
+                base_keys[i].sk_strategy = JsonbContainsStrategyNumber;
+            }
+        }
+    }
+    /* B-tree indexes use standard comparison strategies */
+    else if (index_rel->rd_rel->relam == BTREE_AM_OID)
+    {
+        /* Keys are already set up for B-tree */
+    }
+    /* Hash indexes only support equality */
+    else if (index_rel->rd_rel->relam == HASH_AM_OID)
+    {
+        /* Filter out non-equality keys */
+        int valid_count = 0;
+        for (int i = 0; i < base_nkeys; i++)
+        {
+            if (base_keys[i].sk_strategy == BTEqualStrategyNumber ||
+                base_keys[i].sk_strategy == HTEqualStrategyNumber)
+            {
+                if (i != valid_count)
+                    memcpy(&base_keys[valid_count], &base_keys[i],
+                           sizeof(ScanKeyData));
+                valid_count++;
+            }
+        }
+        base_nkeys = valid_count;
+    }
+
+    index_close(index_rel, AccessShareLock);
+
+    if (base_nkeys > 0)
+    {
+        *keys = base_keys;
+        *nkeys = base_nkeys;
+    }
+    else
+    {
+        pfree(base_keys);
+    }
 }
 
 /* ============================================================

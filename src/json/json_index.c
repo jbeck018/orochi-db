@@ -1030,11 +1030,37 @@ json_index_create_with_options(Oid table_oid, int16 column_attnum,
                  errdetail("SQL: %s", sql.data)));
     }
 
+    /* Look up the created index OID by name */
+    {
+        StringInfoData lookup_sql;
+        char           *index_name;
+
+        index_name = psprintf("idx_%s_%s_json", table_name, column_name);
+
+        initStringInfo(&lookup_sql);
+        appendStringInfo(&lookup_sql,
+            "SELECT oid FROM pg_class "
+            "WHERE relname = '%s' AND relnamespace = "
+            "(SELECT oid FROM pg_namespace WHERE nspname = '%s')",
+            index_name, schema_name);
+
+        ret = SPI_execute(lookup_sql.data, true, 1);
+        if (ret == SPI_OK_SELECT && SPI_processed > 0)
+        {
+            bool isnull;
+            Datum oid_datum = SPI_getbinval(SPI_tuptable->vals[0],
+                                            SPI_tuptable->tupdesc, 1, &isnull);
+            if (!isnull)
+                index_oid = DatumGetObjectId(oid_datum);
+        }
+
+        pfree(lookup_sql.data);
+        pfree(index_name);
+    }
+
     SPI_finish();
 
-    /* Get the created index OID */
-    /* In production, this would look up the index by name */
-    elog(NOTICE, "Created JSON index with SQL: %s", sql.data);
+    elog(NOTICE, "Created JSON index with OID %u", index_oid);
 
     pfree(sql.data);
     return index_oid;

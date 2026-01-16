@@ -519,13 +519,16 @@ json_columnar_extract_columns(Oid table_oid, int16 source_attnum,
                 else
                 {
                     char *value_str;
+                    char *escaped_str;
 
                     switch (col->target_type)
                     {
                         case TEXTOID:
                             value_str = TextDatumGetCString(value);
-                            appendStringInfo(&insert_sql, ", '%s'",
-                                             value_str);  /* TODO: proper escaping */
+                            /* Properly escape string to prevent SQL injection */
+                            escaped_str = quote_literal_cstr(value_str);
+                            appendStringInfo(&insert_sql, ", %s", escaped_str);
+                            pfree(escaped_str);
                             break;
                         case INT4OID:
                             appendStringInfo(&insert_sql, ", %d",
@@ -893,17 +896,92 @@ json_columnar_write_value(JsonColumnarWriteState *state,
 void
 json_columnar_flush_writes(JsonColumnarWriteState *state)
 {
-    /* Flush all column buffers to storage */
-    for (int i = 0; i < state->num_columns; i++)
-    {
-        struct ColumnBuffer *buf = &state->column_buffers[i];
-        if (buf->count == 0)
-            continue;
+    ListCell   *lc;
+    int         col_idx = 0;
+    int         ret;
 
-        /* In production, this would write to the columnar storage table */
-        buf->count = 0;
+    if (state == NULL || state->num_columns == 0)
+        return;
+
+    ret = SPI_connect();
+    if (ret != SPI_OK_CONNECT)
+    {
+        elog(WARNING, "json_columnar_flush_writes: SPI_connect failed");
+        return;
     }
 
+    /* Flush all column buffers to storage */
+    foreach(lc, state->extracted_columns)
+    {
+        JsonExtractedColumn *col = lfirst(lc);
+        struct ColumnBuffer *buf = &state->column_buffers[col_idx];
+
+        if (buf->count == 0)
+        {
+            col_idx++;
+            continue;
+        }
+
+        /* Write batch of values to the data table */
+        for (int64 i = 0; i < buf->count; i++)
+        {
+            StringInfoData sql;
+            int64 row_id = state->rows_written - buf->count + i;
+
+            initStringInfo(&sql);
+            appendStringInfo(&sql,
+                "INSERT INTO orochi.orochi_json_data_%u_%d "
+                "(row_id, chunk_id, col_%d) VALUES (%ld, %ld, ",
+                state->table_oid, state->source_attnum,
+                col_idx, row_id, state->chunks_created);
+
+            if (buf->nulls[i])
+            {
+                appendStringInfo(&sql, "NULL)");
+            }
+            else
+            {
+                switch (col->target_type)
+                {
+                    case TEXTOID:
+                    {
+                        char *value_str = TextDatumGetCString(buf->values[i]);
+                        char *escaped = quote_literal_cstr(value_str);
+                        appendStringInfo(&sql, "%s)", escaped);
+                        pfree(escaped);
+                        break;
+                    }
+                    case INT4OID:
+                        appendStringInfo(&sql, "%d)",
+                                         DatumGetInt32(buf->values[i]));
+                        break;
+                    case INT8OID:
+                        appendStringInfo(&sql, "%ld)",
+                                         DatumGetInt64(buf->values[i]));
+                        break;
+                    case FLOAT8OID:
+                        appendStringInfo(&sql, "%g)",
+                                         DatumGetFloat8(buf->values[i]));
+                        break;
+                    case BOOLOID:
+                        appendStringInfo(&sql, "%s)",
+                                         DatumGetBool(buf->values[i]) ? "true" : "false");
+                        break;
+                    default:
+                        appendStringInfo(&sql, "NULL)");
+                }
+            }
+
+            SPI_execute(sql.data, false, 0);
+            pfree(sql.data);
+        }
+
+        /* Reset buffer after flush */
+        buf->count = 0;
+        col_idx++;
+    }
+
+    SPI_finish();
     state->chunks_created++;
 }
 
@@ -1182,15 +1260,65 @@ json_columnar_compress(Datum *values, bool *nulls, int count,
                        JsonColumnarStorageType storage_type,
                        int64 *compressed_size)
 {
-    /* Simplified compression - in production would use actual algorithms */
-    char *result;
-    int64 size = count * sizeof(Datum);
+    char   *input;
+    char   *output;
+    int64   input_size;
+    int64   max_output_size;
+    int64   actual_size;
 
-    result = palloc(size);
-    memcpy(result, values, size);
-    *compressed_size = size;
+    /* Serialize values to a byte buffer */
+    input_size = count * sizeof(Datum);
+    input = palloc(input_size);
+    memcpy(input, values, input_size);
 
-    return result;
+    /* Allocate output buffer (worst case is no compression) */
+    max_output_size = input_size + 1024;  /* Add headroom */
+    output = palloc(max_output_size);
+
+    switch (storage_type)
+    {
+        case JSON_COLUMNAR_DICTIONARY:
+            /* Dictionary encoding - use LZ4 for the indices */
+            actual_size = compress_lz4(input, input_size, output, max_output_size);
+            break;
+
+        case JSON_COLUMNAR_DELTA:
+            /* Delta encoding for numeric sequences */
+            actual_size = compress_delta(input, input_size, output, max_output_size);
+            break;
+
+        case JSON_COLUMNAR_RLE:
+            /* Run-length encoding for repeated values */
+            actual_size = compress_rle(input, input_size, output, max_output_size);
+            break;
+
+        case JSON_COLUMNAR_INLINE:
+        case JSON_COLUMNAR_RAW:
+        default:
+            /* Use LZ4 for general compression */
+            actual_size = compress_lz4(input, input_size, output, max_output_size);
+            if (actual_size <= 0 || actual_size >= input_size)
+            {
+                /* Compression didn't help, use raw data */
+                pfree(output);
+                *compressed_size = input_size;
+                return input;
+            }
+            break;
+    }
+
+    pfree(input);
+
+    if (actual_size <= 0)
+    {
+        /* Compression failed, return NULL */
+        pfree(output);
+        *compressed_size = 0;
+        return NULL;
+    }
+
+    *compressed_size = actual_size;
+    return output;
 }
 
 void
@@ -1198,9 +1326,65 @@ json_columnar_decompress(const char *compressed, int64 compressed_size,
                          JsonColumnarStorageType storage_type,
                          int count, Datum *values, bool *nulls)
 {
-    /* Simplified decompression */
-    memcpy(values, compressed, count * sizeof(Datum));
+    int64   expected_size = count * sizeof(Datum);
+    char   *decompressed;
+    int64   actual_size;
+
+    /* Initialize nulls to false */
     memset(nulls, false, count * sizeof(bool));
+
+    switch (storage_type)
+    {
+        case JSON_COLUMNAR_DICTIONARY:
+            /* Dictionary encoding - use LZ4 decompression */
+            decompressed = palloc(expected_size);
+            actual_size = decompress_lz4(compressed, compressed_size,
+                                         decompressed, expected_size);
+            if (actual_size > 0)
+                memcpy(values, decompressed, Min(actual_size, expected_size));
+            pfree(decompressed);
+            break;
+
+        case JSON_COLUMNAR_DELTA:
+            /* Delta decoding for numeric sequences */
+            decompressed = palloc(expected_size);
+            actual_size = decompress_delta(compressed, compressed_size,
+                                           decompressed, expected_size);
+            if (actual_size > 0)
+                memcpy(values, decompressed, Min(actual_size, expected_size));
+            pfree(decompressed);
+            break;
+
+        case JSON_COLUMNAR_RLE:
+            /* Run-length decoding */
+            decompressed = palloc(expected_size);
+            actual_size = decompress_rle(compressed, compressed_size,
+                                         decompressed, expected_size);
+            if (actual_size > 0)
+                memcpy(values, decompressed, Min(actual_size, expected_size));
+            pfree(decompressed);
+            break;
+
+        case JSON_COLUMNAR_INLINE:
+        case JSON_COLUMNAR_RAW:
+        default:
+            /* Try LZ4 decompression first */
+            if (compressed_size < expected_size)
+            {
+                decompressed = palloc(expected_size);
+                actual_size = decompress_lz4(compressed, compressed_size,
+                                             decompressed, expected_size);
+                if (actual_size > 0)
+                    memcpy(values, decompressed, Min(actual_size, expected_size));
+                pfree(decompressed);
+            }
+            else
+            {
+                /* Data is uncompressed */
+                memcpy(values, compressed, Min(compressed_size, expected_size));
+            }
+            break;
+    }
 }
 
 void
@@ -1606,20 +1790,184 @@ json_columnar_get_hybrid_config(Oid table_oid, int16 source_attnum)
 void
 json_columnar_compact(Oid table_oid, int16 source_attnum)
 {
-    /* In production, would merge small chunks */
-    elog(NOTICE, "Compacting JSON columnar storage");
+    StringInfoData sql;
+    int         ret;
+    int64       chunks_merged = 0;
+    int64       rows_moved = 0;
+
+    ret = SPI_connect();
+    if (ret != SPI_OK_CONNECT)
+    {
+        elog(WARNING, "json_columnar_compact: SPI_connect failed");
+        return;
+    }
+
+    /*
+     * Merge small chunks into larger ones.
+     * Find chunks smaller than target size and merge consecutive ones.
+     */
+    initStringInfo(&sql);
+    appendStringInfo(&sql,
+        "WITH chunk_sizes AS ("
+        "  SELECT chunk_id, COUNT(*) as row_count "
+        "  FROM orochi.orochi_json_data_%u_%d "
+        "  GROUP BY chunk_id "
+        "  HAVING COUNT(*) < %d "
+        "  ORDER BY chunk_id"
+        "), merged AS ("
+        "  SELECT row_id, (row_number() OVER (ORDER BY row_id) - 1) / %d AS new_chunk_id "
+        "  FROM orochi.orochi_json_data_%u_%d "
+        "  WHERE chunk_id IN (SELECT chunk_id FROM chunk_sizes)"
+        ") "
+        "UPDATE orochi.orochi_json_data_%u_%d d "
+        "SET chunk_id = m.new_chunk_id "
+        "FROM merged m WHERE d.row_id = m.row_id",
+        table_oid, source_attnum, JSON_COLUMNAR_CHUNK_SIZE / 2,
+        JSON_COLUMNAR_CHUNK_SIZE,
+        table_oid, source_attnum,
+        table_oid, source_attnum);
+
+    ret = SPI_execute(sql.data, false, 0);
+    if (ret == SPI_OK_UPDATE)
+    {
+        rows_moved = SPI_processed;
+        if (rows_moved > 0)
+            chunks_merged = rows_moved / JSON_COLUMNAR_CHUNK_SIZE + 1;
+    }
+
+    pfree(sql.data);
+    SPI_finish();
+
+    elog(NOTICE, "JSON columnar compact: merged %ld chunks, moved %ld rows",
+         chunks_merged, rows_moved);
 }
 
 void
 json_columnar_vacuum(Oid table_oid, int16 source_attnum)
 {
-    /* In production, would remove stale/deleted data */
-    elog(NOTICE, "Vacuuming JSON columnar storage");
+    StringInfoData sql;
+    int         ret;
+    int64       rows_deleted = 0;
+
+    ret = SPI_connect();
+    if (ret != SPI_OK_CONNECT)
+    {
+        elog(WARNING, "json_columnar_vacuum: SPI_connect failed");
+        return;
+    }
+
+    /*
+     * Remove orphaned columnar data where the source row no longer exists.
+     * Also remove data for deprecated columns.
+     */
+
+    /* First, delete data for deprecated columns */
+    initStringInfo(&sql);
+    appendStringInfo(&sql,
+        "DELETE FROM orochi.orochi_json_data_%u_%d d "
+        "WHERE NOT EXISTS ("
+        "  SELECT 1 FROM orochi.orochi_json_columns c "
+        "  WHERE c.table_oid = %u "
+        "    AND c.source_attnum = %d "
+        "    AND c.state != %d"  /* JSON_COLUMN_DEPRECATED */
+        ")",
+        table_oid, source_attnum,
+        table_oid, source_attnum,
+        JSON_COLUMN_DEPRECATED);
+
+    ret = SPI_execute(sql.data, false, 0);
+    if (ret == SPI_OK_DELETE)
+        rows_deleted = SPI_processed;
+
+    /* Delete metadata for deprecated columns */
+    resetStringInfo(&sql);
+    appendStringInfo(&sql,
+        "DELETE FROM orochi.orochi_json_columns "
+        "WHERE table_oid = %u AND source_attnum = %d AND state = %d",
+        table_oid, source_attnum, JSON_COLUMN_DEPRECATED);
+
+    SPI_execute(sql.data, false, 0);
+
+    /* Run VACUUM on the data table */
+    resetStringInfo(&sql);
+    appendStringInfo(&sql,
+        "VACUUM orochi.orochi_json_data_%u_%d",
+        table_oid, source_attnum);
+
+    SPI_execute(sql.data, false, 0);
+
+    pfree(sql.data);
+    SPI_finish();
+
+    elog(NOTICE, "JSON columnar vacuum: removed %ld stale rows", rows_deleted);
 }
 
 List *
 json_columnar_analyze(Oid table_oid, int16 source_attnum)
 {
-    /* Returns recommendations for columnar optimization */
-    return NIL;
+    List       *recommendations = NIL;
+    List       *columns;
+    ListCell   *lc;
+    JsonPathStatsCollection *path_stats;
+
+    /* Get existing extracted columns */
+    columns = json_columnar_get_columns(table_oid, source_attnum);
+
+    /* Analyze paths to find new candidates */
+    path_stats = json_index_analyze_paths(table_oid, source_attnum,
+                                          JSON_INDEX_SAMPLE_SIZE);
+
+    if (path_stats == NULL)
+    {
+        list_free_deep(columns);
+        return NIL;
+    }
+
+    /* Find paths that should be extracted but aren't */
+    for (int i = 0; i < path_stats->path_count; i++)
+    {
+        JsonPathStats *ps = &path_stats->paths[i];
+        bool already_extracted = false;
+
+        /* Check if already extracted */
+        foreach(lc, columns)
+        {
+            JsonExtractedColumn *col = lfirst(lc);
+            if (strcmp(col->path, ps->path) == 0)
+            {
+                already_extracted = true;
+                break;
+            }
+        }
+
+        /* Recommend extraction for high-value paths */
+        if (!already_extracted &&
+            ps->access_count >= JSON_INDEX_MIN_ACCESS_COUNT &&
+            ps->selectivity < 0.5 &&
+            ps->value_type != JSON_PATH_ARRAY &&
+            ps->value_type != JSON_PATH_OBJECT)
+        {
+            JsonIndexRecommendation *rec = palloc0(sizeof(JsonIndexRecommendation));
+            StringInfoData reason;
+
+            rec->path = pstrdup(ps->path);
+            rec->index_type = JSON_INDEX_BTREE;  /* Columnar extraction type */
+            rec->estimated_benefit = ps->access_count * (1.0 - ps->selectivity);
+            rec->priority = i + 1;
+
+            initStringInfo(&reason);
+            appendStringInfo(&reason,
+                "Path '%s' has %ld accesses with %.1f%% selectivity - "
+                "recommend columnar extraction",
+                ps->path, ps->access_count, ps->selectivity * 100);
+            rec->reason = reason.data;
+
+            recommendations = lappend(recommendations, rec);
+        }
+    }
+
+    json_index_free_stats(path_stats);
+    list_free_deep(columns);
+
+    return recommendations;
 }
