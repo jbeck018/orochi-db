@@ -297,8 +297,8 @@ data_plane:
 
   network_layer:
     connection_pooler:
-      name: "PgBouncer Pool"
-      technology: "PgBouncer + HAProxy"
+      name: "PgCat Connection Router"
+      technology: "PgCat (Rust)"
       features:
         - Transaction-mode pooling
         - SSL termination
@@ -536,7 +536,7 @@ Compute Instance     Metrics Exporter      Prometheus         Billing Service   
 | Component | Technology | Rationale |
 |-----------|------------|-----------|
 | **Database Engine** | PostgreSQL 17 + Orochi | Latest PG with HTAP capabilities |
-| **Connection Pooler** | PgBouncer | Battle-tested, low overhead |
+| **Connection Pooler** | PgCat | Rust-based, multi-tenant, sharding support, load balancing |
 | **Backup Tool** | WAL-G | S3-native, encryption, compression |
 | **Monitoring Agent** | Vector + Prometheus | Logs and metrics collection |
 
@@ -1512,7 +1512,7 @@ phase_2_growth:
     data_plane:
       - Serverless compute (scale-to-zero)
       - Second region (eu-west-1)
-      - Connection pooling (PgBouncer)
+      - Connection pooling (PgCat)
       - PITR (point-in-time recovery)
       - Auto-scaling (dedicated)
 

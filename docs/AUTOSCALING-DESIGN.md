@@ -1465,7 +1465,7 @@ class BurstTrafficHandler:
 | **Operator Framework** | Kubebuilder | Go-based, strong typing, well-maintained |
 | **State Storage** | etcd (via K8s) | Consistent, built into K8s |
 | **Predictive Model** | Prophet + TensorFlow Lite | Time-series forecasting |
-| **Connection Proxy** | Custom (Go) | Low-latency, wake-on-connect |
+| **Connection Proxy** | PgCat (Rust) | Multi-tenant pooling, sharding, wake-on-connect hooks |
 
 ### 7.2 Architecture Layers
 

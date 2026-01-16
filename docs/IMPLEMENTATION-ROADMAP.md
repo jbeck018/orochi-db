@@ -86,13 +86,12 @@ orochi-cloud/
 │   │   └── deploy/
 │   ├── metrics/                  # Metrics Collection Service (Go)
 │   ├── billing/                  # Billing & Metering Service (Go)
-│   ├── connection-router/        # Connection Router (Rust)
+│   ├── connection-router/        # Connection Router (PgCat-based)
+│   │   ├── pgcat.toml           # PgCat configuration
 │   │   ├── src/
-│   │   │   ├── main.rs
-│   │   │   ├── proxy/           # PostgreSQL proxy
-│   │   │   ├── routing/         # Tenant routing
-│   │   │   └── wakeup/          # Scale-to-zero wake-up
-│   │   └── Cargo.toml
+│   │   │   ├── wakeup/          # Scale-to-zero wake-up hook
+│   │   │   └── metrics/         # Custom metrics integration
+│   │   └── Dockerfile           # PgCat + custom plugins
 │   └── backup/                   # Backup Service (Go)
 ├── infra/
 │   ├── terraform/
@@ -237,12 +236,13 @@ orochi-cloud/
 
 #### Month 5: Serverless Foundation
 
-**Week 1-2: Connection Router**
-- [ ] Build Rust-based connection router
-- [ ] SNI-based tenant routing
-- [ ] Connection multiplexing (PgBouncer integration)
-- [ ] Wake-on-connect detection
-- [ ] Graceful connection migration
+**Week 1-2: Connection Router (PgCat)**
+- [ ] Deploy PgCat as connection pooler/router
+- [ ] Configure multi-tenant routing via SNI
+- [ ] Set up connection pooling (transaction mode)
+- [ ] Implement wake-on-connect hook for scale-to-zero
+- [ ] Configure read/write splitting for replicas
+- [ ] Enable Prometheus metrics endpoint
 
 **Week 3-4: Scale-to-Zero**
 - [ ] Implement idle detection (5 min no connections)
@@ -297,7 +297,7 @@ orochi-cloud/
 - Serverless compute with scale-to-zero
 - Auto-scaling (vertical)
 - Second region (EU)
-- PgBouncer connection pooling
+- PgCat connection pooling/routing
 - PITR backup/restore
 - Team management with RBAC
 - CLI tool
@@ -357,7 +357,7 @@ orochi-cloud/
 | **Control Plane API** | Go | Chi/Echo | Performance, K8s ecosystem, gRPC support |
 | **Provisioner** | Go | Kubebuilder | Native K8s operator framework |
 | **Autoscaler** | Go | Custom | Tight K8s integration, metrics access |
-| **Connection Router** | Rust | tokio | Lowest latency, memory safety |
+| **Connection Router** | Rust | **PgCat** | Multi-tenant pooling, sharding, load balancing |
 | **Billing Service** | Go | Custom | Stripe SDK, reliability |
 
 ### Frontend
