@@ -41,6 +41,13 @@ extern void test_columnar(void);
 extern void test_distribution(void);
 extern void test_executor(void);
 
+/* Auth module test suites */
+extern void test_auth(void);
+extern void test_jwt(void);
+extern void test_webauthn(void);
+extern void test_magic_link(void);
+extern void test_branch_access(void);
+
 /* Placeholder for future test suites - uncomment as implemented */
 /* extern void test_hyperloglog(void); */
 /* extern void test_tdigest(void); */
@@ -62,6 +69,13 @@ static void run_all_tests(void)
     RUN_TEST_SUITE(test_columnar);
     RUN_TEST_SUITE(test_distribution);
     RUN_TEST_SUITE(test_executor);
+
+    /* Auth module test suites */
+    RUN_TEST_SUITE(test_auth);
+    RUN_TEST_SUITE(test_jwt);
+    RUN_TEST_SUITE(test_webauthn);
+    RUN_TEST_SUITE(test_magic_link);
+    RUN_TEST_SUITE(test_branch_access);
 
     /* Add test suites here as they are implemented:
      * RUN_TEST_SUITE(test_hyperloglog);
