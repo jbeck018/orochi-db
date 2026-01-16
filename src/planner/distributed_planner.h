@@ -148,6 +148,12 @@ extern List *orochi_get_distributed_tables(Query *parse);
 extern List *orochi_analyze_predicates(Query *parse, Oid table_oid);
 
 /*
+ * Analyze quals (WHERE clause) for shard pruning
+ * Takes raw Node* quals instead of Query*
+ */
+extern ShardRestriction *orochi_analyze_quals_for_pruning(Node *quals, Oid table_oid);
+
+/*
  * Determine shards for query
  */
 extern List *orochi_get_query_shards(Query *parse, Oid table_oid);

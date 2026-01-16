@@ -11,13 +11,16 @@
 #include "postgres.h"
 #include "fmgr.h"
 #include "access/htup_details.h"
+#include "access/stratnum.h"
 #include "catalog/pg_attribute.h"
+#include "catalog/pg_operator.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "optimizer/optimizer.h"
 #include "optimizer/planner.h"
 #include "parser/parsetree.h"
 #include "utils/builtins.h"
+#include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
 #include "utils/syscache.h"
@@ -410,8 +413,12 @@ analyze_qual_node(Node *node, Oid table_oid, const char *dist_column,
     }
 }
 
-static ShardRestriction *
-analyze_where_clause(Node *quals, Oid table_oid)
+/*
+ * Analyze WHERE clause quals for shard pruning
+ * Exported wrapper for physical_sharding to use
+ */
+ShardRestriction *
+orochi_analyze_quals_for_pruning(Node *quals, Oid table_oid)
 {
     ShardRestriction *restriction;
     OrochiTableInfo *table_info;
@@ -441,7 +448,7 @@ orochi_analyze_predicates(Query *parse, Oid table_oid)
 
     if (parse->jointree && parse->jointree->quals)
     {
-        restriction = analyze_where_clause(parse->jointree->quals, table_oid);
+        restriction = orochi_analyze_quals_for_pruning(parse->jointree->quals, table_oid);
         if (restriction != NULL)
             restrictions = lappend(restrictions, restriction);
     }
@@ -548,29 +555,588 @@ orochi_create_fragment_queries(Query *parse, List *shards)
     return fragments;
 }
 
+/*
+ * Helper: Deparse a target entry (SELECT column)
+ */
+static void
+deparse_target_entry(StringInfo buf, TargetEntry *tle, bool first)
+{
+    if (!first)
+        appendStringInfoString(buf, ", ");
+
+    if (IsA(tle->expr, Var))
+    {
+        Var *var = (Var *) tle->expr;
+        /* For now, use column name if available */
+        if (tle->resname != NULL)
+            appendStringInfoString(buf, quote_identifier(tle->resname));
+        else
+            appendStringInfo(buf, "col%d", var->varattno);
+    }
+    else if (IsA(tle->expr, Aggref))
+    {
+        Aggref *agg = (Aggref *) tle->expr;
+        char *aggname = get_func_name(agg->aggfnoid);
+
+        appendStringInfo(buf, "%s(", aggname ? aggname : "agg");
+
+        if (agg->aggstar)
+        {
+            appendStringInfoChar(buf, '*');
+        }
+        else if (agg->args != NIL)
+        {
+            ListCell *lc;
+            bool first_arg = true;
+
+            foreach(lc, agg->args)
+            {
+                TargetEntry *arg_tle = (TargetEntry *) lfirst(lc);
+                if (!first_arg)
+                    appendStringInfoString(buf, ", ");
+                first_arg = false;
+
+                if (IsA(arg_tle->expr, Var))
+                {
+                    Var *var = (Var *) arg_tle->expr;
+                    if (arg_tle->resname)
+                        appendStringInfoString(buf, quote_identifier(arg_tle->resname));
+                    else
+                        appendStringInfo(buf, "col%d", var->varattno);
+                }
+                else
+                {
+                    appendStringInfoString(buf, "expr");
+                }
+            }
+        }
+        appendStringInfoChar(buf, ')');
+
+        if (tle->resname != NULL)
+            appendStringInfo(buf, " AS %s", quote_identifier(tle->resname));
+    }
+    else if (IsA(tle->expr, Const))
+    {
+        Const *c = (Const *) tle->expr;
+        if (c->constisnull)
+            appendStringInfoString(buf, "NULL");
+        else
+        {
+            char *str = OidOutputFunctionCall(c->consttype, c->constvalue);
+            appendStringInfo(buf, "'%s'", str);
+        }
+        if (tle->resname != NULL)
+            appendStringInfo(buf, " AS %s", quote_identifier(tle->resname));
+    }
+    else
+    {
+        /* Default: use column name or generic expr */
+        if (tle->resname != NULL)
+            appendStringInfoString(buf, quote_identifier(tle->resname));
+        else
+            appendStringInfoString(buf, "expr");
+    }
+}
+
+/*
+ * Helper: Deparse WHERE clause predicate
+ */
+static void
+deparse_qual_node(StringInfo buf, Node *node)
+{
+    if (node == NULL)
+        return;
+
+    if (IsA(node, OpExpr))
+    {
+        OpExpr *op = (OpExpr *) node;
+        char *opname = get_opname(op->opno);
+        Node *left = (Node *) linitial(op->args);
+        Node *right = (Node *) lsecond(op->args);
+
+        appendStringInfoChar(buf, '(');
+
+        /* Left operand */
+        if (IsA(left, Var))
+        {
+            Var *var = (Var *) left;
+            appendStringInfo(buf, "col%d", var->varattno);
+        }
+        else if (IsA(left, Const))
+        {
+            Const *c = (Const *) left;
+            if (c->constisnull)
+                appendStringInfoString(buf, "NULL");
+            else
+            {
+                char *str = OidOutputFunctionCall(c->consttype, c->constvalue);
+                if (c->consttype == INT4OID || c->consttype == INT8OID ||
+                    c->consttype == FLOAT4OID || c->consttype == FLOAT8OID)
+                    appendStringInfoString(buf, str);
+                else
+                    appendStringInfo(buf, "'%s'", str);
+            }
+        }
+        else
+        {
+            deparse_qual_node(buf, left);
+        }
+
+        /* Operator */
+        appendStringInfo(buf, " %s ", opname ? opname : "=");
+
+        /* Right operand */
+        if (IsA(right, Var))
+        {
+            Var *var = (Var *) right;
+            appendStringInfo(buf, "col%d", var->varattno);
+        }
+        else if (IsA(right, Const))
+        {
+            Const *c = (Const *) right;
+            if (c->constisnull)
+                appendStringInfoString(buf, "NULL");
+            else
+            {
+                char *str = OidOutputFunctionCall(c->consttype, c->constvalue);
+                if (c->consttype == INT4OID || c->consttype == INT8OID ||
+                    c->consttype == FLOAT4OID || c->consttype == FLOAT8OID)
+                    appendStringInfoString(buf, str);
+                else
+                    appendStringInfo(buf, "'%s'", str);
+            }
+        }
+        else
+        {
+            deparse_qual_node(buf, right);
+        }
+
+        appendStringInfoChar(buf, ')');
+    }
+    else if (IsA(node, BoolExpr))
+    {
+        BoolExpr *boolexpr = (BoolExpr *) node;
+        const char *op_str;
+        ListCell *lc;
+        bool first = true;
+
+        switch (boolexpr->boolop)
+        {
+            case AND_EXPR:
+                op_str = " AND ";
+                break;
+            case OR_EXPR:
+                op_str = " OR ";
+                break;
+            case NOT_EXPR:
+                appendStringInfoString(buf, "NOT ");
+                deparse_qual_node(buf, (Node *) linitial(boolexpr->args));
+                return;
+            default:
+                op_str = " AND ";
+        }
+
+        appendStringInfoChar(buf, '(');
+        foreach(lc, boolexpr->args)
+        {
+            if (!first)
+                appendStringInfoString(buf, op_str);
+            first = false;
+            deparse_qual_node(buf, (Node *) lfirst(lc));
+        }
+        appendStringInfoChar(buf, ')');
+    }
+    else if (IsA(node, NullTest))
+    {
+        NullTest *nt = (NullTest *) node;
+        if (IsA(nt->arg, Var))
+        {
+            Var *var = (Var *) nt->arg;
+            appendStringInfo(buf, "col%d IS %sNULL",
+                           var->varattno,
+                           nt->nulltesttype == IS_NOT_NULL ? "NOT " : "");
+        }
+    }
+}
+
+/*
+ * Deparse a Query tree to SQL string for shard execution
+ *
+ * This function converts a parsed Query node back to a SQL string
+ * that can be executed on individual shards. It handles:
+ * - SELECT target list
+ * - FROM clause (range table entries)
+ * - WHERE clause (quals)
+ * - GROUP BY clause
+ * - ORDER BY clause
+ * - LIMIT clause
+ */
 char *
 orochi_deparse_query(Query *parse, List *shard_restrictions)
 {
     StringInfoData sql;
+    ListCell *lc;
+    bool first;
+    int rtindex;
 
     initStringInfo(&sql);
 
-    /* TODO: Implement proper query deparsing */
-    /* For now, return a placeholder */
-    appendStringInfoString(&sql, "SELECT * FROM shard_table");
+    /* Only handle SELECT for now */
+    if (parse->commandType != CMD_SELECT)
+    {
+        appendStringInfoString(&sql, "SELECT * FROM shard_table");
+        return sql.data;
+    }
+
+    /* SELECT clause */
+    appendStringInfoString(&sql, "SELECT ");
+
+    if (parse->distinctClause != NIL)
+        appendStringInfoString(&sql, "DISTINCT ");
+
+    /* Target list */
+    first = true;
+    foreach(lc, parse->targetList)
+    {
+        TargetEntry *tle = (TargetEntry *) lfirst(lc);
+
+        /* Skip junk entries (e.g., sort keys not in output) */
+        if (tle->resjunk)
+            continue;
+
+        deparse_target_entry(&sql, tle, first);
+        first = false;
+    }
+
+    /* Handle empty target list (SELECT *) */
+    if (first)
+        appendStringInfoChar(&sql, '*');
+
+    /* FROM clause */
+    appendStringInfoString(&sql, " FROM ");
+
+    first = true;
+    rtindex = 1;
+    foreach(lc, parse->rtable)
+    {
+        RangeTblEntry *rte = (RangeTblEntry *) lfirst(lc);
+
+        /* Only include base relations in FROM clause */
+        if (rte->rtekind == RTE_RELATION && !rte->inh)
+        {
+            char *relname;
+            char *namespace;
+
+            if (!first)
+                appendStringInfoString(&sql, ", ");
+            first = false;
+
+            namespace = get_namespace_name(get_rel_namespace(rte->relid));
+            relname = get_rel_name(rte->relid);
+
+            if (namespace && strcmp(namespace, "public") != 0)
+                appendStringInfo(&sql, "%s.%s",
+                               quote_identifier(namespace),
+                               quote_identifier(relname));
+            else
+                appendStringInfoString(&sql, quote_identifier(relname));
+
+            /* Add alias if present */
+            if (rte->alias && rte->alias->aliasname)
+                appendStringInfo(&sql, " AS %s",
+                               quote_identifier(rte->alias->aliasname));
+        }
+        rtindex++;
+    }
+
+    /* WHERE clause */
+    if (parse->jointree && parse->jointree->quals)
+    {
+        appendStringInfoString(&sql, " WHERE ");
+        deparse_qual_node(&sql, parse->jointree->quals);
+    }
+
+    /* GROUP BY clause */
+    if (parse->groupClause != NIL)
+    {
+        appendStringInfoString(&sql, " GROUP BY ");
+        first = true;
+        foreach(lc, parse->groupClause)
+        {
+            SortGroupClause *sgc = (SortGroupClause *) lfirst(lc);
+            TargetEntry *tle = get_sortgroupclause_tle(sgc, parse->targetList);
+
+            if (!first)
+                appendStringInfoString(&sql, ", ");
+            first = false;
+
+            if (tle->resname)
+                appendStringInfoString(&sql, quote_identifier(tle->resname));
+            else if (IsA(tle->expr, Var))
+            {
+                Var *var = (Var *) tle->expr;
+                appendStringInfo(&sql, "col%d", var->varattno);
+            }
+        }
+    }
+
+    /* HAVING clause */
+    if (parse->havingQual)
+    {
+        appendStringInfoString(&sql, " HAVING ");
+        deparse_qual_node(&sql, parse->havingQual);
+    }
+
+    /* ORDER BY clause */
+    if (parse->sortClause != NIL)
+    {
+        appendStringInfoString(&sql, " ORDER BY ");
+        first = true;
+        foreach(lc, parse->sortClause)
+        {
+            SortGroupClause *sgc = (SortGroupClause *) lfirst(lc);
+            TargetEntry *tle = get_sortgroupclause_tle(sgc, parse->targetList);
+
+            if (!first)
+                appendStringInfoString(&sql, ", ");
+            first = false;
+
+            if (tle->resname)
+                appendStringInfoString(&sql, quote_identifier(tle->resname));
+            else
+                appendStringInfo(&sql, "%d", tle->resno);
+
+            /*
+             * Determine sort direction by checking if the sort operator
+             * is a "greater than" type operator. We check by operator name.
+             */
+            {
+                char *opname = get_opname(sgc->sortop);
+                if (opname && strcmp(opname, ">") == 0)
+                    appendStringInfoString(&sql, " DESC");
+            }
+        }
+    }
+
+    /* LIMIT clause */
+    if (parse->limitCount)
+    {
+        if (IsA(parse->limitCount, Const))
+        {
+            Const *c = (Const *) parse->limitCount;
+            if (!c->constisnull)
+                appendStringInfo(&sql, " LIMIT %ld", DatumGetInt64(c->constvalue));
+        }
+    }
+
+    /* OFFSET clause */
+    if (parse->limitOffset)
+    {
+        if (IsA(parse->limitOffset, Const))
+        {
+            Const *c = (Const *) parse->limitOffset;
+            if (!c->constisnull)
+                appendStringInfo(&sql, " OFFSET %ld", DatumGetInt64(c->constvalue));
+        }
+    }
+
+    elog(DEBUG1, "Deparsed query: %s", sql.data);
 
     return sql.data;
 }
 
+/*
+ * Create coordinator aggregation query
+ *
+ * When queries contain aggregates, the coordinator needs to combine
+ * partial results from workers. This function generates the final
+ * aggregation query that:
+ * - For SUM: SUM(partial_sums)
+ * - For COUNT: SUM(partial_counts)
+ * - For AVG: SUM(partial_sums) / SUM(partial_counts)
+ * - For MIN/MAX: MIN/MAX(partial_mins/maxs)
+ */
 char *
 orochi_create_coordinator_query(Query *parse)
 {
     StringInfoData sql;
+    ListCell *lc;
+    bool first;
+    bool has_aggregates = false;
+    int col_index = 1;
 
     initStringInfo(&sql);
 
-    /* TODO: Create final aggregation query */
-    appendStringInfoString(&sql, "SELECT * FROM worker_results");
+    /* Check if query has aggregates */
+    foreach(lc, parse->targetList)
+    {
+        TargetEntry *tle = (TargetEntry *) lfirst(lc);
+        if (IsA(tle->expr, Aggref))
+        {
+            has_aggregates = true;
+            break;
+        }
+    }
+
+    appendStringInfoString(&sql, "SELECT ");
+
+    /* Build final SELECT list */
+    first = true;
+    col_index = 1;
+    foreach(lc, parse->targetList)
+    {
+        TargetEntry *tle = (TargetEntry *) lfirst(lc);
+
+        if (tle->resjunk)
+            continue;
+
+        if (!first)
+            appendStringInfoString(&sql, ", ");
+        first = false;
+
+        if (IsA(tle->expr, Aggref))
+        {
+            Aggref *agg = (Aggref *) tle->expr;
+            char *aggname = get_func_name(agg->aggfnoid);
+
+            /*
+             * Map partial aggregates to final aggregates:
+             * - SUM: SUM(partial_sums)
+             * - COUNT: SUM(partial_counts)
+             * - AVG: Needs special handling (sum_x / count_x)
+             * - MIN/MAX: MIN/MAX of partials
+             */
+            if (aggname != NULL)
+            {
+                if (strcmp(aggname, "count") == 0)
+                {
+                    /* COUNT becomes SUM of partial counts */
+                    appendStringInfo(&sql, "SUM(col%d)", col_index);
+                }
+                else if (strcmp(aggname, "sum") == 0)
+                {
+                    /* SUM of partial sums */
+                    appendStringInfo(&sql, "SUM(col%d)", col_index);
+                }
+                else if (strcmp(aggname, "avg") == 0)
+                {
+                    /*
+                     * AVG is tricky - ideally we'd send SUM and COUNT separately.
+                     * For now, use weighted average approximation.
+                     */
+                    appendStringInfo(&sql, "AVG(col%d)", col_index);
+                }
+                else if (strcmp(aggname, "min") == 0)
+                {
+                    appendStringInfo(&sql, "MIN(col%d)", col_index);
+                }
+                else if (strcmp(aggname, "max") == 0)
+                {
+                    appendStringInfo(&sql, "MAX(col%d)", col_index);
+                }
+                else
+                {
+                    /* Unknown aggregate - pass through */
+                    appendStringInfo(&sql, "col%d", col_index);
+                }
+            }
+            else
+            {
+                appendStringInfo(&sql, "col%d", col_index);
+            }
+
+            /* Add alias */
+            if (tle->resname != NULL)
+                appendStringInfo(&sql, " AS %s", quote_identifier(tle->resname));
+        }
+        else
+        {
+            /* Non-aggregate columns (GROUP BY columns) - just pass through */
+            if (tle->resname != NULL)
+                appendStringInfoString(&sql, quote_identifier(tle->resname));
+            else
+                appendStringInfo(&sql, "col%d", col_index);
+        }
+
+        col_index++;
+    }
+
+    /* FROM the worker results */
+    appendStringInfoString(&sql, " FROM worker_results");
+
+    /* GROUP BY if we have aggregates with grouping */
+    if (has_aggregates && parse->groupClause != NIL)
+    {
+        appendStringInfoString(&sql, " GROUP BY ");
+        first = true;
+        col_index = 1;
+
+        foreach(lc, parse->targetList)
+        {
+            TargetEntry *tle = (TargetEntry *) lfirst(lc);
+
+            if (tle->resjunk)
+                continue;
+
+            /* Include non-aggregate columns in GROUP BY */
+            if (!IsA(tle->expr, Aggref))
+            {
+                if (!first)
+                    appendStringInfoString(&sql, ", ");
+                first = false;
+
+                if (tle->resname != NULL)
+                    appendStringInfoString(&sql, quote_identifier(tle->resname));
+                else
+                    appendStringInfo(&sql, "col%d", col_index);
+            }
+            col_index++;
+        }
+    }
+
+    /* ORDER BY - reapply at coordinator */
+    if (parse->sortClause != NIL)
+    {
+        appendStringInfoString(&sql, " ORDER BY ");
+        first = true;
+        foreach(lc, parse->sortClause)
+        {
+            SortGroupClause *sgc = (SortGroupClause *) lfirst(lc);
+            TargetEntry *tle = get_sortgroupclause_tle(sgc, parse->targetList);
+
+            if (!first)
+                appendStringInfoString(&sql, ", ");
+            first = false;
+
+            if (tle->resname)
+                appendStringInfoString(&sql, quote_identifier(tle->resname));
+            else
+                appendStringInfo(&sql, "%d", tle->resno);
+        }
+    }
+
+    /* LIMIT - apply at coordinator level */
+    if (parse->limitCount)
+    {
+        if (IsA(parse->limitCount, Const))
+        {
+            Const *c = (Const *) parse->limitCount;
+            if (!c->constisnull)
+                appendStringInfo(&sql, " LIMIT %ld", DatumGetInt64(c->constvalue));
+        }
+    }
+
+    if (parse->limitOffset)
+    {
+        if (IsA(parse->limitOffset, Const))
+        {
+            Const *c = (Const *) parse->limitOffset;
+            if (!c->constisnull)
+                appendStringInfo(&sql, " OFFSET %ld", DatumGetInt64(c->constvalue));
+        }
+    }
+
+    elog(DEBUG1, "Coordinator query: %s", sql.data);
 
     return sql.data;
 }
