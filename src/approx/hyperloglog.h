@@ -37,8 +37,9 @@
 /* Register count = 2^precision */
 #define HLL_REGISTERS(precision)    (1 << (precision))
 
-/* Alpha constants for bias correction (based on precision) */
-#define HLL_ALPHA_INF               0.7213f / (1.0f + 1.079f / (float)(1 << precision))
+/* Alpha constant for bias correction (asymptotic value for large m) */
+/* Note: Use hll_alpha(precision) function for actual calculations */
+#define HLL_ALPHA_INF               0.7213f
 
 /* Threshold for switching between linear counting and HLL */
 #define HLL_LINEAR_COUNT_THRESHOLD  2.5f

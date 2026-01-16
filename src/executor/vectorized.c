@@ -24,6 +24,7 @@
 #include <string.h>
 #include <math.h>
 #include <float.h>
+#include <stdint.h>  /* For INT64_MAX, INT64_MIN */
 
 #include "vectorized.h"
 
@@ -69,9 +70,9 @@ vectorized_palloc_aligned(Size size, Size alignment)
 }
 
 /*
- * Free aligned memory
+ * Free aligned memory allocated by vectorized_palloc_aligned
  */
-static void
+void
 vectorized_pfree_aligned(void *aligned_ptr)
 {
     if (aligned_ptr != NULL)

@@ -434,6 +434,31 @@ extern void raft_log_compact(RaftLog *log, uint64 up_to_index);
  */
 extern void raft_log_free(RaftLog *log);
 
+/*
+ * Create a snapshot of the state machine
+ */
+extern void raft_log_create_snapshot(RaftLog *log, uint64 last_included_index,
+                                     const char *snapshot_data, int32 snapshot_size);
+
+/*
+ * Load the most recent snapshot
+ * Returns snapshot data that caller must free, or NULL if no snapshot.
+ */
+extern char *raft_log_load_snapshot(RaftLog *log, uint64 *last_included_index,
+                                    uint64 *last_included_term, int32 *data_size);
+
+/*
+ * Get log statistics
+ */
+extern void raft_log_get_stats(RaftLog *log, uint64 *first_index, uint64 *last_index,
+                               uint64 *commit_index, uint64 *last_applied,
+                               int32 *entry_count, int32 *capacity);
+
+/*
+ * Dump log contents for debugging
+ */
+extern void raft_log_dump(RaftLog *log, StringInfo buf);
+
 /* ============================================================
  * Raft State Persistence
  * ============================================================ */

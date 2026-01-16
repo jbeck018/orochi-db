@@ -132,16 +132,20 @@ orochi_create_pipeline(const char *name,
                  errmsg("invalid target table")));
 
     /* Create pipeline record in catalog */
-    SPI_connect();
+    if (SPI_connect() != SPI_OK_CONNECT)
+        ereport(ERROR,
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("failed to connect to SPI")));
 
     initStringInfo(&query);
+    /* Use quote_literal_cstr to prevent SQL injection */
     appendStringInfo(&query,
         "INSERT INTO orochi.orochi_pipelines "
         "(name, source_type, target_table_oid, format, options, state, created_at) "
-        "VALUES ('%s', %d, %u, %d, '%s', %d, NOW()) "
+        "VALUES (%s, %d, %u, %d, %s, %d, NOW()) "
         "RETURNING pipeline_id",
-        name, (int)source_type, target_table_oid, (int)format,
-        options_json ? options_json : "{}",
+        quote_literal_cstr(name), (int)source_type, target_table_oid, (int)format,
+        quote_literal_cstr(options_json ? options_json : "{}"),
         (int)PIPELINE_STATE_CREATED);
 
     ret = SPI_execute(query.data, false, 0);
@@ -732,19 +736,22 @@ pipeline_worker_main(Datum main_arg)
             ErrorData *edata;
             MemoryContext ecxt;
 
-            ecxt = MemoryContextSwitchTo(pipeline->pipeline_context);
+            /* Safely get error data - use TopMemoryContext if pipeline_context is NULL */
+            ecxt = MemoryContextSwitchTo(pipeline->pipeline_context ?
+                                         pipeline->pipeline_context : TopMemoryContext);
             edata = CopyErrorData();
             FlushErrorState();
             MemoryContextSwitchTo(ecxt);
 
             elog(WARNING, "Pipeline %ld error: %s", pipeline_id, edata->message);
 
-            /* Update error stats */
-            if (pipeline->stats)
+            /* Update error stats - check stats is not NULL */
+            if (pipeline->stats != NULL)
             {
                 pipeline->stats->messages_failed++;
                 pipeline->stats->last_error_time = GetCurrentTimestamp();
-                pipeline->stats->last_error_message = pstrdup(edata->message);
+                if (edata->message)
+                    pipeline->stats->last_error_message = pstrdup(edata->message);
             }
 
             AbortCurrentTransaction();
@@ -851,10 +858,15 @@ load_pipeline_from_catalog(int64 pipeline_id)
         pipeline->state = (PipelineState)DatumGetInt32(SPI_getbinval(tuple, tupdesc, 7, &isnull));
         pipeline->created_at = DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 8, &isnull));
 
-        if (!DatumGetBool(SPI_getbinval(tuple, tupdesc, 9, &isnull)))
-            pipeline->started_at = DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 9, &isnull));
-        if (!DatumGetBool(SPI_getbinval(tuple, tupdesc, 10, &isnull)))
-            pipeline->stopped_at = DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 10, &isnull));
+        /* Get started_at if not null */
+        pipeline->started_at = DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 9, &isnull));
+        if (isnull)
+            pipeline->started_at = 0;
+
+        /* Get stopped_at if not null */
+        pipeline->stopped_at = DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 10, &isnull));
+        if (isnull)
+            pipeline->stopped_at = 0;
 
         pipeline->worker_pid = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 11, &isnull));
 
@@ -891,6 +903,9 @@ load_pipeline_from_catalog(int64 pipeline_id)
     }
     else
     {
+        /* Clean up memory context before returning NULL */
+        if (pipeline->pipeline_context)
+            MemoryContextDelete(pipeline->pipeline_context);
         pfree(pipeline);
         pipeline = NULL;
     }

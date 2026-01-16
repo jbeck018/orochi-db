@@ -17,6 +17,15 @@ OBJS = \
 	src/vector/vector_ops.o \
 	src/planner/distributed_planner.o \
 	src/executor/distributed_executor.o \
+	src/executor/vectorized.o \
+	src/executor/vectorized_scan.o \
+	src/consensus/raft.o \
+	src/consensus/raft_log.o \
+	src/approx/hyperloglog.o \
+	src/approx/tdigest.o \
+	src/approx/sampling.o \
+	src/pipelines/pipeline.o \
+	src/pipelines/kafka_source.o \
 	src/utils/utils.o
 
 DATA = sql/orochi--1.0.sql
@@ -45,8 +54,8 @@ endif
 # Warnings
 PG_CFLAGS += -Wall -Wextra -Wno-unused-parameter
 
-# Link against compression libraries and OpenSSL (for S3 signing)
-SHLIB_LINK = -llz4 -lzstd -lcurl -lssl -lcrypto
+# Link against compression libraries, OpenSSL (for S3 signing), and Kafka
+SHLIB_LINK = -llz4 -lzstd -lcurl -lssl -lcrypto -lrdkafka
 
 # Regression tests
 REGRESS = basic distributed hypertable columnar vector tiering

@@ -683,15 +683,59 @@ tdigest_trimmed_mean(TDigest *td, double lower_fraction, double upper_fraction)
 {
     double q_low = lower_fraction;
     double q_high = 1.0 - upper_fraction;
+    Centroid *centroids;
+    double total_weight;
+    double cumulative_weight;
+    double trimmed_sum = 0.0;
+    double trimmed_weight = 0.0;
 
     if (q_low >= q_high)
         return NAN;
 
-    /* Simple implementation: average of interior quantiles */
-    double v_low = tdigest_quantile(td, q_low);
-    double v_high = tdigest_quantile(td, q_high);
+    tdigest_compress(td);
+    tdigest_sort_centroids(td);
 
-    return (v_low + v_high) / 2.0;
+    if (td->num_centroids == 0 || td->total_weight == 0)
+        return NAN;
+
+    centroids = TDIGEST_CENTROIDS(td);
+    total_weight = (double) td->total_weight;
+    cumulative_weight = 0.0;
+
+    double target_low = q_low * total_weight;
+    double target_high = q_high * total_weight;
+
+    /*
+     * Walk through centroids and include weights/values that fall
+     * between the lower and upper quantile boundaries.
+     */
+    for (int i = 0; i < td->num_centroids; i++)
+    {
+        double centroid_start = cumulative_weight;
+        double centroid_end = cumulative_weight + centroids[i].weight;
+
+        /* Check if this centroid overlaps with the trimmed range */
+        if (centroid_end > target_low && centroid_start < target_high)
+        {
+            /* Calculate the portion of this centroid within the trim range */
+            double effective_start = fmax(centroid_start, target_low);
+            double effective_end = fmin(centroid_end, target_high);
+            double effective_weight = effective_end - effective_start;
+
+            if (effective_weight > 0)
+            {
+                trimmed_sum += centroids[i].mean * effective_weight;
+                trimmed_weight += effective_weight;
+            }
+        }
+
+        cumulative_weight = centroid_end;
+    }
+
+    if (trimmed_weight <= 0.0)
+        return NAN;
+
+    return trimmed_sum / trimmed_weight;
 }
 
 /* ============================================================

@@ -18,7 +18,9 @@
 #include "utils/builtins.h"
 #include "utils/json.h"
 #include "utils/jsonb.h"
+#include "utils/fmgrprotos.h"
 #include "executor/spi.h"
+#include "catalog/pg_type.h"
 
 #include "../orochi.h"
 #include "pipeline.h"
@@ -45,8 +47,8 @@ typedef struct KafkaConsumer
 
 #ifdef HAVE_LIBRDKAFKA
     rd_kafka_t     *rk;              /* Kafka handle */
-    rd_kafka_conf_t *conf;           /* Configuration */
     rd_kafka_topic_partition_list_t *topics;
+    /* Note: conf is consumed by rd_kafka_new, do not store or free it */
 #endif
 
     /* State tracking */
@@ -200,17 +202,17 @@ kafka_source_init(KafkaSourceConfig *config)
                               errstr, sizeof(errstr));
         }
 
-        /* Create Kafka consumer */
+        /* Create Kafka consumer - note: rd_kafka_new takes ownership of conf */
         consumer->rk = rd_kafka_new(RD_KAFKA_CONSUMER, conf, errstr, sizeof(errstr));
         if (!consumer->rk)
         {
             elog(ERROR, "Failed to create Kafka consumer: %s", errstr);
-            rd_kafka_conf_destroy(conf);
+            /* Note: rd_kafka_new destroys conf on failure, so no need to destroy it here */
             MemoryContextSwitchTo(oldcontext);
+            MemoryContextDelete(kafka_context);
             return NULL;
         }
-
-        consumer->conf = conf;
+        /* conf is now owned by consumer->rk, do not store or destroy it */
 
         /* Redirect all messages to consumer_poll() */
         rd_kafka_poll_set_consumer(consumer->rk);
@@ -319,9 +321,19 @@ kafka_source_poll(void *consumer_ptr, char **messages, int max_messages, int tim
                 }
             }
 
-            /* Copy message payload */
+            /* Copy message payload with size validation */
             if (msg->payload && msg->len > 0)
             {
+                /* Limit maximum message size to 64MB to prevent DoS */
+                #define KAFKA_MAX_MESSAGE_SIZE (64 * 1024 * 1024)
+                if (msg->len > KAFKA_MAX_MESSAGE_SIZE)
+                {
+                    elog(WARNING, "Kafka message too large: %zu bytes (max %d)",
+                         msg->len, KAFKA_MAX_MESSAGE_SIZE);
+                    rd_kafka_message_destroy(msg);
+                    continue;
+                }
+
                 messages[count] = palloc(msg->len + 1);
                 memcpy(messages[count], msg->payload, msg->len);
                 messages[count][msg->len] = '\0';
@@ -559,7 +571,7 @@ kafka_process_batch(Pipeline *pipeline, KafkaConsumer *consumer, int batch_size)
                     List *records = parse_json_records(messages[i], strlen(messages[i]));
                     if (records != NIL)
                     {
-                        int64 inserted = pipeline_insert_batch(pipeline, records, true);
+                        (void) pipeline_insert_batch(pipeline, records, true);
                         processed += list_length(records);
                         list_free_deep(records);
                     }
@@ -572,7 +584,7 @@ kafka_process_batch(Pipeline *pipeline, KafkaConsumer *consumer, int batch_size)
                                                       ',', true);
                     if (records != NIL)
                     {
-                        int64 inserted = pipeline_insert_batch(pipeline, records, true);
+                        (void) pipeline_insert_batch(pipeline, records, true);
                         processed += list_length(records);
                         list_free_deep(records);
                     }
@@ -584,7 +596,7 @@ kafka_process_batch(Pipeline *pipeline, KafkaConsumer *consumer, int batch_size)
                     List *records = parse_line_protocol(messages[i], strlen(messages[i]));
                     if (records != NIL)
                     {
-                        int64 inserted = pipeline_insert_batch(pipeline, records, true);
+                        (void) pipeline_insert_batch(pipeline, records, true);
                         processed += list_length(records);
                         list_free_deep(records);
                     }
@@ -650,18 +662,30 @@ parse_json_records(const char *data, int64 size)
     /* Check if it's an array or single object */
     if (data[0] == '[')
     {
-        /* JSON array - parse each element */
+        /* JSON array - parse each element using parameterized query */
         StringInfoData query;
         int ret;
+        Oid argtypes[1] = { JSONBOID };
+        Datum argvals[1];
+        Jsonb *jb;
 
-        SPI_connect();
+        if (SPI_connect() != SPI_OK_CONNECT)
+        {
+            elog(WARNING, "Failed to connect to SPI for JSON parsing");
+            return NIL;
+        }
 
+        /* Convert text to jsonb for safe parameterized query */
         initStringInfo(&query);
-        appendStringInfo(&query,
-            "SELECT value FROM jsonb_array_elements('%s'::jsonb)",
-            data);
+        appendStringInfoString(&query,
+            "SELECT value FROM jsonb_array_elements($1)");
 
-        ret = SPI_execute(query.data, true, 0);
+        /* Create jsonb datum from text - use DirectFunctionCall for safe conversion */
+        jb = DatumGetJsonbP(DirectFunctionCall1(jsonb_in,
+                                                 CStringGetDatum(data)));
+        argvals[0] = JsonbPGetDatum(jb);
+
+        ret = SPI_execute_with_args(query.data, 1, argtypes, argvals, NULL, true, 0);
         if (ret == SPI_OK_SELECT && SPI_processed > 0)
         {
             int i;

@@ -29,9 +29,11 @@
 /* AVX2 requires 32-byte alignment */
 #define VECTORIZED_ALIGNMENT            32
 
-/* Macro for aligned memory allocation */
-#define VECTORIZED_ALLOC_ALIGNED(size)  \
-    ((void *) TYPEALIGN(VECTORIZED_ALIGNMENT, (uintptr_t) palloc((size) + VECTORIZED_ALIGNMENT)))
+/*
+ * IMPORTANT: Do NOT use a simple macro for aligned allocation.
+ * Aligned allocation requires storing the original pointer for proper freeing.
+ * Always use the function vectorized_palloc_aligned() which handles this correctly.
+ */
 
 /* Macro for portable aligned allocation using palloc */
 #define VECTORIZED_PALLOC_ALIGNED(size) \
@@ -270,6 +272,11 @@ extern VectorColumn *vector_batch_add_column(VectorBatch *batch,
 extern void *vectorized_palloc_aligned(Size size, Size alignment);
 
 /*
+ * Free aligned memory allocated by vectorized_palloc_aligned
+ */
+extern void vectorized_pfree_aligned(void *aligned_ptr);
+
+/*
  * Convert PostgreSQL type to vectorized data type
  */
 extern VectorizedDataType vectorized_type_from_oid(Oid type_oid);
@@ -473,5 +480,12 @@ extern bool vectorized_cpu_supports_avx2(void);
  * Print batch statistics for debugging
  */
 extern void vectorized_batch_debug_print(VectorBatch *batch);
+
+/*
+ * Load raw decompressed data into a vector column
+ * Dispatches to SIMD implementation when available
+ */
+extern void vectorized_load_column_data(VectorColumn *column, const void *src_data,
+                                        int32 row_count, const uint8 *null_bitmap);
 
 #endif /* OROCHI_VECTORIZED_H */

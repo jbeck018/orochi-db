@@ -897,8 +897,9 @@ raft_add_peer(RaftNode *node, int32 peer_id, const char *hostname, int port)
 
     node->cluster->peer_count++;
 
-    /* Update quorum size (majority) */
-    node->cluster->quorum_size = (node->cluster->peer_count + 2) / 2;
+    /* Update quorum size (majority): floor(total_nodes/2) + 1
+     * where total_nodes = peer_count + 1 (including self) */
+    node->cluster->quorum_size = (node->cluster->peer_count + 1) / 2 + 1;
 
     MemoryContextSwitchTo(old_context);
 
@@ -936,7 +937,8 @@ raft_remove_peer(RaftNode *node, int32 peer_id)
             }
 
             node->cluster->peer_count--;
-            node->cluster->quorum_size = (node->cluster->peer_count + 2) / 2;
+            /* Update quorum size (majority): floor(total_nodes/2) + 1 */
+            node->cluster->quorum_size = (node->cluster->peer_count + 1) / 2 + 1;
 
             elog(LOG, "Raft node %d removed peer %d (quorum=%d)",
                  node->node_id, peer_id, node->cluster->quorum_size);

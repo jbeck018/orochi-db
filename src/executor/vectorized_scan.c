@@ -22,6 +22,8 @@
 #include "utils/memutils.h"
 #include "utils/rel.h"
 
+#include <stdint.h>  /* For uint8, int32, int64 types */
+
 #include "vectorized.h"
 #include "../storage/columnar.h"
 #include "../core/catalog.h"

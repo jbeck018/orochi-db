@@ -27,6 +27,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <dirent.h>
 
 #include "raft.h"
 
@@ -139,17 +140,22 @@ void
 raft_log_free(RaftLog *log)
 {
     uint64 i;
+    uint64 entry_count;
 
     if (log == NULL)
         return;
 
-    /* Free entry command data */
-    for (i = 0; i < (log->last_index - log->first_index + 1); i++)
+    /* Free entry command data - check for empty log to avoid underflow */
+    if (log->last_index >= log->first_index)
     {
-        if (log->entries[i].command_data != NULL)
+        entry_count = log->last_index - log->first_index + 1;
+        for (i = 0; i < entry_count; i++)
         {
-            pfree(log->entries[i].command_data);
-            log->entries[i].command_data = NULL;
+            if (log->entries[i].command_data != NULL)
+            {
+                pfree(log->entries[i].command_data);
+                log->entries[i].command_data = NULL;
+            }
         }
     }
 
