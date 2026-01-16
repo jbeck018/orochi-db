@@ -564,11 +564,40 @@ CREATE TABLE IF NOT EXISTS orochi.orochi_chunks (
     UNIQUE(hypertable_oid, range_start)
 );
 
+-- Hypertable dimensions (time and space partitioning)
+CREATE TABLE IF NOT EXISTS orochi.orochi_dimensions (
+    dimension_id SERIAL PRIMARY KEY,
+    hypertable_oid OID NOT NULL REFERENCES orochi.orochi_tables(table_oid) ON DELETE CASCADE,
+    column_name TEXT NOT NULL,
+    dimension_type INTEGER NOT NULL DEFAULT 0,  -- 0=time, 1=space/hash
+    num_partitions INTEGER NOT NULL DEFAULT 1,
+    interval_length BIGINT,  -- For time dimensions, in microseconds
+    aligned BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(hypertable_oid, column_name)
+);
+
+-- Hypertable policies (compression, retention, tiering)
+CREATE TABLE IF NOT EXISTS orochi.orochi_policies (
+    policy_id SERIAL PRIMARY KEY,
+    hypertable_oid OID NOT NULL REFERENCES orochi.orochi_tables(table_oid) ON DELETE CASCADE,
+    policy_type INTEGER NOT NULL,  -- 0=compression, 1=retention, 2=tiering
+    trigger_interval INTERVAL NOT NULL,
+    config JSONB,  -- Additional policy-specific configuration
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    last_run TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(hypertable_oid, policy_type)
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_shards_table ON orochi.orochi_shards(table_oid);
 CREATE INDEX IF NOT EXISTS idx_shards_node ON orochi.orochi_shards(node_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_hypertable ON orochi.orochi_chunks(hypertable_oid);
 CREATE INDEX IF NOT EXISTS idx_chunks_range ON orochi.orochi_chunks(range_start, range_end);
+CREATE INDEX IF NOT EXISTS idx_dimensions_hypertable ON orochi.orochi_dimensions(hypertable_oid);
+CREATE INDEX IF NOT EXISTS idx_policies_hypertable ON orochi.orochi_policies(hypertable_oid);
+CREATE INDEX IF NOT EXISTS idx_policies_active ON orochi.orochi_policies(is_active) WHERE is_active = TRUE;
 
 -- ============================================================
 -- Information Views
