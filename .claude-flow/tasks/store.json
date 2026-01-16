@@ -1,0 +1,18 @@
+{
+  "tasks": {
+    "task-1768521837104-axhyo0": {
+      "taskId": "task-1768521837104-axhyo0",
+      "type": "implementation",
+      "description": "Complete Orochi DB Phase 1: Implement shard pruning and query deparsing",
+      "priority": "high",
+      "status": "pending",
+      "progress": 0,
+      "assignedTo": [],
+      "tags": [],
+      "createdAt": "2026-01-16T00:03:57.104Z",
+      "startedAt": null,
+      "completedAt": null
+    }
+  },
+  "version": "3.0.0"
+}

@@ -276,9 +276,34 @@ extern void orochi_catalog_update_stripe_status(int64 stripe_id, bool is_flushed
 extern void orochi_catalog_create_column_chunk(OrochiColumnChunk *chunk);
 
 /*
+ * Update column chunk min/max statistics
+ */
+extern void orochi_catalog_update_column_stats(int64 stripe_id, int16 column_index,
+                                               Datum min_value, Datum max_value,
+                                               Oid type_oid);
+
+/*
  * Get column chunks for a stripe
  */
 extern List *orochi_catalog_get_stripe_columns(int64 stripe_id);
+
+/*
+ * Read compressed chunk data from storage
+ * Returns the compressed data buffer and sets size.
+ * Caller is responsible for freeing the returned buffer.
+ */
+extern char *orochi_catalog_read_chunk_data(int64 stripe_id, int32 chunk_group_index,
+                                            int16 column_index, int64 *data_size);
+
+/*
+ * Extended version of create_column_chunk that stores the data
+ */
+extern void orochi_catalog_create_column_chunk_with_data(int64 stripe_id,
+                                                          int32 chunk_group_index,
+                                                          int16 column_index,
+                                                          OrochiColumnChunk *chunk,
+                                                          const char *data,
+                                                          int64 data_size);
 
 /* ============================================================
  * Tiering Policy Operations

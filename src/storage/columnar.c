@@ -14,17 +14,23 @@
 #include "access/tableam.h"
 #include "access/xact.h"
 #include "catalog/pg_am.h"
+#include "catalog/pg_operator.h"
 #include "catalog/pg_type.h"
 #include "commands/vacuum.h"
+#include "executor/spi.h"
 #include "executor/tuptable.h"
 #include "miscadmin.h"
+#include "nodes/primnodes.h"
 #include "storage/bufmgr.h"
 #include "storage/smgr.h"
 #include "utils/builtins.h"
 #include "utils/datum.h"
+#include "utils/fmgroids.h"
 #include "utils/memutils.h"
+#include "utils/hashutils.h"
 #include "utils/rel.h"
 #include "utils/syscache.h"
+#include "utils/typcache.h"
 
 #include "../orochi.h"
 #include "../core/catalog.h"
@@ -184,7 +190,57 @@ columnar_select_compression(Oid type_oid, Datum *sample_values, int sample_count
         case TEXTOID:
         case VARCHAROID:
         case BPCHAROID:
-            /* TODO: Analyze cardinality for dictionary encoding */
+            /*
+             * Analyze cardinality for dictionary encoding.
+             * If the ratio of unique values to total values is below a threshold,
+             * dictionary encoding is more efficient.
+             */
+            if (sample_values != NULL && sample_count > 0)
+            {
+                HTAB       *seen_values;
+                HASHCTL     hash_ctl;
+                int         unique_count = 0;
+                int         i;
+                double      cardinality_ratio;
+
+                /* Create a hash table to count unique values */
+                memset(&hash_ctl, 0, sizeof(hash_ctl));
+                hash_ctl.keysize = sizeof(uint32);
+                hash_ctl.entrysize = sizeof(uint32);
+                hash_ctl.hcxt = CurrentMemoryContext;
+
+                seen_values = hash_create("CardinalityCheck",
+                                         sample_count,
+                                         &hash_ctl,
+                                         HASH_ELEM | HASH_CONTEXT | HASH_BLOBS);
+
+                for (i = 0; i < sample_count; i++)
+                {
+                    uint32 hash_val;
+                    bool found;
+
+                    /* Compute hash of the text value */
+                    hash_val = DatumGetUInt32(hash_any((unsigned char *)
+                                              DatumGetPointer(sample_values[i]),
+                                              VARSIZE_ANY_EXHDR(DatumGetPointer(sample_values[i]))));
+
+                    hash_search(seen_values, &hash_val, HASH_ENTER, &found);
+                    if (!found)
+                        unique_count++;
+                }
+
+                hash_destroy(seen_values);
+
+                /* Calculate cardinality ratio */
+                cardinality_ratio = (double) unique_count / (double) sample_count;
+
+                /*
+                 * Use dictionary encoding if cardinality is low (< 10% unique values)
+                 * or if there are very few unique values (< 256 for byte-sized index)
+                 */
+                if (cardinality_ratio < 0.1 || unique_count < 256)
+                    return OROCHI_COMPRESS_DICTIONARY;
+            }
             return OROCHI_COMPRESS_ZSTD;
 
         default:
@@ -303,12 +359,45 @@ columnar_write_row(ColumnarWriteState *state, Datum *values, bool *nulls)
             }
 
             /* Update min/max statistics */
-            if (buf->count == 0 || !buf->has_nulls)
+            if (buf->count == 0)
             {
+                /* First non-null value: initialize min/max */
                 buf->min_value = buf->values[buf->count];
                 buf->max_value = buf->values[buf->count];
             }
-            /* TODO: Compare and update min/max */
+            else
+            {
+                /*
+                 * Compare current value with min/max and update.
+                 * Use the appropriate comparison based on type.
+                 */
+                Oid             cmp_proc;
+                TypeCacheEntry *typentry;
+                Datum           curr_value = buf->values[buf->count];
+                int             cmp_result;
+
+                typentry = lookup_type_cache(attr->atttypid,
+                                            TYPECACHE_CMP_PROC | TYPECACHE_CMP_PROC_FINFO);
+
+                if (OidIsValid(typentry->cmp_proc))
+                {
+                    /* Compare with min value */
+                    cmp_result = DatumGetInt32(FunctionCall2Coll(&typentry->cmp_proc_finfo,
+                                                                  attr->attcollation,
+                                                                  curr_value,
+                                                                  buf->min_value));
+                    if (cmp_result < 0)
+                        buf->min_value = curr_value;
+
+                    /* Compare with max value */
+                    cmp_result = DatumGetInt32(FunctionCall2Coll(&typentry->cmp_proc_finfo,
+                                                                  attr->attcollation,
+                                                                  curr_value,
+                                                                  buf->max_value));
+                    if (cmp_result > 0)
+                        buf->max_value = curr_value;
+                }
+            }
         }
         else
         {
@@ -495,7 +584,19 @@ serialize_chunk_group(ColumnarWriteState *state)
 
         cg->columns[i] = chunk;
 
-        /* Reset buffer for next chunk group */
+        /*
+         * Also store compression info in ColumnWriteBuffer for flush_stripe
+         * to access when writing to catalog storage.
+         */
+        buf->attr_type = attr->atttypid;
+        buf->row_count = chunk->value_count;
+        buf->null_count = chunk->null_count;
+        buf->compressed_data = chunk->value_buffer;
+        buf->compressed_size = chunk->compressed_size;
+        buf->uncompressed_size = chunk->decompressed_size;
+        buf->compression_type = chunk->compression_type;
+
+        /* Reset count for next chunk group (but keep compression data for flush) */
         buf->count = 0;
         buf->has_nulls = false;
     }
@@ -526,8 +627,64 @@ flush_stripe(ColumnarWriteState *state)
     stripe->stripe_id = stripe_id;
     stripe->row_count = state->stripe_row_count;
 
-    /* Write stripe data to storage */
-    /* TODO: Implement actual storage write */
+    /*
+     * Write stripe data to storage.
+     * Store each column's compressed data separately in the catalog.
+     */
+    {
+        int cg_idx;
+        int64 total_data_size = 0;
+
+        /* Store data for each chunk group */
+        for (cg_idx = 0; cg_idx < stripe->chunk_group_count; cg_idx++)
+        {
+            int col_idx;
+
+            /* Store each column separately */
+            for (col_idx = 0; col_idx < state->tupdesc->natts; col_idx++)
+            {
+                struct ColumnWriteBuffer *col_buf = &state->column_buffers[col_idx];
+                OrochiColumnChunk chunk_meta;
+
+                /* Build chunk metadata */
+                memset(&chunk_meta, 0, sizeof(OrochiColumnChunk));
+                chunk_meta.stripe_id = stripe_id;
+                chunk_meta.chunk_group_index = cg_idx;
+                chunk_meta.column_index = col_idx;
+                chunk_meta.data_type = col_buf->attr_type;
+                chunk_meta.value_count = col_buf->row_count;
+                chunk_meta.null_count = col_buf->null_count;
+                chunk_meta.has_nulls = (col_buf->null_count > 0);
+                chunk_meta.compressed_size = col_buf->compressed_size;
+                chunk_meta.decompressed_size = col_buf->uncompressed_size;
+                chunk_meta.compression = col_buf->compression_type;
+                chunk_meta.min_value = col_buf->min_value;
+                chunk_meta.max_value = col_buf->max_value;
+
+                /* Store chunk with compressed data */
+                orochi_catalog_create_column_chunk_with_data(
+                    stripe_id,
+                    cg_idx,
+                    col_idx,
+                    &chunk_meta,
+                    col_buf->compressed_data,
+                    col_buf->compressed_size);
+
+                /* Update min/max statistics for skip list */
+                orochi_catalog_update_column_stats(stripe_id, col_idx,
+                                                   col_buf->min_value,
+                                                   col_buf->max_value,
+                                                   col_buf->attr_type);
+
+                total_data_size += col_buf->compressed_size;
+            }
+        }
+
+        stripe->data_size = total_data_size;
+
+        elog(DEBUG1, "Wrote stripe %ld: %d chunk groups, %ld bytes",
+             stripe_id, stripe->chunk_group_count, total_data_size);
+    }
 
     /* Update catalog with final sizes */
     orochi_catalog_update_stripe_status(stripe_id, true,
@@ -629,12 +786,220 @@ columnar_begin_read(Relation relation, Snapshot snapshot, Bitmapset *columns_nee
 static void
 load_chunk_group(ColumnarReadState *state, int chunk_group_index)
 {
-    /* TODO: Load chunk group data from storage */
-    /* This would:
-     * 1. Read compressed column data from storage
-     * 2. Decompress into column_buffers
-     * 3. Set up for iteration
-     */
+    ColumnarStripe *stripe = state->current_stripe;
+    TupleDesc tupdesc = state->tupdesc;
+    MemoryContext old_context;
+    List *column_chunks;
+    ListCell *lc;
+    int col_idx;
+
+    if (stripe == NULL)
+        return;
+
+    old_context = MemoryContextSwitchTo(state->stripe_context);
+
+    /* Get column chunk metadata from catalog */
+    column_chunks = orochi_catalog_get_stripe_columns(stripe->stripe_id);
+
+    /* Allocate chunk group structure */
+    state->current_chunk_group = palloc0(sizeof(ColumnarChunkGroup));
+    state->current_chunk_group->chunk_group_index = chunk_group_index;
+    state->current_chunk_group->column_count = tupdesc->natts;
+    state->current_chunk_group->row_count = stripe->row_count;
+
+    /* Process each column in projection */
+    for (col_idx = 0; col_idx < tupdesc->natts; col_idx++)
+    {
+        Form_pg_attribute attr = TupleDescAttr(tupdesc, col_idx);
+        OrochiColumnChunk *chunk_meta = NULL;
+        struct ColumnReadBuffer *col_buf = &state->column_buffers[col_idx];
+
+        /* Skip if not in projection */
+        if (!bms_is_member(col_idx, state->columns_needed))
+        {
+            col_buf->is_loaded = false;
+            continue;
+        }
+
+        /* Find the metadata for this column */
+        foreach(lc, column_chunks)
+        {
+            OrochiColumnChunk *cc = (OrochiColumnChunk *) lfirst(lc);
+            if (cc->column_index == col_idx)
+            {
+                chunk_meta = cc;
+                break;
+            }
+        }
+
+        if (chunk_meta == NULL)
+        {
+            /* No data for this column, initialize with nulls */
+            col_buf->values = palloc0(stripe->row_count * sizeof(Datum));
+            col_buf->nulls = palloc(stripe->row_count * sizeof(bool));
+            memset(col_buf->nulls, true, stripe->row_count * sizeof(bool));
+            col_buf->row_count = stripe->row_count;
+            col_buf->is_loaded = true;
+            continue;
+        }
+
+        /* Allocate buffers for decompressed data */
+        col_buf->values = palloc0(chunk_meta->value_count * sizeof(Datum));
+        col_buf->nulls = palloc0(chunk_meta->value_count * sizeof(bool));
+        col_buf->row_count = chunk_meta->value_count;
+
+        /*
+         * Read compressed data from catalog storage and decompress.
+         * Use the catalog function which reads from orochi_column_chunks table.
+         */
+        {
+            char *compressed_data = NULL;
+            int64 compressed_size = 0;
+            int64 decompressed_size = chunk_meta->decompressed_size;
+            char *decompressed_buffer = NULL;
+
+            /* Read the compressed chunk data from catalog storage */
+            compressed_data = orochi_catalog_read_chunk_data(
+                stripe->stripe_id,
+                chunk_group_index,
+                col_idx,
+                &compressed_size);
+
+            /* Decompress the data if we have it */
+            if (compressed_data != NULL && compressed_size > 0)
+            {
+                OrochiCompressionType compression_type = chunk_meta->compression;
+
+                /* Allocate decompression buffer */
+                if (decompressed_size <= 0)
+                    decompressed_size = compressed_size;
+                decompressed_buffer = palloc(decompressed_size);
+
+                if (compression_type != OROCHI_COMPRESS_NONE)
+                {
+                    /* Decompress the column data using appropriate algorithm */
+                    int64 actual_size = columnar_decompress_buffer(
+                        compressed_data, compressed_size,
+                        decompressed_buffer, decompressed_size,
+                        compression_type);
+
+                    if (actual_size > 0 && actual_size != decompressed_size)
+                    {
+                        elog(DEBUG1, "Column %d decompression: expected %ld, got %ld",
+                             col_idx, decompressed_size, actual_size);
+                        decompressed_size = actual_size;
+                    }
+                }
+                else
+                {
+                    /* No compression, just copy the raw data */
+                    memcpy(decompressed_buffer, compressed_data, compressed_size);
+                    decompressed_size = compressed_size;
+                }
+
+                /*
+                 * Decode the decompressed data into Datum values.
+                 * Format depends on whether type is pass-by-value or pass-by-reference.
+                 */
+                if (attr->attbyval && attr->attlen > 0)
+                {
+                    /* Fixed-width pass-by-value type (int, float, etc.) */
+                    int64 j;
+                    for (j = 0; j < chunk_meta->value_count && j * attr->attlen < decompressed_size; j++)
+                    {
+                        memcpy(&col_buf->values[j],
+                               decompressed_buffer + (j * attr->attlen),
+                               attr->attlen);
+                        col_buf->nulls[j] = false;
+                    }
+                    /* Mark remaining as null if we ran out of data */
+                    while (j < chunk_meta->value_count)
+                    {
+                        col_buf->nulls[j] = true;
+                        col_buf->values[j] = (Datum) 0;
+                        j++;
+                    }
+                }
+                else
+                {
+                    /* Variable-length type - values stored with size prefix */
+                    int64 offset = 0;
+                    int64 j = 0;
+
+                    while (offset < decompressed_size && j < chunk_meta->value_count)
+                    {
+                        Size value_size;
+
+                        /* Read value size */
+                        if (offset + (int64)sizeof(Size) > decompressed_size)
+                            break;
+
+                        memcpy(&value_size, decompressed_buffer + offset, sizeof(Size));
+                        offset += sizeof(Size);
+
+                        if (value_size == 0)
+                        {
+                            /* Null value */
+                            col_buf->nulls[j] = true;
+                            col_buf->values[j] = (Datum) 0;
+                        }
+                        else
+                        {
+                            /* Read actual value */
+                            if (offset + (int64)value_size > decompressed_size)
+                                break;
+
+                            /* Copy value with proper alignment */
+                            void *value_ptr = palloc(value_size);
+                            memcpy(value_ptr, decompressed_buffer + offset, value_size);
+                            col_buf->values[j] = PointerGetDatum(value_ptr);
+                            col_buf->nulls[j] = false;
+
+                            offset += value_size;
+                        }
+                        j++;
+                    }
+
+                    /* Mark remaining as nulls if we ran out of data */
+                    while (j < chunk_meta->value_count)
+                    {
+                        col_buf->nulls[j] = true;
+                        col_buf->values[j] = (Datum) 0;
+                        j++;
+                    }
+                }
+
+                pfree(decompressed_buffer);
+                pfree(compressed_data);
+            }
+            else
+            {
+                /*
+                 * No compressed data available in catalog storage.
+                 * Initialize with defaults based on null metadata.
+                 */
+                if (chunk_meta->has_nulls)
+                {
+                    memset(col_buf->nulls, true, chunk_meta->value_count * sizeof(bool));
+                }
+                else
+                {
+                    memset(col_buf->nulls, false, chunk_meta->value_count * sizeof(bool));
+                    memset(col_buf->values, 0, chunk_meta->value_count * sizeof(Datum));
+                }
+            }
+        }
+
+        col_buf->is_loaded = true;
+    }
+
+    /* Set row position in chunk */
+    state->current_row_in_chunk = 0;
+
+    /* Free column chunks list */
+    list_free_deep(column_chunks);
+
+    MemoryContextSwitchTo(old_context);
 }
 
 bool
@@ -744,7 +1109,19 @@ columnar_seek_to_row(ColumnarReadState *state, int64 row_number)
 
             /* Calculate chunk group and row within */
             int64 row_in_stripe = row_number - stripe->first_row_number;
-            /* TODO: Find correct chunk group */
+
+            /*
+             * Calculate the chunk group index based on row position.
+             * Each chunk group contains chunk_group_row_limit rows.
+             */
+            int32 chunk_group_row_limit = COLUMNAR_DEFAULT_CHUNK_GROUP_ROW_LIMIT;
+            int32 chunk_group_index = (int32)(row_in_stripe / chunk_group_row_limit);
+            int64 row_in_chunk = row_in_stripe % chunk_group_row_limit;
+
+            /* Load the correct chunk group */
+            state->current_chunk_group_index = chunk_group_index;
+            load_chunk_group(state, chunk_group_index);
+            state->current_row_in_chunk = row_in_chunk;
 
             return true;
         }
@@ -768,19 +1145,194 @@ ColumnarSkipList *
 columnar_build_skip_list(Relation relation)
 {
     ColumnarSkipList *skip_list;
+    List *stripes;
+    ListCell *stripe_lc;
+    int total_entries = 0;
+    int entry_idx = 0;
 
     skip_list = palloc0(sizeof(ColumnarSkipList));
 
-    /* TODO: Load skip list from catalog */
+    /* Get all stripes for this table */
+    stripes = orochi_catalog_get_table_stripes(RelationGetRelid(relation));
+
+    if (stripes == NIL)
+        return skip_list;
+
+    /* First pass: count total entries needed */
+    foreach(stripe_lc, stripes)
+    {
+        ColumnarStripe *stripe = (ColumnarStripe *) lfirst(stripe_lc);
+        List *columns = orochi_catalog_get_stripe_columns(stripe->stripe_id);
+        total_entries += list_length(columns);
+        list_free_deep(columns);
+    }
+
+    if (total_entries == 0)
+        return skip_list;
+
+    /* Allocate entries array */
+    skip_list->entries = palloc0(total_entries * sizeof(ColumnarSkipListEntry));
+    skip_list->entry_count = total_entries;
+
+    /* Second pass: populate entries */
+    foreach(stripe_lc, stripes)
+    {
+        ColumnarStripe *stripe = (ColumnarStripe *) lfirst(stripe_lc);
+        List *columns = orochi_catalog_get_stripe_columns(stripe->stripe_id);
+        ListCell *col_lc;
+
+        foreach(col_lc, columns)
+        {
+            OrochiColumnChunk *chunk = (OrochiColumnChunk *) lfirst(col_lc);
+            ColumnarSkipListEntry *entry = &skip_list->entries[entry_idx++];
+
+            entry->stripe_id = stripe->stripe_id;
+            entry->chunk_group_index = 0; /* Default to first chunk group */
+            entry->column_index = chunk->column_index;
+            entry->min_value = chunk->min_value;
+            entry->max_value = chunk->max_value;
+            entry->row_count = chunk->value_count;
+            entry->has_nulls = chunk->has_nulls;
+        }
+
+        list_free_deep(columns);
+    }
+
+    list_free_deep(stripes);
 
     return skip_list;
 }
 
+/*
+ * columnar_can_skip_chunk
+ *
+ * Evaluate predicates against min/max statistics to determine if chunk can be skipped.
+ * Returns true if the chunk definitely contains no matching rows.
+ */
 bool
 columnar_can_skip_chunk(ColumnarSkipListEntry *entry, List *predicates)
 {
-    /* TODO: Implement predicate evaluation against min/max */
+    ListCell *lc;
+
+    if (entry == NULL || predicates == NIL)
+        return false;
+
+    /* Evaluate each predicate against min/max */
+    foreach(lc, predicates)
+    {
+        Node *pred = (Node *) lfirst(lc);
+
+        if (IsA(pred, OpExpr))
+        {
+            OpExpr *op = (OpExpr *) pred;
+            Oid opno = op->opno;
+            Node *left;
+            Node *right;
+            Var *var = NULL;
+            Const *constval = NULL;
+
+            if (list_length(op->args) != 2)
+                continue;
+
+            left = (Node *) linitial(op->args);
+            right = (Node *) lsecond(op->args);
+
+            /* Identify var and const in the expression */
+            if (IsA(left, Var) && IsA(right, Const))
+            {
+                var = (Var *) left;
+                constval = (Const *) right;
+            }
+            else if (IsA(left, Const) && IsA(right, Var))
+            {
+                constval = (Const *) left;
+                var = (Var *) right;
+            }
+            else
+                continue;
+
+            /* Skip if wrong column */
+            if (var->varattno - 1 != entry->column_index)
+                continue;
+
+            /* Handle null constant */
+            if (constval->constisnull)
+            {
+                /* x = NULL never matches any row */
+                return true;
+            }
+
+            /* Evaluate based on operator type */
+            /* This is a simplified version - full implementation would use
+             * the operator's comparison function */
+            switch (opno)
+            {
+                case Int4EqualOperator:
+                case Int8EqualOperator:
+                case Float8EqualOperator:
+                    /* For equality, skip if value outside min/max range */
+                    {
+                        Datum val = constval->constvalue;
+                        /* Simple numeric comparison */
+                        if (DatumGetInt64(val) < DatumGetInt64(entry->min_value) ||
+                            DatumGetInt64(val) > DatumGetInt64(entry->max_value))
+                            return true;
+                    }
+                    break;
+
+                case Int4LessOperator:
+                case Int8LessOperator:
+                    /* WHERE col < val: skip if min >= val */
+                    if (DatumGetInt64(entry->min_value) >= DatumGetInt64(constval->constvalue))
+                        return true;
+                    break;
+
+                case Int4GreaterOperator:
+                case Int8GreaterOperator:
+                    /* WHERE col > val: skip if max <= val */
+                    if (DatumGetInt64(entry->max_value) <= DatumGetInt64(constval->constvalue))
+                        return true;
+                    break;
+
+                default:
+                    /* Unknown operator, don't skip */
+                    break;
+            }
+        }
+    }
+
     return false;
+}
+
+/*
+ * columnar_get_matching_chunks
+ *
+ * Filter skip list entries using predicates and return matching chunks.
+ */
+List *
+columnar_get_matching_chunks(ColumnarSkipList *skip_list, List *predicates)
+{
+    List *result = NIL;
+    int i;
+
+    if (skip_list == NULL || skip_list->entry_count == 0)
+        return NIL;
+
+    for (i = 0; i < skip_list->entry_count; i++)
+    {
+        ColumnarSkipListEntry *entry = &skip_list->entries[i];
+
+        /* Include chunk if it can't be skipped */
+        if (!columnar_can_skip_chunk(entry, predicates))
+        {
+            /* Copy entry to result */
+            ColumnarSkipListEntry *match = palloc(sizeof(ColumnarSkipListEntry));
+            memcpy(match, entry, sizeof(ColumnarSkipListEntry));
+            result = lappend(result, match);
+        }
+    }
+
+    return result;
 }
 
 /* ============================================================

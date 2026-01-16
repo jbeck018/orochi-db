@@ -138,6 +138,9 @@ extern void orochi_create_hypertable_with_space(Oid table_oid, const char *time_
                                                 const char *space_column, int num_partitions);
 extern void orochi_add_dimension(Oid hypertable_oid, const char *column_name,
                                  int num_partitions, Interval *interval);
+extern void orochi_register_dimension(Oid hypertable_oid, const char *column_name,
+                                      int dimension_type, int num_partitions,
+                                      int64 interval_length);
 extern HypertableInfo *orochi_get_hypertable_info(Oid hypertable_oid);
 extern bool orochi_is_hypertable(Oid table_oid);
 extern void orochi_drop_hypertable(Oid hypertable_oid, bool cascade);

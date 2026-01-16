@@ -28,6 +28,7 @@
 
 #include "../orochi.h"
 #include "../core/catalog.h"
+#include "../planner/distributed_planner.h"
 #include "distribution.h"
 #include "physical_sharding.h"
 
@@ -657,19 +658,61 @@ orochi_get_target_shards_for_query(Oid table_oid, Node *quals)
 {
     OrochiTableInfo *info;
     List *shard_oids = NIL;
+    ShardRestriction *restriction;
+    List *restrictions = NIL;
+    List *pruned_shards;
+    ListCell *lc;
     int i;
 
     info = orochi_catalog_get_table(table_oid);
     if (info == NULL || !info->is_distributed)
         return NIL;
 
-    /* TODO: Implement actual shard pruning based on quals analysis
-     * For now, return all shards */
-    for (i = 0; i < info->shard_count; i++)
+    /*
+     * Analyze quals to extract shard restrictions.
+     * If we have equality predicates on the distribution column,
+     * we can prune to a single shard.
+     */
+    if (quals != NULL)
     {
-        Oid shard_oid = orochi_get_shard_table_oid(table_oid, i);
-        if (OidIsValid(shard_oid))
-            shard_oids = lappend_oid(shard_oids, shard_oid);
+        restriction = orochi_analyze_quals_for_pruning(quals, table_oid);
+        if (restriction != NULL)
+            restrictions = lappend(restrictions, restriction);
+    }
+
+    /*
+     * Use the shard pruning logic to determine which shards to query.
+     * Returns a list of OrochiShardInfo for the matching shards.
+     */
+    pruned_shards = orochi_prune_shards(table_oid, restrictions);
+
+    /*
+     * Convert OrochiShardInfo list to shard table OIDs.
+     * If pruning found matching shards, use those; otherwise fall back to all.
+     */
+    if (list_length(pruned_shards) > 0)
+    {
+        foreach(lc, pruned_shards)
+        {
+            OrochiShardInfo *shard = (OrochiShardInfo *) lfirst(lc);
+            Oid shard_oid = orochi_get_shard_table_oid(table_oid, shard->shard_index);
+            if (OidIsValid(shard_oid))
+            {
+                shard_oids = lappend_oid(shard_oids, shard_oid);
+                elog(DEBUG1, "Shard pruning: targeting shard %d (oid=%u) for table %u",
+                     shard->shard_index, shard_oid, table_oid);
+            }
+        }
+    }
+    else
+    {
+        /* No pruning possible or no shards found - return all shards */
+        for (i = 0; i < info->shard_count; i++)
+        {
+            Oid shard_oid = orochi_get_shard_table_oid(table_oid, i);
+            if (OidIsValid(shard_oid))
+                shard_oids = lappend_oid(shard_oids, shard_oid);
+        }
     }
 
     return shard_oids;

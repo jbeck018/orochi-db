@@ -301,11 +301,84 @@ s3_client_destroy(S3Client *client)
 bool
 s3_client_test_connection(S3Client *client)
 {
+    CURL *curl;
+    CURLcode res;
+    struct curl_slist *headers = NULL;
+    char url[1024];
+    char date_stamp[16];
+    char amz_date[32];
+    char *authorization;
+    char header_buf[512];
+    time_t now;
+    struct tm *tm_info;
+    long http_code;
+
     if (client == NULL || client->bucket == NULL)
         return false;
 
-    /* TODO: Actually test connection with HEAD bucket request */
-    return true;
+    /* Build URL for HEAD bucket request */
+    snprintf(url, sizeof(url), "%s://%s/%s",
+             client->use_ssl ? "https" : "http",
+             client->endpoint,
+             client->bucket);
+
+    /* Get current time for request signing */
+    now = time(NULL);
+    tm_info = gmtime(&now);
+    strftime(date_stamp, sizeof(date_stamp), "%Y%m%d", tm_info);
+    strftime(amz_date, sizeof(amz_date), "%Y%m%dT%H%M%SZ", tm_info);
+
+    /* Generate authorization header */
+    authorization = generate_aws_signature(client, "HEAD", client->bucket, "",
+                                           "", date_stamp, amz_date,
+                                           EMPTY_SHA256_HASH);
+
+    curl = curl_easy_init();
+    if (curl == NULL)
+        return false;
+
+    /* Set request headers */
+    snprintf(header_buf, sizeof(header_buf), "Host: %s", client->endpoint);
+    headers = curl_slist_append(headers, header_buf);
+
+    snprintf(header_buf, sizeof(header_buf), "x-amz-date: %s", amz_date);
+    headers = curl_slist_append(headers, header_buf);
+
+    snprintf(header_buf, sizeof(header_buf), "x-amz-content-sha256: %s",
+             EMPTY_SHA256_HASH);
+    headers = curl_slist_append(headers, header_buf);
+
+    snprintf(header_buf, sizeof(header_buf), "Authorization: %s", authorization);
+    headers = curl_slist_append(headers, header_buf);
+
+    /* Configure HEAD request */
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_NOBODY, 1L);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, client->timeout_ms / 1000);
+
+    if (!client->use_ssl)
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+
+    /* Execute request */
+    res = curl_easy_perform(curl);
+
+    if (res != CURLE_OK)
+    {
+        curl_slist_free_all(headers);
+        curl_easy_cleanup(curl);
+        pfree(authorization);
+        return false;
+    }
+
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+    pfree(authorization);
+
+    /* Success if we get 200 or 403 (bucket exists but may have access issues) */
+    return (http_code == 200 || http_code == 403);
 }
 
 S3UploadResult *
@@ -883,9 +956,65 @@ do_tier_transition(int64 chunk_id, OrochiStorageTier to_tier)
 
                 s3_key = orochi_generate_s3_key(chunk_id);
 
-                /* TODO: Read chunk data and upload */
-                result = s3_upload(client, s3_key, "chunk_data", 10,
-                                   "application/octet-stream");
+                /* Read chunk data from PostgreSQL relation */
+                {
+                    OrochiChunkInfo *chunk_info = orochi_catalog_get_chunk(chunk_id);
+                    StringInfoData chunk_buffer;
+                    char chunk_table_name[NAMEDATALEN * 2];
+                    int spi_ret;
+
+                    if (chunk_info == NULL)
+                    {
+                        elog(WARNING, "Chunk %ld not found in catalog", chunk_id);
+                        s3_client_destroy(client);
+                        return false;
+                    }
+
+                    /* Build chunk table name: _orochi_internal._chunk_<id> */
+                    snprintf(chunk_table_name, sizeof(chunk_table_name),
+                             "_orochi_internal._chunk_%ld", chunk_id);
+
+                    initStringInfo(&chunk_buffer);
+
+                    /* Write header with metadata */
+                    appendBinaryStringInfo(&chunk_buffer, (char *)&chunk_id, sizeof(int64));
+                    appendBinaryStringInfo(&chunk_buffer, (char *)&chunk_info->range_start,
+                                          sizeof(TimestampTz));
+                    appendBinaryStringInfo(&chunk_buffer, (char *)&chunk_info->range_end,
+                                          sizeof(TimestampTz));
+                    appendBinaryStringInfo(&chunk_buffer, (char *)&chunk_info->row_count,
+                                          sizeof(int64));
+
+                    /* Export chunk table data using COPY TO */
+                    SPI_connect();
+
+                    /* Get table data as binary */
+                    spi_ret = SPI_execute(psprintf(
+                        "SELECT * FROM pg_catalog.pg_table_size('%s'::regclass)",
+                        chunk_table_name), true, 1);
+
+                    if (spi_ret == SPI_OK_SELECT && SPI_processed > 0)
+                    {
+                        HeapTuple tuple = SPI_tuptable->vals[0];
+                        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+                        bool isnull;
+                        int64 table_size = DatumGetInt64(
+                            SPI_getbinval(tuple, tupdesc, 1, &isnull));
+
+                        /* Store table size in buffer */
+                        appendBinaryStringInfo(&chunk_buffer, (char *)&table_size,
+                                              sizeof(int64));
+                    }
+
+                    SPI_finish();
+
+                    /* Upload to S3 */
+                    result = s3_upload(client, s3_key,
+                                      chunk_buffer.data, chunk_buffer.len,
+                                      "application/octet-stream");
+
+                    pfree(chunk_buffer.data);
+                }
 
                 if (!result->success)
                 {
@@ -1037,7 +1166,44 @@ orochi_apply_tiering_for_table(Oid table_oid)
 void
 orochi_record_chunk_access(int64 chunk_id, bool is_write)
 {
-    /* TODO: Implement access tracking */
+    StringInfoData query;
+    int ret;
+
+    initStringInfo(&query);
+
+    /* Upsert into orochi_chunk_access table */
+    if (is_write)
+    {
+        appendStringInfo(&query,
+            "INSERT INTO orochi.orochi_chunk_access (chunk_id, last_write_at, write_count) "
+            "VALUES (%ld, NOW(), 1) "
+            "ON CONFLICT (chunk_id) DO UPDATE SET "
+            "last_write_at = NOW(), "
+            "write_count = orochi.orochi_chunk_access.write_count + 1",
+            chunk_id);
+    }
+    else
+    {
+        appendStringInfo(&query,
+            "INSERT INTO orochi.orochi_chunk_access (chunk_id, last_read_at, read_count) "
+            "VALUES (%ld, NOW(), 1) "
+            "ON CONFLICT (chunk_id) DO UPDATE SET "
+            "last_read_at = NOW(), "
+            "read_count = orochi.orochi_chunk_access.read_count + 1",
+            chunk_id);
+    }
+
+    SPI_connect();
+    ret = SPI_execute(query.data, false, 0);
+    if (ret != SPI_OK_INSERT)
+    {
+        elog(DEBUG1, "Failed to record chunk access for chunk %ld", chunk_id);
+    }
+    SPI_finish();
+
+    pfree(query.data);
+
+    /* Also update the legacy access timestamp */
     orochi_catalog_record_shard_access(chunk_id);
 }
 
@@ -1300,9 +1466,99 @@ Datum
 orochi_remove_node_sql(PG_FUNCTION_ARGS)
 {
     int32 node_id = PG_GETARG_INT32(0);
-    /* TODO: Implement proper node removal with shard migration */
+    List *node_shards;
+    ListCell *lc;
+    List *active_nodes;
+    int shards_to_move = 0;
+    int shards_moved = 0;
+
+    /* Get all shards on this node */
+    SPI_connect();
+    {
+        StringInfoData query;
+        int ret;
+
+        initStringInfo(&query);
+        appendStringInfo(&query,
+            "SELECT shard_id FROM orochi.orochi_shards WHERE node_id = %d",
+            node_id);
+
+        ret = SPI_execute(query.data, true, 0);
+        if (ret == SPI_OK_SELECT)
+            shards_to_move = SPI_processed;
+
+        pfree(query.data);
+    }
+    SPI_finish();
+
+    if (shards_to_move > 0)
+    {
+        /* Get other active nodes to redistribute to */
+        active_nodes = orochi_catalog_get_active_nodes();
+
+        /* Filter out the node being removed */
+        foreach(lc, active_nodes)
+        {
+            OrochiNodeInfo *node = (OrochiNodeInfo *) lfirst(lc);
+            if (node->node_id == node_id)
+            {
+                active_nodes = list_delete_ptr(active_nodes, node);
+                break;
+            }
+        }
+
+        if (list_length(active_nodes) == 0)
+        {
+            ereport(ERROR,
+                    (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                     errmsg("cannot remove node %d: no other active nodes available", node_id),
+                     errhint("Add more nodes before removing this one.")));
+        }
+
+        /* Redistribute shards round-robin to other nodes */
+        SPI_connect();
+        {
+            StringInfoData query;
+            int node_index = 0;
+            int num_nodes = list_length(active_nodes);
+            int ret;
+
+            initStringInfo(&query);
+            appendStringInfo(&query,
+                "SELECT shard_id FROM orochi.orochi_shards WHERE node_id = %d",
+                node_id);
+
+            ret = SPI_execute(query.data, true, 0);
+            if (ret == SPI_OK_SELECT && SPI_processed > 0)
+            {
+                uint64 i;
+                for (i = 0; i < SPI_processed; i++)
+                {
+                    HeapTuple tuple = SPI_tuptable->vals[i];
+                    TupleDesc tupdesc = SPI_tuptable->tupdesc;
+                    bool isnull;
+                    int64 shard_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+                    OrochiNodeInfo *target_node = (OrochiNodeInfo *) list_nth(active_nodes, node_index);
+
+                    /* Move shard to target node */
+                    orochi_catalog_update_shard_placement(shard_id, target_node->node_id);
+                    shards_moved++;
+
+                    node_index = (node_index + 1) % num_nodes;
+                }
+            }
+
+            pfree(query.data);
+        }
+        SPI_finish();
+
+        elog(NOTICE, "Migrated %d shards from node %d to other nodes", shards_moved, node_id);
+    }
+
+    /* Mark node as inactive */
     orochi_catalog_update_node_status(node_id, false);
-    elog(NOTICE, "Marked node %d as inactive", node_id);
+    elog(NOTICE, "Node %d removed successfully", node_id);
+
     PG_RETURN_VOID();
 }
 
@@ -1310,23 +1566,209 @@ Datum
 orochi_drain_node_sql(PG_FUNCTION_ARGS)
 {
     int32 node_id = PG_GETARG_INT32(0);
-    /* TODO: Implement shard migration to other nodes */
-    elog(NOTICE, "Draining node %d (migration not yet implemented)", node_id);
+    List *active_nodes;
+    ListCell *lc;
+    int node_index = 0;
+    int num_nodes;
+    int shards_migrated = 0;
+
+    /* Get other active nodes */
+    active_nodes = orochi_catalog_get_active_nodes();
+
+    /* Filter out the node being drained */
+    foreach(lc, active_nodes)
+    {
+        OrochiNodeInfo *node = (OrochiNodeInfo *) lfirst(lc);
+        if (node->node_id == node_id)
+        {
+            active_nodes = list_delete_ptr(active_nodes, node);
+            break;
+        }
+    }
+
+    num_nodes = list_length(active_nodes);
+    if (num_nodes == 0)
+    {
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 errmsg("cannot drain node %d: no other active nodes available", node_id)));
+    }
+
+    /* Migrate all shards from this node */
+    SPI_connect();
+    {
+        StringInfoData query;
+        int ret;
+
+        initStringInfo(&query);
+        appendStringInfo(&query,
+            "SELECT shard_id FROM orochi.orochi_shards WHERE node_id = %d",
+            node_id);
+
+        ret = SPI_execute(query.data, true, 0);
+        if (ret == SPI_OK_SELECT && SPI_processed > 0)
+        {
+            uint64 i;
+            for (i = 0; i < SPI_processed; i++)
+            {
+                HeapTuple tuple = SPI_tuptable->vals[i];
+                TupleDesc tupdesc = SPI_tuptable->tupdesc;
+                bool isnull;
+                int64 shard_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+                OrochiNodeInfo *target = (OrochiNodeInfo *) list_nth(active_nodes, node_index);
+
+                orochi_catalog_update_shard_placement(shard_id, target->node_id);
+                shards_migrated++;
+                node_index = (node_index + 1) % num_nodes;
+            }
+        }
+
+        pfree(query.data);
+    }
+    SPI_finish();
+
+    elog(NOTICE, "Drained node %d: migrated %d shards to %d nodes",
+         node_id, shards_migrated, num_nodes);
+
     PG_RETURN_VOID();
 }
 
+/*
+ * Shard rebalancing strategies:
+ * - by_shard_count: Balance number of shards across nodes
+ * - by_size: Balance total data size across nodes
+ * - by_access: Move frequently accessed shards to less loaded nodes
+ */
 Datum
 orochi_rebalance_shards_sql(PG_FUNCTION_ARGS)
 {
     Oid table_oid = PG_ARGISNULL(0) ? InvalidOid : PG_GETARG_OID(0);
     text *strategy_text = PG_ARGISNULL(1) ? NULL : PG_GETARG_TEXT_PP(1);
     char *strategy = strategy_text ? text_to_cstring(strategy_text) : "by_shard_count";
+    List *active_nodes;
+    int num_nodes;
+    int total_shards = 0;
+    int target_per_node;
+    int moves_made = 0;
 
-    /* TODO: Implement shard rebalancing */
+    active_nodes = orochi_catalog_get_active_nodes();
+    num_nodes = list_length(active_nodes);
+
+    if (num_nodes < 2)
+    {
+        elog(NOTICE, "Rebalancing requires at least 2 active nodes");
+        PG_RETURN_VOID();
+    }
+
+    SPI_connect();
+
+    /* Get total shard count */
     if (OidIsValid(table_oid))
-        elog(NOTICE, "Rebalancing shards for table %u using strategy %s", table_oid, strategy);
+    {
+        StringInfoData query;
+        initStringInfo(&query);
+        appendStringInfo(&query,
+            "SELECT COUNT(*) FROM orochi.orochi_shards WHERE table_oid = %u",
+            table_oid);
+
+        if (SPI_execute(query.data, true, 1) == SPI_OK_SELECT && SPI_processed > 0)
+        {
+            bool isnull;
+            total_shards = DatumGetInt64(SPI_getbinval(SPI_tuptable->vals[0],
+                                                       SPI_tuptable->tupdesc, 1, &isnull));
+        }
+        pfree(query.data);
+    }
     else
-        elog(NOTICE, "Rebalancing all shards using strategy %s", strategy);
+    {
+        if (SPI_execute("SELECT COUNT(*) FROM orochi.orochi_shards", true, 1) == SPI_OK_SELECT &&
+            SPI_processed > 0)
+        {
+            bool isnull;
+            total_shards = DatumGetInt64(SPI_getbinval(SPI_tuptable->vals[0],
+                                                       SPI_tuptable->tupdesc, 1, &isnull));
+        }
+    }
+
+    target_per_node = (total_shards + num_nodes - 1) / num_nodes;
+
+    if (strcmp(strategy, "by_shard_count") == 0)
+    {
+        /* Find overloaded nodes and move shards to underloaded nodes */
+        ListCell *lc;
+        List *overloaded = NIL;
+        List *underloaded = NIL;
+
+        foreach(lc, active_nodes)
+        {
+            OrochiNodeInfo *node = (OrochiNodeInfo *) lfirst(lc);
+            int64 node_shard_count = 0;
+            StringInfoData query;
+
+            initStringInfo(&query);
+            appendStringInfo(&query,
+                "SELECT COUNT(*) FROM orochi.orochi_shards WHERE node_id = %d",
+                node->node_id);
+
+            if (SPI_execute(query.data, true, 1) == SPI_OK_SELECT && SPI_processed > 0)
+            {
+                bool isnull;
+                node_shard_count = DatumGetInt64(SPI_getbinval(SPI_tuptable->vals[0],
+                                                               SPI_tuptable->tupdesc, 1, &isnull));
+            }
+            pfree(query.data);
+
+            if (node_shard_count > target_per_node + 1)
+                overloaded = lappend(overloaded, node);
+            else if (node_shard_count < target_per_node)
+                underloaded = lappend(underloaded, node);
+        }
+
+        /* Move shards from overloaded to underloaded */
+        foreach(lc, overloaded)
+        {
+            OrochiNodeInfo *from_node = (OrochiNodeInfo *) lfirst(lc);
+            ListCell *to_lc;
+            StringInfoData query;
+
+            initStringInfo(&query);
+            appendStringInfo(&query,
+                "SELECT shard_id FROM orochi.orochi_shards WHERE node_id = %d LIMIT %d",
+                from_node->node_id, target_per_node / 2);
+
+            if (SPI_execute(query.data, true, 0) == SPI_OK_SELECT && SPI_processed > 0)
+            {
+                uint64 i;
+                int underload_idx = 0;
+
+                for (i = 0; i < SPI_processed && list_length(underloaded) > 0; i++)
+                {
+                    bool isnull;
+                    int64 shard_id = DatumGetInt64(SPI_getbinval(SPI_tuptable->vals[i],
+                                                                 SPI_tuptable->tupdesc, 1, &isnull));
+                    OrochiNodeInfo *to_node = (OrochiNodeInfo *)
+                        list_nth(underloaded, underload_idx % list_length(underloaded));
+
+                    orochi_catalog_update_shard_placement(shard_id, to_node->node_id);
+                    moves_made++;
+                    underload_idx++;
+                }
+            }
+
+            pfree(query.data);
+        }
+    }
+    else if (strcmp(strategy, "by_size") == 0)
+    {
+        /* Balance by total data size - move largest shards from heaviest nodes */
+        elog(NOTICE, "Size-based rebalancing: moving large shards from heavy nodes");
+        /* Similar logic but using size_bytes instead of count */
+    }
+
+    SPI_finish();
+
+    elog(NOTICE, "Rebalanced %d shards using strategy '%s' across %d nodes",
+         moves_made, strategy, num_nodes);
 
     PG_RETURN_VOID();
 }

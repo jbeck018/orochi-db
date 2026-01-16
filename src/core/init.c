@@ -26,11 +26,16 @@
 #include "access/xact.h"
 
 #include "../orochi.h"
+#include "../compat.h"
 #include "catalog.h"
 #include "../planner/distributed_planner.h"
 #include "../executor/distributed_executor.h"
+#include "../pipelines/pipeline.h"
+#include "../consensus/raft.h"
+#include "../consensus/raft_integration.h"
 
-PG_MODULE_MAGIC;
+/* Use PG_MODULE_MAGIC_EXT on PG18+ for name/version reporting */
+OROCHI_MODULE_MAGIC;
 
 /* GUC variables */
 int     orochi_default_shard_count = 32;
@@ -86,7 +91,11 @@ _PG_init(void)
     {
         /* Request shared memory */
         RequestAddinShmemSpace(orochi_memsize());
+
+        /* Request LWLock tranches for all components */
         RequestNamedLWLockTranche("orochi", 8);
+        RequestNamedLWLockTranche("orochi_pipeline", 2);
+        RequestNamedLWLockTranche("orochi_raft", 4);
 
         /* Install shared memory hooks */
         prev_shmem_startup_hook = shmem_startup_hook;
@@ -119,7 +128,11 @@ _PG_init(void)
     prev_executor_end_hook = ExecutorEnd_hook;
     ExecutorEnd_hook = orochi_executor_end_hook;
 
-    elog(LOG, "Orochi DB v%s initialized", OROCHI_VERSION_STRING);
+    elog(LOG, "Orochi DB v%s initialized (PostgreSQL %d)",
+         OROCHI_VERSION_STRING, orochi_pg_major_version());
+
+    /* Log compatibility info for debugging */
+    OROCHI_LOG_COMPAT_INFO();
 }
 
 /*
@@ -349,6 +362,12 @@ orochi_memsize(void)
     /* Statistics counters */
     size = add_size(size, 64 * 1024);    /* 64KB for stats */
 
+    /* Pipeline shared state */
+    size = add_size(size, orochi_pipeline_shmem_size());
+
+    /* Raft consensus shared state */
+    size = add_size(size, orochi_raft_shmem_size());
+
     return size;
 }
 
@@ -387,6 +406,12 @@ orochi_shmem_startup(void)
     ShmemInitStruct("orochi_statistics",
                    64 * 1024,
                    &found);
+
+    /* Initialize pipeline shared state */
+    orochi_pipeline_shmem_init();
+
+    /* Initialize Raft consensus shared state */
+    orochi_raft_shmem_init();
 
     LWLockRelease(AddinShmemInitLock);
 
@@ -453,6 +478,20 @@ orochi_register_background_workers(void)
     worker.bgw_restart_time = 300;  /* Restart after 5 minutes */
     snprintf(worker.bgw_library_name, BGW_MAXLEN, "orochi");
     snprintf(worker.bgw_function_name, BGW_MAXLEN, "orochi_rebalancer_worker_main");
+    worker.bgw_main_arg = (Datum) 0;
+    worker.bgw_notify_pid = 0;
+
+    RegisterBackgroundWorker(&worker);
+
+    /* Raft consensus worker - leader election and log replication */
+    memset(&worker, 0, sizeof(BackgroundWorker));
+    snprintf(worker.bgw_name, BGW_MAXLEN, "orochi raft consensus");
+    snprintf(worker.bgw_type, BGW_MAXLEN, "orochi raft");
+    worker.bgw_flags = BGWORKER_SHMEM_ACCESS | BGWORKER_BACKEND_DATABASE_CONNECTION;
+    worker.bgw_start_time = BgWorkerStart_RecoveryFinished;
+    worker.bgw_restart_time = 10;  /* Restart quickly for consensus continuity */
+    snprintf(worker.bgw_library_name, BGW_MAXLEN, "orochi");
+    snprintf(worker.bgw_function_name, BGW_MAXLEN, "orochi_raft_worker_main");
     worker.bgw_main_arg = (Datum) 0;
     worker.bgw_notify_pid = 0;
 

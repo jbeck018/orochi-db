@@ -4,7 +4,7 @@
 
 ### Prerequisites
 
-- PostgreSQL 14 or later
+- PostgreSQL 16, 17, or 18 (PostgreSQL 18 recommended for best performance)
 - GCC or Clang compiler
 - Development libraries:
   - liblz4-dev
