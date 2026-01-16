@@ -1,0 +1,420 @@
+syntax = "proto3";
+
+package provisioner.v1;
+
+option go_package = "github.com/orochi-db/orochi-cloud/provisioner/api/proto;proto";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+// ProvisionerService handles PostgreSQL cluster lifecycle management
+service ProvisionerService {
+  // Cluster operations
+  rpc CreateCluster(CreateClusterRequest) returns (CreateClusterResponse);
+  rpc UpdateCluster(UpdateClusterRequest) returns (UpdateClusterResponse);
+  rpc DeleteCluster(DeleteClusterRequest) returns (DeleteClusterResponse);
+  rpc GetCluster(GetClusterRequest) returns (GetClusterResponse);
+  rpc ListClusters(ListClustersRequest) returns (ListClustersResponse);
+
+  // Backup operations
+  rpc CreateBackup(CreateBackupRequest) returns (CreateBackupResponse);
+  rpc ListBackups(ListBackupsRequest) returns (ListBackupsResponse);
+  rpc DeleteBackup(DeleteBackupRequest) returns (DeleteBackupResponse);
+
+  // Restore operations
+  rpc RestoreCluster(RestoreClusterRequest) returns (RestoreClusterResponse);
+
+  // Health and status
+  rpc GetClusterStatus(GetClusterStatusRequest) returns (GetClusterStatusResponse);
+  rpc HealthCheck(google.protobuf.Empty) returns (HealthCheckResponse);
+}
+
+// Cluster configuration
+message ClusterSpec {
+  string name = 1;
+  string namespace = 2;
+
+  // PostgreSQL configuration
+  int32 instances = 3;
+  string postgres_version = 4;
+  string image_name = 5;
+
+  // Resource configuration
+  ResourceRequirements resources = 6;
+
+  // Storage configuration
+  StorageSpec storage = 7;
+
+  // Orochi DB extension configuration
+  OrochiConfig orochi_config = 8;
+
+  // Backup configuration
+  BackupConfiguration backup_config = 9;
+
+  // Monitoring configuration
+  MonitoringConfig monitoring = 10;
+
+  // Connection pooler (PgBouncer)
+  ConnectionPoolerSpec pooler = 11;
+
+  // Affinity and topology
+  AffinityConfig affinity = 12;
+
+  // Labels and annotations
+  map<string, string> labels = 13;
+  map<string, string> annotations = 14;
+}
+
+message ResourceRequirements {
+  string cpu_request = 1;
+  string cpu_limit = 2;
+  string memory_request = 3;
+  string memory_limit = 4;
+  string hugepages_2mi = 5;
+  string hugepages_1gi = 6;
+}
+
+message StorageSpec {
+  string size = 1;
+  string storage_class = 2;
+  bool resize_in_use_volumes = 3;
+  string wal_size = 4;
+  string wal_storage_class = 5;
+  string tablespace_size = 6;
+}
+
+message OrochiConfig {
+  bool enabled = 1;
+  int32 default_shard_count = 2;
+  string chunk_interval = 3;
+  bool enable_columnar = 4;
+  CompressionType default_compression = 5;
+  TieringConfig tiering = 6;
+  map<string, string> custom_parameters = 7;
+}
+
+enum CompressionType {
+  COMPRESSION_NONE = 0;
+  COMPRESSION_LZ4 = 1;
+  COMPRESSION_ZSTD = 2;
+  COMPRESSION_DELTA = 3;
+  COMPRESSION_GORILLA = 4;
+  COMPRESSION_DICTIONARY = 5;
+  COMPRESSION_RLE = 6;
+}
+
+message TieringConfig {
+  bool enabled = 1;
+  string hot_duration = 2;
+  string warm_duration = 3;
+  string cold_duration = 4;
+  S3Config s3_config = 5;
+}
+
+message S3Config {
+  string endpoint = 1;
+  string bucket = 2;
+  string region = 3;
+  string access_key_secret = 4;
+}
+
+message BackupConfiguration {
+  string retention_policy = 1;
+  BarmanObjectStore barman_object_store = 2;
+  ScheduledBackup scheduled_backup = 3;
+  VolumeSnapshot volume_snapshot = 4;
+}
+
+message BarmanObjectStore {
+  string destination_path = 1;
+  string endpoint = 2;
+  S3Credentials s3_credentials = 3;
+  WalConfig wal = 4;
+  DataConfig data = 5;
+}
+
+message S3Credentials {
+  string access_key_id_secret = 1;
+  string secret_access_key_secret = 2;
+  string region_secret = 3;
+  string session_token_secret = 4;
+  bool inherit_from_iam_role = 5;
+}
+
+message WalConfig {
+  CompressionType compression = 1;
+  string max_parallel = 2;
+}
+
+message DataConfig {
+  CompressionType compression = 1;
+  int32 jobs = 2;
+  bool immediate_checkpoint = 3;
+}
+
+message ScheduledBackup {
+  bool enabled = 1;
+  string schedule = 2;
+  bool immediate = 3;
+  string backup_owner_reference = 4;
+}
+
+message VolumeSnapshot {
+  bool enabled = 1;
+  string snapshot_class = 2;
+}
+
+message MonitoringConfig {
+  bool enable_pod_monitor = 1;
+  bool enable_prometheus_rule = 2;
+  map<string, string> custom_queries = 3;
+  string scrape_interval = 4;
+}
+
+message ConnectionPoolerSpec {
+  bool enabled = 1;
+  int32 instances = 2;
+  PoolerType type = 3;
+  PgBouncerConfig pgbouncer = 4;
+}
+
+enum PoolerType {
+  POOLER_PGBOUNCER = 0;
+}
+
+message PgBouncerConfig {
+  string pool_mode = 1;
+  int32 default_pool_size = 2;
+  int32 max_client_conn = 3;
+  map<string, string> parameters = 4;
+}
+
+message AffinityConfig {
+  bool enable_pod_anti_affinity = 1;
+  string topology_key = 2;
+  map<string, string> node_selector = 3;
+  repeated Toleration tolerations = 4;
+}
+
+message Toleration {
+  string key = 1;
+  string operator = 2;
+  string value = 3;
+  string effect = 4;
+  int64 toleration_seconds = 5;
+}
+
+// Request/Response messages
+
+message CreateClusterRequest {
+  ClusterSpec spec = 1;
+  bool wait_for_ready = 2;
+  int32 timeout_seconds = 3;
+}
+
+message CreateClusterResponse {
+  string cluster_id = 1;
+  string name = 2;
+  string namespace = 3;
+  ClusterPhase phase = 4;
+  string message = 5;
+}
+
+message UpdateClusterRequest {
+  string cluster_id = 1;
+  ClusterSpec spec = 2;
+  bool rolling_update = 3;
+}
+
+message UpdateClusterResponse {
+  string cluster_id = 1;
+  ClusterPhase phase = 2;
+  string message = 3;
+}
+
+message DeleteClusterRequest {
+  string cluster_id = 1;
+  string namespace = 2;
+  bool delete_backups = 3;
+  bool delete_pvcs = 4;
+}
+
+message DeleteClusterResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message GetClusterRequest {
+  string cluster_id = 1;
+  string namespace = 2;
+}
+
+message GetClusterResponse {
+  ClusterInfo cluster = 1;
+}
+
+message ListClustersRequest {
+  string namespace = 1;
+  map<string, string> label_selector = 2;
+  int32 limit = 3;
+  string continue_token = 4;
+}
+
+message ListClustersResponse {
+  repeated ClusterInfo clusters = 1;
+  string continue_token = 2;
+  int32 total_count = 3;
+}
+
+message ClusterInfo {
+  string cluster_id = 1;
+  string name = 2;
+  string namespace = 3;
+  ClusterSpec spec = 4;
+  ClusterStatus status = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+message ClusterStatus {
+  ClusterPhase phase = 1;
+  int32 ready_instances = 2;
+  int32 total_instances = 3;
+  string current_primary = 4;
+  string current_primary_timestamp = 5;
+  string first_recoverability_point = 6;
+  string last_successful_backup = 7;
+  repeated InstanceStatus instances = 8;
+  repeated string conditions = 9;
+}
+
+enum ClusterPhase {
+  PHASE_UNKNOWN = 0;
+  PHASE_SETTING_UP = 1;
+  PHASE_HEALTHY = 2;
+  PHASE_UNHEALTHY = 3;
+  PHASE_UPGRADING = 4;
+  PHASE_FAILING_OVER = 5;
+  PHASE_DELETING = 6;
+}
+
+message InstanceStatus {
+  string name = 1;
+  string role = 2;
+  bool ready = 3;
+  string pod_ip = 4;
+  google.protobuf.Timestamp start_time = 5;
+}
+
+// Backup messages
+
+message CreateBackupRequest {
+  string cluster_id = 1;
+  string namespace = 2;
+  string backup_name = 3;
+  BackupMethod method = 4;
+  string target_time = 5;
+}
+
+enum BackupMethod {
+  BACKUP_BARMAN_OBJECT_STORE = 0;
+  BACKUP_VOLUME_SNAPSHOT = 1;
+}
+
+message CreateBackupResponse {
+  string backup_id = 1;
+  string name = 2;
+  BackupPhase phase = 3;
+  string message = 4;
+}
+
+message ListBackupsRequest {
+  string cluster_id = 1;
+  string namespace = 2;
+}
+
+message ListBackupsResponse {
+  repeated BackupInfo backups = 1;
+}
+
+message BackupInfo {
+  string backup_id = 1;
+  string name = 2;
+  string cluster_name = 3;
+  BackupMethod method = 4;
+  BackupPhase phase = 5;
+  google.protobuf.Timestamp started_at = 6;
+  google.protobuf.Timestamp completed_at = 7;
+  string begin_wal = 8;
+  string end_wal = 9;
+  string begin_lsn = 10;
+  string end_lsn = 11;
+  int64 backup_size = 12;
+}
+
+enum BackupPhase {
+  BACKUP_PENDING = 0;
+  BACKUP_RUNNING = 1;
+  BACKUP_COMPLETED = 2;
+  BACKUP_FAILED = 3;
+}
+
+message DeleteBackupRequest {
+  string backup_id = 1;
+  string namespace = 2;
+}
+
+message DeleteBackupResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Restore messages
+
+message RestoreClusterRequest {
+  string source_cluster_id = 1;
+  string source_namespace = 2;
+  ClusterSpec target_spec = 3;
+  RestoreOptions options = 4;
+}
+
+message RestoreOptions {
+  string backup_id = 1;
+  string recovery_target_time = 2;
+  string recovery_target_lsn = 3;
+  string recovery_target_name = 4;
+  bool recovery_target_inclusive = 5;
+}
+
+message RestoreClusterResponse {
+  string cluster_id = 1;
+  string name = 2;
+  ClusterPhase phase = 3;
+  string message = 4;
+}
+
+// Status messages
+
+message GetClusterStatusRequest {
+  string cluster_id = 1;
+  string namespace = 2;
+}
+
+message GetClusterStatusResponse {
+  ClusterStatus status = 1;
+  repeated ClusterCondition conditions = 2;
+}
+
+message ClusterCondition {
+  string type = 1;
+  string status = 2;
+  google.protobuf.Timestamp last_transition_time = 3;
+  string reason = 4;
+  string message = 5;
+}
+
+message HealthCheckResponse {
+  bool healthy = 1;
+  string version = 2;
+  map<string, string> details = 3;
+}

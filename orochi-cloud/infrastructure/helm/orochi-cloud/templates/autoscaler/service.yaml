@@ -1,0 +1,28 @@
+{{- if .Values.autoscaler.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "orochi-cloud.autoscaler.fullname" . }}
+  namespace: {{ include "orochi-cloud.namespace" . }}
+  labels:
+    {{- include "orochi-cloud.autoscaler.labels" . | nindent 4 }}
+  {{- with .Values.autoscaler.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.autoscaler.service.type }}
+  ports:
+    - port: {{ .Values.autoscaler.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+    {{- if .Values.metrics.enabled }}
+    - port: {{ .Values.metrics.port }}
+      targetPort: metrics
+      protocol: TCP
+      name: metrics
+    {{- end }}
+  selector:
+    {{- include "orochi-cloud.autoscaler.selectorLabels" . | nindent 4 }}
+{{- end }}

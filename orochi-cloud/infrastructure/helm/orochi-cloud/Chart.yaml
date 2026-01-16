@@ -1,0 +1,35 @@
+apiVersion: v2
+name: orochi-cloud
+description: A Helm chart for deploying Orochi Cloud - Managed PostgreSQL HTAP Platform
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+kubeVersion: ">=1.25.0-0"
+
+keywords:
+  - postgresql
+  - htap
+  - database
+  - managed-service
+  - orochi
+
+home: https://github.com/orochi-db/orochi-cloud
+sources:
+  - https://github.com/orochi-db/orochi-cloud
+
+maintainers:
+  - name: Orochi Team
+    email: team@orochi-db.io
+
+dependencies:
+  - name: cloudnative-pg
+    version: "0.20.0"
+    repository: "https://cloudnative-pg.github.io/charts"
+    condition: cloudnativepg.enabled
+    alias: cnpg
+
+annotations:
+  artifacthub.io/category: database
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/operator: "true"
+  artifacthub.io/operatorCapabilities: Full Lifecycle

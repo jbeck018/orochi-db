@@ -1,0 +1,52 @@
+{{- if .Values.autoscaler.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "orochi-cloud.autoscaler.fullname" . }}-config
+  namespace: {{ include "orochi-cloud.namespace" . }}
+  labels:
+    {{- include "orochi-cloud.autoscaler.labels" . | nindent 4 }}
+data:
+  # Server configuration
+  SERVER_PORT: {{ .Values.autoscaler.service.targetPort | quote }}
+  SERVER_HOST: "0.0.0.0"
+
+  # Metrics collection
+  METRICS_INTERVAL_SECONDS: {{ .Values.autoscaler.config.metricsInterval | quote }}
+  METRICS_ENABLED: {{ .Values.metrics.enabled | quote }}
+  METRICS_PORT: {{ .Values.metrics.port | quote }}
+
+  # Scaling cooldowns
+  SCALE_UP_COOLDOWN_SECONDS: {{ .Values.autoscaler.config.scaleUpCooldown | quote }}
+  SCALE_DOWN_COOLDOWN_SECONDS: {{ .Values.autoscaler.config.scaleDownCooldown | quote }}
+
+  # CPU thresholds
+  CPU_SCALE_UP_THRESHOLD: {{ .Values.autoscaler.config.cpuScaleUpThreshold | quote }}
+  CPU_SCALE_DOWN_THRESHOLD: {{ .Values.autoscaler.config.cpuScaleDownThreshold | quote }}
+
+  # Memory thresholds
+  MEMORY_SCALE_UP_THRESHOLD: {{ .Values.autoscaler.config.memoryScaleUpThreshold | quote }}
+
+  # Connection thresholds
+  CONNECTION_SCALE_UP_THRESHOLD: {{ .Values.autoscaler.config.connectionScaleUpThreshold | quote }}
+
+  # Instance limits
+  MIN_INSTANCES: {{ .Values.autoscaler.config.minInstances | quote }}
+  MAX_INSTANCES: {{ .Values.autoscaler.config.maxInstances | quote }}
+
+  # Service discovery
+  CONTROL_PLANE_URL: "http://{{ include "orochi-cloud.controlPlane.fullname" . }}:{{ .Values.controlPlane.service.port }}"
+  PROVISIONER_URL: "http://{{ include "orochi-cloud.provisioner.fullname" . }}:{{ .Values.provisioner.service.port }}"
+
+  # Cluster configuration
+  CLUSTER_NAMESPACE: {{ include "orochi-cloud.namespace" . | quote }}
+
+  # Scaling algorithm
+  SCALING_ALGORITHM: "proportional"
+  SCALE_INCREMENT: "1"
+  SCALE_DECREMENT: "1"
+
+  # Health check
+  HEALTH_CHECK_INTERVAL: "30s"
+  HEALTH_CHECK_TIMEOUT: "5s"
+{{- end }}

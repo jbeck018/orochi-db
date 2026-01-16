@@ -1,0 +1,62 @@
+{{- if .Values.provisioner.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "orochi-cloud.provisioner.fullname" . }}-config
+  namespace: {{ include "orochi-cloud.namespace" . }}
+  labels:
+    {{- include "orochi-cloud.provisioner.labels" . | nindent 4 }}
+data:
+  # Server configuration
+  SERVER_PORT: {{ .Values.provisioner.service.targetPort | quote }}
+  SERVER_HOST: "0.0.0.0"
+
+  # Reconciliation
+  RECONCILE_INTERVAL_SECONDS: {{ .Values.provisioner.config.reconcileInterval | quote }}
+  MAX_CONCURRENT_PROVISIONS: {{ .Values.provisioner.config.maxConcurrentProvisions | quote }}
+  PROVISION_TIMEOUT_MINUTES: {{ .Values.provisioner.config.provisionTimeout | quote }}
+
+  # Storage configuration
+  DEFAULT_STORAGE_CLASS: {{ .Values.provisioner.config.defaultStorageClass | quote }}
+  BACKUP_STORAGE_CLASS: {{ .Values.provisioner.config.backupStorageClass | quote }}
+
+  # Metrics
+  METRICS_ENABLED: {{ .Values.metrics.enabled | quote }}
+  METRICS_PORT: {{ .Values.metrics.port | quote }}
+
+  # Service discovery
+  CONTROL_PLANE_URL: "http://{{ include "orochi-cloud.controlPlane.fullname" . }}:{{ .Values.controlPlane.service.port }}"
+  AUTOSCALER_URL: "http://{{ include "orochi-cloud.autoscaler.fullname" . }}:{{ .Values.autoscaler.service.port }}"
+
+  # Cluster configuration
+  CLUSTER_NAMESPACE: {{ include "orochi-cloud.namespace" . | quote }}
+  CLUSTER_DOMAIN: "cluster.local"
+
+  # Cloud provider
+  CLOUD_PROVIDER: {{ .Values.provisioner.cloudProvider.type | quote }}
+  {{- if eq .Values.provisioner.cloudProvider.type "aws" }}
+  AWS_REGION: {{ .Values.provisioner.cloudProvider.aws.region | quote }}
+  {{- end }}
+  {{- if eq .Values.provisioner.cloudProvider.type "gcp" }}
+  GCP_PROJECT: {{ .Values.provisioner.cloudProvider.gcp.project | quote }}
+  {{- end }}
+
+  # PostgreSQL defaults
+  POSTGRES_DEFAULT_VERSION: "16"
+  POSTGRES_DEFAULT_INSTANCES: "1"
+  POSTGRES_DEFAULT_STORAGE_SIZE: "10Gi"
+
+  # Orochi extension configuration
+  OROCHI_EXTENSION_ENABLED: "true"
+  OROCHI_DEFAULT_SHARD_COUNT: "32"
+  OROCHI_DEFAULT_COMPRESSION: "lz4"
+
+  # Health check
+  HEALTH_CHECK_INTERVAL: "30s"
+  HEALTH_CHECK_TIMEOUT: "10s"
+
+  # Backup configuration
+  BACKUP_ENABLED: "true"
+  BACKUP_SCHEDULE: "0 2 * * *"
+  BACKUP_RETENTION_DAYS: "7"
+{{- end }}

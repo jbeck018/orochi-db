@@ -1,0 +1,139 @@
+{{- if .Values.autoscaler.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "orochi-cloud.autoscaler.fullname" . }}
+  namespace: {{ include "orochi-cloud.namespace" . }}
+  labels:
+    {{- include "orochi-cloud.autoscaler.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.autoscaler.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "orochi-cloud.autoscaler.selectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/autoscaler/configmap.yaml") . | sha256sum }}
+        {{- with .Values.autoscaler.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "orochi-cloud.autoscaler.labels" . | nindent 8 }}
+        {{- with .Values.autoscaler.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- include "orochi-cloud.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "orochi-cloud.autoscaler.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.autoscaler.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Values.autoscaler.name }}
+          image: "{{ .Values.autoscaler.image.repository }}:{{ .Values.autoscaler.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.autoscaler.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.autoscaler.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.autoscaler.service.targetPort }}
+              protocol: TCP
+            {{- if .Values.metrics.enabled }}
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+              protocol: TCP
+            {{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "orochi-cloud.autoscaler.fullname" . }}-config
+          {{- with .Values.autoscaler.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          livenessProbe:
+            {{- toYaml .Values.autoscaler.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.autoscaler.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.autoscaler.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.autoscaler.nodeSelector | default .Values.global.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.autoscaler.affinity | default .Values.global.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.autoscaler.tolerations | default .Values.global.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: 30
+---
+{{- if .Values.autoscaler.serviceAccount.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "orochi-cloud.autoscaler.serviceAccountName" . }}
+  namespace: {{ include "orochi-cloud.namespace" . }}
+  labels:
+    {{- include "orochi-cloud.autoscaler.labels" . | nindent 4 }}
+  {{- with .Values.autoscaler.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+automountServiceAccountToken: true
+---
+# RBAC for Autoscaler to read pod metrics
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "orochi-cloud.autoscaler.fullname" . }}
+  namespace: {{ include "orochi-cloud.namespace" . }}
+  labels:
+    {{- include "orochi-cloud.autoscaler.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/status"]
+    verbs: ["get"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters/status"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "orochi-cloud.autoscaler.fullname" . }}
+  namespace: {{ include "orochi-cloud.namespace" . }}
+  labels:
+    {{- include "orochi-cloud.autoscaler.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "orochi-cloud.autoscaler.serviceAccountName" . }}
+    namespace: {{ include "orochi-cloud.namespace" . }}
+roleRef:
+  kind: Role
+  name: {{ include "orochi-cloud.autoscaler.fullname" . }}
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}
+{{- end }}

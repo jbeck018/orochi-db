@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: control-plane-config
+  labels:
+    app.kubernetes.io/component: control-plane
+data:
+  SERVER_PORT: "8080"
+  SERVER_HOST: "0.0.0.0"
+  LOG_LEVEL: "info"
+  LOG_FORMAT: "json"
+  DB_POOL_SIZE: "20"
+  JWT_EXPIRATION_HOURS: "24"
+  RATE_LIMIT_REQUESTS_PER_MINUTE: "1000"
+  METRICS_ENABLED: "true"
+  METRICS_PORT: "9090"
+  AUTOSCALER_URL: "http://autoscaler:8081"
+  PROVISIONER_URL: "http://provisioner:8082"
+  FEATURE_HTAP_ENABLED: "true"
+  FEATURE_VECTOR_SEARCH_ENABLED: "true"
+  FEATURE_TIMESERIES_ENABLED: "true"
+  FEATURE_COLUMNAR_ENABLED: "true"

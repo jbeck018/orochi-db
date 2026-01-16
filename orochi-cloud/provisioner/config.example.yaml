@@ -1,0 +1,143 @@
+# Orochi Cloud Provisioner Configuration Example
+# Copy this file to config.yaml and adjust values as needed.
+
+# gRPC Server Configuration
+server:
+  # Port for gRPC API
+  grpcPort: 8080
+  # Port for health check endpoint
+  healthPort: 8081
+  # Enable TLS for gRPC
+  tlsEnabled: false
+  # Path to TLS certificate (required if tlsEnabled is true)
+  tlsCertFile: ""
+  # Path to TLS private key (required if tlsEnabled is true)
+  tlsKeyFile: ""
+  # Maximum concurrent gRPC streams
+  maxConcurrentStreams: 100
+  # Graceful shutdown timeout
+  shutdownTimeout: 30s
+
+# Kubernetes Client Configuration
+kubernetes:
+  # Set to true when running inside a Kubernetes cluster
+  inCluster: true
+  # Path to kubeconfig file (used when inCluster is false)
+  kubeconfigPath: ""
+  # Default namespace for cluster operations
+  defaultNamespace: orochi-cloud
+  # Kubernetes API request rate limit (queries per second)
+  qps: 50
+  # Kubernetes API burst limit
+  burst: 100
+  # Default timeout for Kubernetes API calls
+  timeout: 30s
+  # Retry configuration for Kubernetes operations
+  retryConfig:
+    maxRetries: 5
+    initialBackoff: 100ms
+    maxBackoff: 30s
+    backoffMultiplier: 2.0
+
+# CloudNativePG Operator Configuration
+cloudNativePG:
+  # Namespace where CloudNativePG operator is installed
+  operatorNamespace: cnpg-system
+  # Default PostgreSQL version for new clusters
+  defaultPostgresVersion: "16"
+  # Namespaces to watch (empty means all namespaces)
+  watchNamespaces: []
+  # Timeout for waiting for clusters to become ready
+  clusterReadyTimeout: 10m
+  # Default storage class for PVCs
+  defaultStorageClass: standard
+  # Default backup retention period
+  defaultBackupRetention: 30d
+
+# Orochi DB Extension Defaults
+orochiDefaults:
+  # Default number of shards for distributed tables
+  defaultShardCount: 32
+  # Default time interval for hypertable chunks
+  defaultChunkInterval: "1 day"
+  # Default compression algorithm (none, lz4, zstd, delta, gorilla, dictionary, rle)
+  defaultCompression: lz4
+  # Enable columnar storage by default
+  enableColumnarByDefault: true
+  # Orochi extension version
+  extensionVersion: "1.0.0"
+  # Libraries to preload in PostgreSQL
+  sharedPreloadLibraries:
+    - orochi
+
+# Prometheus Metrics Configuration
+metrics:
+  # Enable metrics collection
+  enabled: true
+  # Port for metrics endpoint
+  port: 9090
+  # Path for metrics endpoint
+  path: /metrics
+
+# Logging Configuration
+logging:
+  # Log level: debug, info, warn, error
+  level: info
+  # Log format: json, console
+  format: json
+  # Output destinations (stdout, stderr, or file paths)
+  outputPaths:
+    - stdout
+
+---
+# Example production configuration
+# Uncomment and modify as needed
+
+# server:
+#   grpcPort: 8080
+#   healthPort: 8081
+#   tlsEnabled: true
+#   tlsCertFile: /etc/ssl/certs/provisioner.crt
+#   tlsKeyFile: /etc/ssl/private/provisioner.key
+#   maxConcurrentStreams: 200
+#   shutdownTimeout: 60s
+
+# kubernetes:
+#   inCluster: true
+#   defaultNamespace: orochi-production
+#   qps: 100
+#   burst: 200
+#   timeout: 60s
+#   retryConfig:
+#     maxRetries: 10
+#     initialBackoff: 200ms
+#     maxBackoff: 60s
+#     backoffMultiplier: 2.0
+
+# cloudNativePG:
+#   operatorNamespace: cnpg-system
+#   defaultPostgresVersion: "16"
+#   watchNamespaces:
+#     - orochi-production
+#     - orochi-staging
+#   clusterReadyTimeout: 15m
+#   defaultStorageClass: premium-ssd
+#   defaultBackupRetention: 90d
+
+# orochiDefaults:
+#   defaultShardCount: 64
+#   defaultChunkInterval: "1 hour"
+#   defaultCompression: zstd
+#   enableColumnarByDefault: true
+
+# metrics:
+#   enabled: true
+#   port: 9090
+#   path: /metrics
+
+# logging:
+#   level: info
+#   format: json
+#   outputPaths:
+#     - stdout
+#     - /var/log/provisioner/provisioner.log

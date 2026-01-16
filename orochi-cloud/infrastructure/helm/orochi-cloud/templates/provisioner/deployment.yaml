@@ -1,0 +1,105 @@
+{{- if .Values.provisioner.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "orochi-cloud.provisioner.fullname" . }}
+  namespace: {{ include "orochi-cloud.namespace" . }}
+  labels:
+    {{- include "orochi-cloud.provisioner.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.provisioner.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "orochi-cloud.provisioner.selectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/provisioner/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/provisioner/secret.yaml") . | sha256sum }}
+        {{- with .Values.provisioner.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "orochi-cloud.provisioner.labels" . | nindent 8 }}
+        {{- with .Values.provisioner.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- include "orochi-cloud.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "orochi-cloud.provisioner.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.provisioner.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Values.provisioner.name }}
+          image: "{{ .Values.provisioner.image.repository }}:{{ .Values.provisioner.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.provisioner.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.provisioner.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.provisioner.service.targetPort }}
+              protocol: TCP
+            {{- if .Values.metrics.enabled }}
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+              protocol: TCP
+            {{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "orochi-cloud.provisioner.fullname" . }}-config
+            - secretRef:
+                name: {{ include "orochi-cloud.provisioner.fullname" . }}-secret
+          {{- with .Values.provisioner.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          livenessProbe:
+            {{- toYaml .Values.provisioner.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.provisioner.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.provisioner.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: cache
+              mountPath: /app/.cache
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: cache
+          emptyDir: {}
+      {{- with .Values.provisioner.nodeSelector | default .Values.global.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.provisioner.affinity | default .Values.global.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.provisioner.tolerations | default .Values.global.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: 60
+---
+{{- if .Values.provisioner.serviceAccount.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "orochi-cloud.provisioner.serviceAccountName" . }}
+  namespace: {{ include "orochi-cloud.namespace" . }}
+  labels:
+    {{- include "orochi-cloud.provisioner.labels" . | nindent 4 }}
+  {{- with .Values.provisioner.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+automountServiceAccountToken: true
+{{- end }}
+{{- end }}
