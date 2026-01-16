@@ -631,6 +631,19 @@ CREATE TABLE IF NOT EXISTS orochi.orochi_column_chunks (
     UNIQUE(stripe_id, chunk_group_index, column_index)
 );
 
+-- Chunk access tracking for tiered storage decisions
+CREATE TABLE IF NOT EXISTS orochi.orochi_chunk_access (
+    chunk_id BIGINT NOT NULL REFERENCES orochi.orochi_chunks(chunk_id) ON DELETE CASCADE,
+    last_read_at TIMESTAMPTZ,
+    last_write_at TIMESTAMPTZ,
+    read_count BIGINT NOT NULL DEFAULT 0,
+    write_count BIGINT NOT NULL DEFAULT 0,
+    total_bytes_read BIGINT NOT NULL DEFAULT 0,
+    total_bytes_written BIGINT NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (chunk_id)
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_shards_table ON orochi.orochi_shards(table_oid);
 CREATE INDEX IF NOT EXISTS idx_shards_node ON orochi.orochi_shards(node_id);
@@ -643,6 +656,8 @@ CREATE INDEX IF NOT EXISTS idx_stripes_table ON orochi.orochi_stripes(table_oid)
 CREATE INDEX IF NOT EXISTS idx_stripes_flushed ON orochi.orochi_stripes(is_flushed) WHERE is_flushed = TRUE;
 CREATE INDEX IF NOT EXISTS idx_column_chunks_stripe ON orochi.orochi_column_chunks(stripe_id);
 CREATE INDEX IF NOT EXISTS idx_column_chunks_stats ON orochi.orochi_column_chunks(stripe_id, column_index);
+CREATE INDEX IF NOT EXISTS idx_chunk_access_last_read ON orochi.orochi_chunk_access(last_read_at);
+CREATE INDEX IF NOT EXISTS idx_chunk_access_last_write ON orochi.orochi_chunk_access(last_write_at);
 
 -- ============================================================
 -- Information Views
