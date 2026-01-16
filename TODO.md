@@ -118,7 +118,7 @@ All previously identified TODOs have been implemented:
 ```bash
 # Dependencies
 sudo apt-get install -y \
-    postgresql-server-dev-16 \
+    postgresql-server-dev-18 \
     liblz4-dev \
     libzstd-dev \
     libcurl4-openssl-dev

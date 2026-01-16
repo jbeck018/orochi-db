@@ -28,9 +28,16 @@ OBJS = \
 	src/approx/sampling.o \
 	src/pipelines/pipeline.o \
 	src/pipelines/kafka_source.o \
+	src/json/json_index.o \
+	src/json/json_columnar.o \
+	src/json/json_query.o \
+	src/ddl/ddl_workflow.o \
+	src/ddl/ddl_stream.o \
+	src/ddl/ddl_task.o \
+	src/ddl/ddl_dynamic.o \
 	src/utils/utils.o
 
-DATA = sql/orochi--1.0.sql
+DATA = sql/orochi--1.0.sql sql/ddl.sql
 PGFILEDESC = "Orochi DB - Modern HTAP PostgreSQL Extension"
 
 # Compiler flags
@@ -60,7 +67,7 @@ PG_CFLAGS += -Wall -Wextra -Wno-unused-parameter
 SHLIB_LINK = -llz4 -lzstd -lcurl -lssl -lcrypto -lrdkafka
 
 # Regression tests
-REGRESS = basic distributed hypertable columnar vector tiering
+REGRESS = basic distributed hypertable columnar vector tiering json
 
 # Documentation
 DOCS = README.md docs/architecture.md docs/user-guide.md
@@ -70,8 +77,22 @@ PG_CONFIG ?= pg_config
 PGXS := $(shell $(PG_CONFIG) --pgxs)
 include $(PGXS)
 
+# PostgreSQL version requirements
+PG_VERSION := $(shell $(PG_CONFIG) --version | sed 's/PostgreSQL //' | cut -d. -f1)
+MIN_PG_VERSION := 16
+MAX_PG_VERSION := 18
+
 # Additional targets
-.PHONY: format check-format lint test docs clean-all
+.PHONY: format check-format lint test docs clean-all check-version
+
+# Check PostgreSQL version compatibility
+check-version:
+	@echo "Checking PostgreSQL version..."
+	@if [ $(PG_VERSION) -lt $(MIN_PG_VERSION) ] || [ $(PG_VERSION) -gt $(MAX_PG_VERSION) ]; then \
+		echo "Error: Orochi DB requires PostgreSQL $(MIN_PG_VERSION)-$(MAX_PG_VERSION), found $(PG_VERSION)"; \
+		exit 1; \
+	fi
+	@echo "PostgreSQL $(PG_VERSION) supported"
 
 # Format source code
 format:
@@ -98,12 +119,15 @@ clean-all: clean
 	rm -rf results/ regression.diffs regression.out
 
 # Install development dependencies (Ubuntu/Debian)
+# Supports PostgreSQL 16, 17, and 18
 install-deps:
 	sudo apt-get install -y \
 		postgresql-server-dev-all \
 		liblz4-dev \
 		libzstd-dev \
 		libcurl4-openssl-dev \
+		libssl-dev \
+		librdkafka-dev \
 		clang-format \
 		cppcheck
 

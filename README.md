@@ -53,7 +53,11 @@ Orochi DB transforms PostgreSQL into a powerful Hybrid Transactional/Analytical 
 
 ```bash
 # Install dependencies (Ubuntu/Debian)
-sudo apt-get install postgresql-server-dev-16 liblz4-dev libzstd-dev libcurl4-openssl-dev
+# For PostgreSQL 18 (recommended)
+sudo apt-get install postgresql-server-dev-18 liblz4-dev libzstd-dev libcurl4-openssl-dev
+
+# Or for PostgreSQL 16/17
+sudo apt-get install postgresql-server-dev-all liblz4-dev libzstd-dev libcurl4-openssl-dev
 
 # Build and install
 make

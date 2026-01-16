@@ -204,6 +204,48 @@ Orochi DB uses PostgreSQL's extension APIs:
 - **Shared Memory**: Caching and coordination
 - **GUC Variables**: Configuration
 
+## PostgreSQL Version Compatibility
+
+Orochi DB supports PostgreSQL versions 16, 17, and 18. The extension uses a compatibility layer (`src/compat.h`) to abstract API differences between versions.
+
+### PostgreSQL 18 Features
+
+When running on PostgreSQL 18, Orochi DB can leverage several new features:
+
+1. **PG_MODULE_MAGIC_EXT**: Reports extension name and version via `pg_get_loaded_modules()`
+2. **Asynchronous I/O (AIO)**: Improved performance for sequential scans and bulk operations
+3. **Skip Scan for B-tree**: Better utilization of multicolumn indexes in distributed queries
+4. **Temporal Constraints**: Enhanced time-series constraint validation
+5. **UUIDv7**: Timestamp-ordered UUID generation for distributed ID assignment
+6. **EXPLAIN Hooks**: Custom EXPLAIN output for distributed query plans
+7. **Cumulative Statistics API**: Custom statistics tracking for Orochi operations
+
+### Compatibility Macros
+
+The compatibility header provides feature detection:
+
+```c
+#include "compat.h"
+
+#if OROCHI_HAS_AIO
+    // Use async I/O for better performance
+#endif
+
+#if OROCHI_HAS_TEMPORAL_CONSTRAINTS
+    // Leverage temporal constraints for hypertables
+#endif
+```
+
+### Building for Different Versions
+
+```bash
+# Build for PostgreSQL 18 (recommended)
+PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config make
+
+# Build for PostgreSQL 16
+PG_CONFIG=/usr/lib/postgresql/16/bin/pg_config make
+```
+
 ## Future Directions
 
 - CDC (Change Data Capture) support

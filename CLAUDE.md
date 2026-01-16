@@ -18,7 +18,8 @@ Orochi DB is a PostgreSQL extension providing HTAP (Hybrid Transactional/Analyti
 - **JIT Compilation**: Just-in-time query expression compilation
 
 **Version**: 1.0.0
-**Minimum PostgreSQL**: 14+
+**Supported PostgreSQL**: 16, 17, 18
+**Minimum PostgreSQL**: 16+
 **Language**: C11
 
 ---

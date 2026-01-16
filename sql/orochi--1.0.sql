@@ -1229,3 +1229,435 @@ SELECT
 FROM orochi.orochi_nodes
 WHERE role IN (0, 1, 2)  -- Only show Raft-participating nodes
 ORDER BY node_id;
+
+-- ============================================================
+-- JSON Indexing and Semi-Structured Data Support
+-- ============================================================
+
+-- JSON path statistics storage
+CREATE TABLE IF NOT EXISTS orochi.orochi_json_path_stats (
+    stat_id BIGSERIAL PRIMARY KEY,
+    table_oid OID NOT NULL,
+    column_attnum SMALLINT NOT NULL,
+    path TEXT NOT NULL,
+    value_type INTEGER NOT NULL DEFAULT 0,
+    access_count BIGINT NOT NULL DEFAULT 0,
+    null_count BIGINT NOT NULL DEFAULT 0,
+    distinct_count BIGINT NOT NULL DEFAULT 0,
+    selectivity DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+    avg_value_size DOUBLE PRECISION NOT NULL DEFAULT 0,
+    is_indexed BOOLEAN NOT NULL DEFAULT FALSE,
+    recommended_index INTEGER NOT NULL DEFAULT 0,
+    first_seen TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_accessed TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(table_oid, column_attnum, path)
+);
+
+CREATE INDEX IF NOT EXISTS idx_json_path_stats_table ON orochi.orochi_json_path_stats(table_oid, column_attnum);
+CREATE INDEX IF NOT EXISTS idx_json_path_stats_access ON orochi.orochi_json_path_stats(access_count DESC);
+
+-- JSON extracted columns metadata
+CREATE TABLE IF NOT EXISTS orochi.orochi_json_columns (
+    column_id SERIAL PRIMARY KEY,
+    table_oid OID NOT NULL,
+    source_attnum SMALLINT NOT NULL,
+    path TEXT NOT NULL,
+    target_type OID NOT NULL,
+    storage_type INTEGER NOT NULL DEFAULT 0,
+    state INTEGER NOT NULL DEFAULT 0,
+    row_count BIGINT NOT NULL DEFAULT 0,
+    null_count BIGINT NOT NULL DEFAULT 0,
+    distinct_count BIGINT NOT NULL DEFAULT 0,
+    storage_size BIGINT NOT NULL DEFAULT 0,
+    compression_ratio DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_refreshed TIMESTAMPTZ,
+    UNIQUE(table_oid, source_attnum, path)
+);
+
+CREATE INDEX IF NOT EXISTS idx_json_columns_table ON orochi.orochi_json_columns(table_oid, source_attnum);
+
+-- ============================================================
+-- JSON Index Functions
+-- ============================================================
+
+-- Create a JSON path index on specified paths
+CREATE FUNCTION create_json_index(
+    table_name regclass,
+    json_column text,
+    paths text[]
+) RETURNS oid AS $$
+DECLARE
+    v_index_oid oid;
+BEGIN
+    SELECT orochi._create_json_index(table_name, json_column, paths) INTO v_index_oid;
+    RAISE NOTICE 'Created JSON index on %.% for paths %', table_name, json_column, paths;
+    RETURN v_index_oid;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE FUNCTION orochi._create_json_index(
+    table_oid oid,
+    json_column text,
+    paths text[]
+) RETURNS oid
+    AS 'MODULE_PATHNAME', 'orochi_create_json_index'
+    LANGUAGE C STRICT;
+
+-- Analyze JSON paths in a table column
+CREATE FUNCTION analyze_json_paths(
+    table_name regclass,
+    json_column text
+) RETURNS TABLE(
+    path text,
+    value_type text,
+    access_count bigint,
+    distinct_count bigint,
+    selectivity double precision,
+    is_indexed boolean,
+    recommended_index text
+) AS $$
+    SELECT * FROM orochi._analyze_json_paths(table_name, json_column);
+$$ LANGUAGE sql;
+
+CREATE FUNCTION orochi._analyze_json_paths(
+    table_oid oid,
+    json_column text
+) RETURNS TABLE(
+    path text,
+    value_type text,
+    access_count bigint,
+    distinct_count bigint,
+    selectivity double precision,
+    is_indexed boolean,
+    recommended_index text
+)
+    AS 'MODULE_PATHNAME', 'orochi_analyze_json_paths'
+    LANGUAGE C STRICT;
+
+-- Get JSON index recommendations for a column
+CREATE FUNCTION json_index_recommendations(
+    table_name regclass,
+    json_column text,
+    max_recommendations integer DEFAULT 10
+) RETURNS TABLE(
+    path text,
+    index_type text,
+    priority integer,
+    create_statement text,
+    reason text
+) AS $$
+    SELECT * FROM orochi._json_index_recommendations(table_name, json_column, max_recommendations);
+$$ LANGUAGE sql;
+
+CREATE FUNCTION orochi._json_index_recommendations(
+    table_oid oid,
+    json_column text,
+    max_recommendations integer
+) RETURNS TABLE(
+    path text,
+    index_type text,
+    priority integer,
+    create_statement text,
+    reason text
+)
+    AS 'MODULE_PATHNAME', 'orochi_json_index_recommendations'
+    LANGUAGE C STRICT;
+
+-- Check if a specific JSON path is indexed
+CREATE FUNCTION json_path_is_indexed(
+    table_name regclass,
+    json_column text,
+    path text
+) RETURNS boolean AS $$
+    SELECT orochi._json_path_is_indexed(table_name, json_column, path);
+$$ LANGUAGE sql;
+
+CREATE FUNCTION orochi._json_path_is_indexed(
+    table_oid oid,
+    json_column text,
+    path text
+) RETURNS boolean
+    AS 'MODULE_PATHNAME', 'orochi_json_path_is_indexed'
+    LANGUAGE C STRICT;
+
+-- Get statistics for a specific JSON path
+CREATE FUNCTION json_path_stats(
+    table_name regclass,
+    json_column text,
+    path text
+) RETURNS TABLE(
+    path text,
+    access_count bigint,
+    distinct_count bigint,
+    null_count bigint,
+    selectivity double precision,
+    avg_value_size double precision
+) AS $$
+    SELECT r.path, r.access_count, r.distinct_count, r.null_count, r.selectivity, r.avg_value_size
+    FROM orochi._json_path_stats(table_name, json_column, path) r;
+$$ LANGUAGE sql;
+
+CREATE FUNCTION orochi._json_path_stats(
+    table_oid oid,
+    json_column text,
+    path text
+) RETURNS record
+    AS 'MODULE_PATHNAME', 'orochi_json_path_stats'
+    LANGUAGE C STRICT;
+
+-- ============================================================
+-- JSON Columnar Extraction Functions
+-- ============================================================
+
+-- Extract common JSON paths to columnar storage
+CREATE FUNCTION extract_json_columns(
+    table_name regclass,
+    json_column text,
+    paths text[]
+) RETURNS integer AS $$
+DECLARE
+    v_count integer;
+BEGIN
+    SELECT orochi._extract_columns(table_name, json_column, paths) INTO v_count;
+    RAISE NOTICE 'Extracted % columns from %.%', v_count, table_name, json_column;
+    RETURN v_count;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE FUNCTION orochi._extract_columns(
+    table_oid oid,
+    json_column text,
+    paths text[]
+) RETURNS integer
+    AS 'MODULE_PATHNAME', 'orochi_extract_columns'
+    LANGUAGE C STRICT;
+
+-- Get information about extracted JSON columns
+CREATE FUNCTION json_columnar_info(
+    table_name regclass,
+    json_column text
+) RETURNS TABLE(
+    column_id integer,
+    path text,
+    target_type text,
+    row_count bigint,
+    null_count bigint,
+    storage_size bigint,
+    compression_ratio double precision,
+    state text
+) AS $$
+    SELECT * FROM orochi._json_columnar_info(table_name, json_column);
+$$ LANGUAGE sql;
+
+CREATE FUNCTION orochi._json_columnar_info(
+    table_oid oid,
+    json_column text
+) RETURNS TABLE(
+    column_id integer,
+    path text,
+    target_type text,
+    row_count bigint,
+    null_count bigint,
+    storage_size bigint,
+    compression_ratio double precision,
+    state text
+)
+    AS 'MODULE_PATHNAME', 'orochi_json_columnar_info'
+    LANGUAGE C STRICT;
+
+-- Refresh extracted JSON columns
+CREATE FUNCTION refresh_json_columns(
+    table_name regclass,
+    json_column text
+) RETURNS void AS $$
+BEGIN
+    PERFORM orochi._json_columnar_refresh(table_name, json_column);
+    RAISE NOTICE 'Refreshed JSON columns for %.%', table_name, json_column;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE FUNCTION orochi._json_columnar_refresh(
+    table_oid oid,
+    json_column text
+) RETURNS void
+    AS 'MODULE_PATHNAME', 'orochi_json_columnar_refresh'
+    LANGUAGE C STRICT;
+
+-- Get columnar storage statistics
+CREATE FUNCTION json_columnar_stats(
+    table_name regclass,
+    json_column text
+) RETURNS TABLE(
+    num_columns integer,
+    total_rows bigint,
+    columnar_size bigint,
+    original_size bigint,
+    space_savings double precision,
+    avg_compression double precision
+) AS $$
+    SELECT r.num_columns, r.total_rows, r.columnar_size, r.original_size, r.space_savings, r.avg_compression
+    FROM orochi._json_columnar_stats(table_name, json_column) r;
+$$ LANGUAGE sql;
+
+CREATE FUNCTION orochi._json_columnar_stats(
+    table_oid oid,
+    json_column text
+) RETURNS record
+    AS 'MODULE_PATHNAME', 'orochi_json_columnar_stats'
+    LANGUAGE C STRICT;
+
+-- Enable hybrid row/columnar storage for JSON
+CREATE FUNCTION enable_json_hybrid(
+    table_name regclass,
+    json_column text,
+    columnar_paths text[]
+) RETURNS void AS $$
+BEGIN
+    PERFORM orochi._json_enable_hybrid(table_name, json_column, columnar_paths);
+    RAISE NOTICE 'Enabled hybrid storage for %.% with % columnar paths',
+        table_name, json_column, array_length(columnar_paths, 1);
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE FUNCTION orochi._json_enable_hybrid(
+    table_oid oid,
+    json_column text,
+    columnar_paths text[]
+) RETURNS void
+    AS 'MODULE_PATHNAME', 'orochi_json_enable_hybrid'
+    LANGUAGE C STRICT;
+
+-- ============================================================
+-- JSON Query Functions
+-- ============================================================
+
+-- Execute an optimized JSON query
+CREATE FUNCTION json_query(
+    table_name regclass,
+    json_column text,
+    query_expr text
+) RETURNS SETOF jsonb AS $$
+    SELECT * FROM orochi._json_query(table_name, json_column, query_expr);
+$$ LANGUAGE sql;
+
+CREATE FUNCTION orochi._json_query(
+    table_oid oid,
+    json_column text,
+    query_expr text
+) RETURNS SETOF jsonb
+    AS 'MODULE_PATHNAME', 'orochi_json_query'
+    LANGUAGE C STRICT;
+
+-- Batch extract a path from an array of JSONB values
+CREATE FUNCTION json_extract_batch(
+    values jsonb[],
+    path text
+) RETURNS text[]
+    AS 'MODULE_PATHNAME', 'orochi_json_extract_batch'
+    LANGUAGE C STRICT PARALLEL SAFE;
+
+-- Explain a JSON query plan
+CREATE FUNCTION json_query_explain(
+    table_name regclass,
+    json_column text,
+    query_expr text
+) RETURNS text AS $$
+    SELECT orochi._json_query_explain(table_name, json_column, query_expr);
+$$ LANGUAGE sql;
+
+CREATE FUNCTION orochi._json_query_explain(
+    table_oid oid,
+    json_column text,
+    query_expr text
+) RETURNS text
+    AS 'MODULE_PATHNAME', 'orochi_json_query_explain'
+    LANGUAGE C STRICT;
+
+-- Get JSON query statistics for a column
+CREATE FUNCTION json_query_stats(
+    table_name regclass,
+    json_column text
+) RETURNS TABLE(
+    total_rows bigint,
+    paths_found integer,
+    indexed_paths integer,
+    last_analyzed timestamptz
+) AS $$
+    SELECT r.total_rows, r.paths_found, r.indexed_paths, r.last_analyzed
+    FROM orochi._json_query_stats(table_name, json_column) r;
+$$ LANGUAGE sql;
+
+CREATE FUNCTION orochi._json_query_stats(
+    table_oid oid,
+    json_column text
+) RETURNS record
+    AS 'MODULE_PATHNAME', 'orochi_json_query_stats'
+    LANGUAGE C STRICT;
+
+-- ============================================================
+-- JSON Views
+-- ============================================================
+
+-- View for JSON path statistics
+CREATE VIEW orochi.json_paths AS
+SELECT
+    t.schema_name || '.' || t.table_name as table_name,
+    a.attname as column_name,
+    s.path,
+    CASE s.value_type
+        WHEN 0 THEN 'null'
+        WHEN 1 THEN 'string'
+        WHEN 2 THEN 'number'
+        WHEN 3 THEN 'boolean'
+        WHEN 4 THEN 'array'
+        WHEN 5 THEN 'object'
+        WHEN 6 THEN 'mixed'
+    END as value_type,
+    s.access_count,
+    s.distinct_count,
+    round(s.selectivity::numeric, 4) as selectivity,
+    s.is_indexed,
+    CASE s.recommended_index
+        WHEN 0 THEN 'gin'
+        WHEN 1 THEN 'btree'
+        WHEN 2 THEN 'hash'
+        WHEN 3 THEN 'expression'
+        WHEN 4 THEN 'partial'
+    END as recommended_index,
+    s.last_accessed
+FROM orochi.orochi_json_path_stats s
+JOIN orochi.orochi_tables t ON s.table_oid = t.table_oid
+JOIN pg_attribute a ON s.table_oid = a.attrelid AND s.column_attnum = a.attnum
+ORDER BY s.access_count DESC;
+
+-- View for extracted JSON columns
+CREATE VIEW orochi.json_columns AS
+SELECT
+    t.schema_name || '.' || t.table_name as table_name,
+    a.attname as source_column,
+    c.column_id,
+    c.path,
+    format_type(c.target_type, NULL) as target_type,
+    CASE c.storage_type
+        WHEN 0 THEN 'inline'
+        WHEN 1 THEN 'dictionary'
+        WHEN 2 THEN 'delta'
+        WHEN 3 THEN 'rle'
+        WHEN 4 THEN 'raw'
+    END as storage_type,
+    c.row_count,
+    c.null_count,
+    pg_size_pretty(c.storage_size) as storage_size,
+    round(c.compression_ratio::numeric, 2) as compression_ratio,
+    CASE c.state
+        WHEN 0 THEN 'active'
+        WHEN 1 THEN 'stale'
+        WHEN 2 THEN 'deprecated'
+    END as state,
+    c.created_at,
+    c.last_refreshed
+FROM orochi.orochi_json_columns c
+JOIN orochi.orochi_tables t ON c.table_oid = t.table_oid
+JOIN pg_attribute a ON c.table_oid = a.attrelid AND c.source_attnum = a.attnum
+ORDER BY c.table_oid, c.path;

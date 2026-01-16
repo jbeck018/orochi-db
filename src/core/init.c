@@ -26,6 +26,7 @@
 #include "access/xact.h"
 
 #include "../orochi.h"
+#include "../compat.h"
 #include "catalog.h"
 #include "../planner/distributed_planner.h"
 #include "../executor/distributed_executor.h"
@@ -33,7 +34,8 @@
 #include "../consensus/raft.h"
 #include "../consensus/raft_integration.h"
 
-PG_MODULE_MAGIC;
+/* Use PG_MODULE_MAGIC_EXT on PG18+ for name/version reporting */
+OROCHI_MODULE_MAGIC;
 
 /* GUC variables */
 int     orochi_default_shard_count = 32;
@@ -126,7 +128,11 @@ _PG_init(void)
     prev_executor_end_hook = ExecutorEnd_hook;
     ExecutorEnd_hook = orochi_executor_end_hook;
 
-    elog(LOG, "Orochi DB v%s initialized", OROCHI_VERSION_STRING);
+    elog(LOG, "Orochi DB v%s initialized (PostgreSQL %d)",
+         OROCHI_VERSION_STRING, orochi_pg_major_version());
+
+    /* Log compatibility info for debugging */
+    OROCHI_LOG_COMPAT_INFO();
 }
 
 /*

@@ -34,6 +34,10 @@
 #define OROCHI_VERSION_PATCH    0
 #define OROCHI_VERSION_STRING   "1.0.0"
 
+/* PostgreSQL version requirements */
+#define OROCHI_MIN_PG_MAJOR     16
+#define OROCHI_MAX_PG_MAJOR     18
+
 /* Extension name for identification */
 #define OROCHI_EXTENSION_NAME   "orochi"
 #define OROCHI_SCHEMA_NAME      "orochi"
@@ -353,5 +357,125 @@ extern char *orochi_s3_bucket;
 extern bool orochi_enable_vectorized_execution;
 extern bool orochi_enable_parallel_query;
 extern int orochi_parallel_workers;
+
+/* ============================================================
+ * JSON Semi-Structured Data Support
+ * ============================================================ */
+
+/*
+ * JSON Index Types
+ */
+typedef enum OrochiJsonIndexType
+{
+    OROCHI_JSON_INDEX_GIN = 0,        /* GIN index for containment */
+    OROCHI_JSON_INDEX_BTREE,          /* B-tree for scalar paths */
+    OROCHI_JSON_INDEX_HASH,           /* Hash for equality */
+    OROCHI_JSON_INDEX_EXPRESSION,     /* Expression index */
+    OROCHI_JSON_INDEX_PARTIAL         /* Partial index */
+} OrochiJsonIndexType;
+
+/*
+ * JSON Path Value Types
+ */
+typedef enum OrochiJsonPathType
+{
+    OROCHI_JSON_PATH_NULL = 0,
+    OROCHI_JSON_PATH_STRING,
+    OROCHI_JSON_PATH_NUMBER,
+    OROCHI_JSON_PATH_BOOLEAN,
+    OROCHI_JSON_PATH_ARRAY,
+    OROCHI_JSON_PATH_OBJECT,
+    OROCHI_JSON_PATH_MIXED
+} OrochiJsonPathType;
+
+/*
+ * JSON Columnar Storage Type
+ */
+typedef enum OrochiJsonColumnarType
+{
+    OROCHI_JSON_COLUMNAR_INLINE = 0,  /* Small values inline */
+    OROCHI_JSON_COLUMNAR_DICTIONARY,  /* Dictionary encoded */
+    OROCHI_JSON_COLUMNAR_DELTA,       /* Delta encoded */
+    OROCHI_JSON_COLUMNAR_RLE,         /* Run-length encoded */
+    OROCHI_JSON_COLUMNAR_RAW          /* Raw uncompressed */
+} OrochiJsonColumnarType;
+
+/*
+ * OrochiJsonIndexInfo - JSON index metadata
+ */
+typedef struct OrochiJsonIndexInfo
+{
+    Oid                     index_oid;          /* PostgreSQL index OID */
+    Oid                     table_oid;          /* Parent table OID */
+    int16                   column_attnum;      /* JSONB column */
+    char                   *index_name;         /* Index name */
+    OrochiJsonIndexType     index_type;         /* Type of index */
+    char                  **paths;              /* Indexed paths */
+    int32                   path_count;         /* Number of paths */
+    bool                    is_unique;          /* Unique index */
+    int64                   size_bytes;         /* Index size */
+    TimestampTz             created_at;         /* Creation time */
+} OrochiJsonIndexInfo;
+
+/*
+ * OrochiJsonPathStats - JSON path statistics
+ */
+typedef struct OrochiJsonPathStats
+{
+    char                   *path;               /* JSON path */
+    OrochiJsonPathType      value_type;         /* Value type */
+    int64                   access_count;       /* Access count */
+    int64                   null_count;         /* Null values */
+    int64                   distinct_count;     /* Distinct values */
+    double                  selectivity;        /* Selectivity estimate */
+    double                  avg_value_size;     /* Average value size */
+    bool                    is_indexed;         /* Has index */
+    OrochiJsonIndexType     recommended_index;  /* Recommended index */
+    TimestampTz             last_accessed;      /* Last access time */
+} OrochiJsonPathStats;
+
+/*
+ * OrochiJsonExtractedColumn - Extracted JSON column metadata
+ */
+typedef struct OrochiJsonExtractedColumn
+{
+    int32                   column_id;          /* Column ID */
+    Oid                     table_oid;          /* Table OID */
+    int16                   source_attnum;      /* Source JSONB column */
+    char                   *path;               /* Extraction path */
+    Oid                     target_type;        /* Target type */
+    OrochiJsonColumnarType  storage_type;       /* Storage type */
+    int64                   row_count;          /* Row count */
+    int64                   null_count;         /* Null count */
+    double                  compression_ratio;  /* Compression ratio */
+    TimestampTz             created_at;         /* Creation time */
+} OrochiJsonExtractedColumn;
+
+/* JSON Index Operations */
+extern Oid orochi_json_create_index(Oid table_oid, int16 column_attnum,
+                                    const char **paths, int path_count,
+                                    OrochiJsonIndexType index_type);
+extern void orochi_json_drop_index(Oid index_oid);
+extern bool orochi_json_path_is_indexed(Oid table_oid, int16 column_attnum,
+                                        const char *path);
+extern List *orochi_json_get_indexes(Oid table_oid, int16 column_attnum);
+
+/* JSON Path Statistics */
+extern OrochiJsonPathStats *orochi_json_analyze_path(Oid table_oid,
+                                                     int16 column_attnum,
+                                                     const char *path);
+extern List *orochi_json_analyze_all_paths(Oid table_oid, int16 column_attnum);
+extern void orochi_json_record_path_access(Oid table_oid, int16 column_attnum,
+                                           const char *path);
+
+/* JSON Columnar Extraction */
+extern List *orochi_json_extract_columns(Oid table_oid, int16 column_attnum,
+                                         const char **paths, int path_count);
+extern void orochi_json_refresh_columns(Oid table_oid, int16 column_attnum);
+extern List *orochi_json_get_extracted_columns(Oid table_oid, int16 column_attnum);
+
+/* JSON Query Optimization */
+extern void orochi_json_planner_init(void);
+extern void orochi_json_executor_init(void);
 
 #endif /* OROCHI_H */

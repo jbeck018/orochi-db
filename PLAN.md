@@ -282,4 +282,4 @@ agents:
 - Follow PostgreSQL coding conventions
 - Use ereport/elog for error handling
 - Update catalog after any metadata changes
-- Test with various PostgreSQL versions (14, 15, 16)
+- Test with various PostgreSQL versions (16, 17, 18)
