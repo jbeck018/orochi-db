@@ -653,6 +653,49 @@ orochi_catalog_get_active_nodes(void)
     return nodes;
 }
 
+OrochiNodeInfo *
+orochi_catalog_get_node(int32 node_id)
+{
+    StringInfoData query;
+    OrochiNodeInfo *info = NULL;
+    int ret;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "SELECT node_id, hostname, port, role, is_active, "
+        "shard_count, total_size, cpu_usage, memory_usage, last_heartbeat "
+        "FROM orochi.orochi_nodes WHERE node_id = %d",
+        node_id);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 1);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0)
+    {
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        bool isnull;
+
+        info = (OrochiNodeInfo *) palloc0(sizeof(OrochiNodeInfo));
+
+        info->node_id = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+        info->hostname = pstrdup(SPI_getvalue(tuple, tupdesc, 2));
+        info->port = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 3, &isnull));
+        info->role = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 4, &isnull));
+        info->is_active = DatumGetBool(SPI_getbinval(tuple, tupdesc, 5, &isnull));
+        info->shard_count = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 6, &isnull));
+        info->total_size = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 7, &isnull));
+        info->cpu_usage = DatumGetFloat8(SPI_getbinval(tuple, tupdesc, 8, &isnull));
+        info->memory_usage = DatumGetFloat8(SPI_getbinval(tuple, tupdesc, 9, &isnull));
+        info->last_heartbeat = DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 10, &isnull));
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
+    return info;
+}
+
 void
 orochi_catalog_record_heartbeat(int32 node_id)
 {
