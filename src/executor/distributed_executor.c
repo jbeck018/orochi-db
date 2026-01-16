@@ -974,11 +974,16 @@ orochi_combine_partial_aggregates(List *partials, int agg_type)
 }
 
 /* ============================================================
- * Query Result Caching
+ * Query Result Caching with Table Dependency Tracking
  * ============================================================ */
 
 /* Simple hash table for query cache */
 static HTAB *query_cache = NULL;
+
+/* Hash table for tracking table dependencies */
+static HTAB *cache_dependencies = NULL;
+
+#define MAX_DEPENDENT_TABLES 16
 
 typedef struct QueryCacheEntry
 {
@@ -987,7 +992,75 @@ typedef struct QueryCacheEntry
     int64 result_size;
     TimestampTz cached_at;
     int64 hit_count;
+    Oid dependent_tables[MAX_DEPENDENT_TABLES];  /* Tables this entry depends on */
+    int num_dependencies;
 } QueryCacheEntry;
+
+typedef struct CacheDependencyEntry
+{
+    Oid table_oid;                      /* Key: table OID */
+    uint64 dependent_queries[64];        /* Query hashes that depend on this table */
+    int num_queries;
+} CacheDependencyEntry;
+
+/*
+ * Initialize cache dependency tracking
+ */
+static void
+init_cache_dependencies(void)
+{
+    HASHCTL hash_ctl;
+
+    if (cache_dependencies != NULL)
+        return;
+
+    memset(&hash_ctl, 0, sizeof(hash_ctl));
+    hash_ctl.keysize = sizeof(Oid);
+    hash_ctl.entrysize = sizeof(CacheDependencyEntry);
+    hash_ctl.hcxt = TopMemoryContext;
+
+    cache_dependencies = hash_create("OrochiCacheDependencies", 256, &hash_ctl,
+                                     HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+}
+
+/*
+ * Register a cache entry's dependency on a table
+ */
+static void
+register_cache_dependency(uint64 query_hash, Oid table_oid)
+{
+    CacheDependencyEntry *entry;
+    bool found;
+
+    init_cache_dependencies();
+
+    entry = hash_search(cache_dependencies, &table_oid, HASH_ENTER, &found);
+
+    if (!found)
+    {
+        entry->table_oid = table_oid;
+        entry->num_queries = 0;
+    }
+
+    /* Add query hash if not already present and space available */
+    if (entry->num_queries < 64)
+    {
+        int i;
+        bool exists = false;
+
+        for (i = 0; i < entry->num_queries; i++)
+        {
+            if (entry->dependent_queries[i] == query_hash)
+            {
+                exists = true;
+                break;
+            }
+        }
+
+        if (!exists)
+            entry->dependent_queries[entry->num_queries++] = query_hash;
+    }
+}
 
 /*
  * Initialize query result cache
@@ -1087,17 +1160,97 @@ orochi_cache_store(const char *query_string, const char *result_data, int64 resu
 }
 
 /*
- * Invalidate cache entries for a table
+ * Invalidate cache entries for a table using dependency tracking
  */
 void
 orochi_cache_invalidate(Oid table_oid)
 {
-    /* TODO: Track which cache entries depend on which tables */
-    /* For now, clear entire cache on any modification */
-    if (query_cache != NULL)
+    CacheDependencyEntry *dep_entry;
+    bool found;
+    int i;
+    int invalidated = 0;
+
+    if (query_cache == NULL)
+        return;
+
+    /* Look up which queries depend on this table */
+    if (cache_dependencies != NULL)
     {
-        hash_destroy(query_cache);
-        query_cache = NULL;
+        dep_entry = hash_search(cache_dependencies, &table_oid, HASH_FIND, &found);
+
+        if (found && dep_entry->num_queries > 0)
+        {
+            /* Invalidate each dependent query */
+            for (i = 0; i < dep_entry->num_queries; i++)
+            {
+                uint64 hash = dep_entry->dependent_queries[i];
+                QueryCacheEntry *cache_entry;
+
+                cache_entry = hash_search(query_cache, &hash, HASH_FIND, &found);
+                if (found)
+                {
+                    /* Free result data and remove from cache */
+                    if (cache_entry->result_data != NULL)
+                        pfree(cache_entry->result_data);
+
+                    hash_search(query_cache, &hash, HASH_REMOVE, NULL);
+                    invalidated++;
+                }
+            }
+
+            /* Clear the dependency entry */
+            dep_entry->num_queries = 0;
+
+            elog(DEBUG1, "Invalidated %d cache entries for table OID %u",
+                 invalidated, table_oid);
+            return;
+        }
+    }
+
+    /* Fallback: if no dependency tracking or table not found,
+     * clear the entire cache to be safe */
+    elog(DEBUG1, "No dependency info for table OID %u, clearing entire cache",
+         table_oid);
+    hash_destroy(query_cache);
+    query_cache = NULL;
+}
+
+/*
+ * Store cache entry with table dependencies
+ */
+void
+orochi_cache_store_with_deps(const char *query_string, const char *result_data,
+                              int64 result_size, Oid *table_oids, int num_tables)
+{
+    uint64 hash;
+    QueryCacheEntry *entry;
+    bool found;
+    int i;
+
+    if (query_cache == NULL)
+        orochi_init_query_cache();
+
+    hash = compute_query_hash(query_string);
+    entry = hash_search(query_cache, &hash, HASH_ENTER, &found);
+
+    if (!found || entry->result_data == NULL)
+    {
+        entry->query_hash = hash;
+        entry->result_data = MemoryContextStrdup(TopMemoryContext, result_data);
+        entry->result_size = result_size;
+        entry->cached_at = GetCurrentTimestamp();
+        entry->hit_count = 0;
+        entry->num_dependencies = 0;
+
+        /* Record table dependencies */
+        for (i = 0; i < num_tables && i < MAX_DEPENDENT_TABLES; i++)
+        {
+            entry->dependent_tables[i] = table_oids[i];
+            entry->num_dependencies++;
+
+            /* Also register in reverse lookup */
+            register_cache_dependency(hash, table_oids[i]);
+        }
     }
 }
 

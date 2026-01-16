@@ -547,6 +547,33 @@ CREATE TABLE IF NOT EXISTS orochi.orochi_nodes (
     UNIQUE(hostname, port)
 );
 
+-- Co-location groups for distributed tables
+CREATE TABLE IF NOT EXISTS orochi.orochi_colocation_groups (
+    group_id SERIAL PRIMARY KEY,
+    shard_count INTEGER NOT NULL,
+    shard_strategy INTEGER NOT NULL DEFAULT 0,
+    distribution_type TEXT,
+    replication_factor INTEGER NOT NULL DEFAULT 1,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Shard movement tracking
+CREATE TABLE IF NOT EXISTS orochi.orochi_shard_moves (
+    move_id BIGSERIAL PRIMARY KEY,
+    shard_id BIGINT NOT NULL,
+    source_node_id INTEGER NOT NULL,
+    target_node_id INTEGER NOT NULL,
+    status INTEGER NOT NULL DEFAULT 0, -- 0=pending, 1=copying, 2=completed, 3=failed
+    bytes_copied BIGINT NOT NULL DEFAULT 0,
+    bytes_total BIGINT NOT NULL DEFAULT 0,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at TIMESTAMPTZ,
+    error_message TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_shard_moves_shard ON orochi.orochi_shard_moves(shard_id);
+CREATE INDEX IF NOT EXISTS idx_shard_moves_status ON orochi.orochi_shard_moves(status) WHERE status < 2;
+
 -- Time-series chunks
 CREATE TABLE IF NOT EXISTS orochi.orochi_chunks (
     chunk_id BIGSERIAL PRIMARY KEY,
