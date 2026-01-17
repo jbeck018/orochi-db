@@ -1,11 +1,11 @@
 {
-  "timestamp": "2026-01-17T02:39:06.943Z",
+  "timestamp": "2026-01-17T21:30:28.845Z",
   "projectRoot": "/home/user/orochi-db",
   "structure": {
-    "hasPackageJson": false,
+    "hasPackageJson": true,
     "hasTsConfig": false,
     "hasClaudeConfig": true,
     "hasClaudeFlow": true
   },
-  "scannedAt": 1768617546944
+  "scannedAt": 1768685428845
 }
