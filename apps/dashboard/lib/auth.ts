@@ -72,12 +72,20 @@ export async function login(credentials: LoginCredentials): Promise<{ tokens: Au
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: "Login failed" }));
-    throw new Error(error.error ?? "Login failed");
+    throw new Error(error.message ?? error.error ?? "Login failed");
   }
 
   const data = await response.json();
+
+  // Map API response (snake_case) to frontend format (camelCase)
+  const tokens: AuthTokens = {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token,
+    expiresAt: Date.now() + (data.expires_in * 1000), // Convert seconds to absolute timestamp
+  };
+
   const result = {
-    tokens: data.tokens as AuthTokens,
+    tokens,
     user: data.user as User,
   };
 
@@ -98,8 +106,16 @@ export async function register(credentials: RegisterCredentials): Promise<{ toke
   }
 
   const data = await response.json();
+
+  // Map API response (snake_case) to frontend format (camelCase)
+  const tokens: AuthTokens = {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token,
+    expiresAt: Date.now() + (data.expires_in * 1000),
+  };
+
   const result = {
-    tokens: data.tokens as AuthTokens,
+    tokens,
     user: data.user as User,
   };
 
@@ -135,7 +151,7 @@ export async function refreshTokens(): Promise<AuthTokens | null> {
     const response = await fetch(`${API_URL}/api/v1/auth/refresh`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refreshToken: tokens.refreshToken }),
+      body: JSON.stringify({ refresh_token: tokens.refreshToken }),
     });
 
     if (!response.ok) {
@@ -144,7 +160,14 @@ export async function refreshTokens(): Promise<AuthTokens | null> {
     }
 
     const data = await response.json();
-    const newTokens = data.tokens as AuthTokens;
+
+    // Map API response (snake_case) to frontend format (camelCase)
+    const newTokens: AuthTokens = {
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token,
+      expiresAt: Date.now() + (data.expires_in * 1000),
+    };
+
     const user = getStoredUser();
 
     if (user) {

@@ -10,6 +10,8 @@ import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import { Toaster } from "@/components/ui/toaster";
 import { queryClient } from "@/lib/queryClient";
+// Import Fira Code font via JS for reliable bundling
+import "@fontsource-variable/fira-code";
 import "../styles/globals.css";
 
 export const Route = createRootRoute({

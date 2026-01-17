@@ -1,5 +1,5 @@
 @import "tailwindcss";
-@import "@fontsource-variable/fira-code";
+/* Note: @fontsource-variable/fira-code is imported via JS in __root.tsx for reliable bundling */
 
 @plugin "tailwindcss-animate";
 
