@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/components/layout/theme-provider";
 import {
   Database,
   Moon,
@@ -31,7 +31,7 @@ interface HeaderProps {
 
 export function Header({ onMenuClick }: HeaderProps): React.JSX.Element {
   const navigate = useNavigate();
-  const { theme, setTheme } = useTheme();
+  const { resolvedTheme, setTheme } = useTheme();
   const [user, setUser] = React.useState<UserType | null>(null);
   const [mounted, setMounted] = React.useState(false);
 
@@ -79,9 +79,9 @@ export function Header({ onMenuClick }: HeaderProps): React.JSX.Element {
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
             >
-              {theme === "dark" ? (
+              {resolvedTheme === "dark" ? (
                 <Sun className="h-5 w-5" />
               ) : (
                 <Moon className="h-5 w-5" />
