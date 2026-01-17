@@ -91,30 +91,152 @@ async function fetchWithAuth<T>(
   return JSON.parse(text) as T;
 }
 
+// API Cluster type (snake_case from backend)
+interface ApiCluster {
+  id: string;
+  name: string;
+  owner_id: string;
+  status: string;
+  tier: string;
+  provider: string;
+  region: string;
+  version: string;
+  node_count: number;
+  node_size: string;
+  storage_gb: number;
+  connection_url: string;
+  maintenance_day: string;
+  maintenance_hour: number;
+  backup_enabled: boolean;
+  backup_retention_days: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// Transform API cluster to frontend Cluster type
+function transformCluster(c: ApiCluster): Cluster {
+  return {
+    id: c.id,
+    name: c.name,
+    status: c.status as Cluster["status"],
+    config: {
+      tier: c.tier as Cluster["config"]["tier"],
+      provider: c.provider as Cluster["config"]["provider"],
+      region: c.region,
+      nodeCount: c.node_count,
+      storageGb: c.storage_gb,
+      highAvailability: false,
+      backupEnabled: c.backup_enabled,
+      backupRetentionDays: c.backup_retention_days,
+      maintenanceWindow: {
+        dayOfWeek: ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"].indexOf(c.maintenance_day),
+        hourUtc: c.maintenance_hour,
+      },
+    },
+    connectionString: c.connection_url,
+    createdAt: c.created_at,
+    updatedAt: c.updated_at,
+    ownerId: c.owner_id,
+    version: c.version,
+    endpoints: {
+      primary: c.connection_url,
+    },
+  };
+}
+
 // Cluster API
 export const clusterApi = {
   list: async (page = 1, pageSize = 10): Promise<PaginatedResponse<Cluster>> => {
-    return fetchWithAuth<PaginatedResponse<Cluster>>(
-      `/api/v1/clusters?page=${page}&pageSize=${pageSize}`
-    );
+    // API returns snake_case format, map to frontend format
+    const response = await fetchWithAuth<{
+      clusters: ApiCluster[];
+      total_count: number;
+      page: number;
+      page_size: number;
+    }>(`/api/v1/clusters?page=${page}&pageSize=${pageSize}`);
+
+    return {
+      data: (response.clusters || []).map(transformCluster),
+      pagination: {
+        page: response.page,
+        pageSize: response.page_size,
+        total: response.total_count,
+        totalPages: Math.ceil(response.total_count / response.page_size),
+      },
+    };
   },
 
   get: async (id: string): Promise<ApiResponse<Cluster>> => {
-    return fetchWithAuth<ApiResponse<Cluster>>(`/api/v1/clusters/${id}`);
+    // API returns snake_case format, map to frontend format
+    const response = await fetchWithAuth<{
+      cluster: {
+        id: string;
+        name: string;
+        owner_id: string;
+        status: string;
+        tier: string;
+        provider: string;
+        region: string;
+        version: string;
+        node_count: number;
+        node_size: string;
+        storage_gb: number;
+        connection_url: string;
+        maintenance_day: string;
+        maintenance_hour: number;
+        backup_enabled: boolean;
+        backup_retention_days: number;
+        created_at: string;
+        updated_at: string;
+      };
+    }>(`/api/v1/clusters/${id}`);
+
+    const c = response.cluster;
+    return {
+      data: {
+        id: c.id,
+        name: c.name,
+        status: c.status as Cluster["status"],
+        config: {
+          tier: c.tier as Cluster["config"]["tier"],
+          provider: c.provider as Cluster["config"]["provider"],
+          region: c.region,
+          nodeCount: c.node_count,
+          storageGb: c.storage_gb,
+          highAvailability: false,
+          backupEnabled: c.backup_enabled,
+          backupRetentionDays: c.backup_retention_days,
+          maintenanceWindow: {
+            dayOfWeek: ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"].indexOf(c.maintenance_day),
+            hourUtc: c.maintenance_hour,
+          },
+        },
+        connectionString: c.connection_url,
+        createdAt: c.created_at,
+        updatedAt: c.updated_at,
+        ownerId: c.owner_id,
+        version: c.version,
+        endpoints: {
+          primary: c.connection_url,
+        },
+      },
+    };
   },
 
   create: async (data: CreateClusterForm): Promise<ApiResponse<Cluster>> => {
-    return fetchWithAuth<ApiResponse<Cluster>>("/api/v1/clusters", {
+    const response = await fetchWithAuth<{ cluster: ApiCluster }>("/api/v1/clusters", {
       method: "POST",
       body: JSON.stringify(data),
     });
+    return { data: transformCluster(response.cluster) };
   },
 
   update: async (id: string, data: UpdateClusterForm): Promise<ApiResponse<Cluster>> => {
-    return fetchWithAuth<ApiResponse<Cluster>>(`/api/v1/clusters/${id}`, {
+    const response = await fetchWithAuth<{ cluster: ApiCluster }>(`/api/v1/clusters/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
     });
+    return { data: transformCluster(response.cluster) };
   },
 
   delete: async (id: string): Promise<void> => {
@@ -124,21 +246,24 @@ export const clusterApi = {
   },
 
   start: async (id: string): Promise<ApiResponse<Cluster>> => {
-    return fetchWithAuth<ApiResponse<Cluster>>(`/api/v1/clusters/${id}/start`, {
+    const response = await fetchWithAuth<{ cluster: ApiCluster }>(`/api/v1/clusters/${id}/start`, {
       method: "POST",
     });
+    return { data: transformCluster(response.cluster) };
   },
 
   stop: async (id: string): Promise<ApiResponse<Cluster>> => {
-    return fetchWithAuth<ApiResponse<Cluster>>(`/api/v1/clusters/${id}/stop`, {
+    const response = await fetchWithAuth<{ cluster: ApiCluster }>(`/api/v1/clusters/${id}/stop`, {
       method: "POST",
     });
+    return { data: transformCluster(response.cluster) };
   },
 
   restart: async (id: string): Promise<ApiResponse<Cluster>> => {
-    return fetchWithAuth<ApiResponse<Cluster>>(`/api/v1/clusters/${id}/restart`, {
+    const response = await fetchWithAuth<{ cluster: ApiCluster }>(`/api/v1/clusters/${id}/restart`, {
       method: "POST",
     });
+    return { data: transformCluster(response.cluster) };
   },
 
   getMetrics: async (id: string): Promise<ApiResponse<ClusterMetrics>> => {
