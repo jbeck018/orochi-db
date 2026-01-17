@@ -163,11 +163,16 @@ jobs:
         env:
           DATABASE_URL: postgres://test:test@localhost:5432/orochi_test
 
+      - name: Set artifact name
+        if: steps.check.outputs.exists == 'true'
+        id: artifact-name
+        run: echo "name=coverage-$(echo '${{ matrix.component }}' | tr '/' '-')" >> $GITHUB_OUTPUT
+
       - name: Upload coverage
         if: steps.check.outputs.exists == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-${{ matrix.component | replace('/', '-') }}
+          name: ${{ steps.artifact-name.outputs.name }}
           path: ${{ matrix.component }}/coverage.out
           retention-days: 7
           if-no-files-found: ignore
