@@ -1,8 +1,10 @@
 package middleware
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,38 +25,13 @@ func RequestID(next http.Handler) http.Handler {
 
 		w.Header().Set("X-Request-ID", requestID)
 
-		ctx := r.Context()
-		ctx = setRequestID(ctx, requestID)
+		// Use context.WithValue to properly preserve context chain
+		// This ensures cancellation, deadlines, and errors propagate correctly
+		ctx := context.WithValue(r.Context(), requestIDKey{}, requestID)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
-
-// setRequestID stores the request ID in context.
-func setRequestID(ctx interface{ Value(any) any }, requestID string) interface {
-	Value(any) any
-	Done() <-chan struct{}
-	Err() error
-	Deadline() (time.Time, bool)
-} {
-	// Use a simple context wrapper
-	return &requestIDContext{ctx, requestID}
-}
-
-type requestIDContext struct {
-	parent interface{ Value(any) any }
-	id     string
-}
-
-func (c *requestIDContext) Value(key any) any {
-	if _, ok := key.(requestIDKey); ok {
-		return c.id
-	}
-	return c.parent.Value(key)
-}
-func (c *requestIDContext) Done() <-chan struct{} { return nil }
-func (c *requestIDContext) Err() error            { return nil }
-func (c *requestIDContext) Deadline() (time.Time, bool) { return time.Time{}, false }
 
 // GetRequestID retrieves the request ID from context.
 func GetRequestID(r *http.Request) string {
@@ -164,6 +141,7 @@ func Recoverer(logger *slog.Logger) func(http.Handler) http.Handler {
 // RateLimiter provides basic rate limiting.
 // For production, use a more sophisticated implementation with Redis.
 type RateLimiter struct {
+	mu       sync.Mutex
 	requests map[string][]time.Time
 	limit    int
 	window   time.Duration
@@ -179,12 +157,14 @@ func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
 }
 
 // Limit returns middleware that rate limits requests by IP.
+// Thread-safe: uses mutex to protect concurrent map access.
 func (rl *RateLimiter) Limit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := r.RemoteAddr
-
 		now := time.Now()
 		cutoff := now.Add(-rl.window)
+
+		rl.mu.Lock()
 
 		// Clean old requests
 		var valid []time.Time
@@ -193,10 +173,17 @@ func (rl *RateLimiter) Limit(next http.Handler) http.Handler {
 				valid = append(valid, t)
 			}
 		}
-		rl.requests[ip] = valid
+
+		// Remove empty entries to prevent unbounded memory growth
+		if len(valid) == 0 {
+			delete(rl.requests, ip)
+		} else {
+			rl.requests[ip] = valid
+		}
 
 		// Check limit
 		if len(rl.requests[ip]) >= rl.limit {
+			rl.mu.Unlock()
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Retry-After", "60")
 			w.WriteHeader(http.StatusTooManyRequests)
@@ -206,6 +193,7 @@ func (rl *RateLimiter) Limit(next http.Handler) http.Handler {
 
 		// Record request
 		rl.requests[ip] = append(rl.requests[ip], now)
+		rl.mu.Unlock()
 
 		next.ServeHTTP(w, r)
 	})

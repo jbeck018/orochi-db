@@ -22,6 +22,7 @@ type HorizontalScaler struct {
 	evaluationInterval time.Duration
 	stopCh          chan struct{}
 	doneCh          chan struct{}
+	stopOnce        sync.Once // Prevents double-close panic
 }
 
 // HorizontalScalerConfig holds configuration for the horizontal scaler.
@@ -76,11 +77,14 @@ func (s *HorizontalScaler) Start(ctx context.Context) error {
 }
 
 // Stop stops the horizontal scaler.
+// Safe to call multiple times - uses sync.Once to prevent double-close panic.
 func (s *HorizontalScaler) Stop() error {
-	if s.stopCh != nil {
-		close(s.stopCh)
-		<-s.doneCh
-	}
+	s.stopOnce.Do(func() {
+		if s.stopCh != nil {
+			close(s.stopCh)
+			<-s.doneCh
+		}
+	})
 	return nil
 }
 

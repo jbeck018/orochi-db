@@ -24,6 +24,7 @@ type VerticalScaler struct {
 	evaluationInterval time.Duration
 	stopCh             chan struct{}
 	doneCh             chan struct{}
+	stopOnce           sync.Once // Prevents double-close panic
 	recommendations    map[string]*VerticalRecommendation
 }
 
@@ -97,11 +98,14 @@ func (s *VerticalScaler) Start(ctx context.Context) error {
 }
 
 // Stop stops the vertical scaler.
+// Safe to call multiple times - uses sync.Once to prevent double-close panic.
 func (s *VerticalScaler) Stop() error {
-	if s.stopCh != nil {
-		close(s.stopCh)
-		<-s.doneCh
-	}
+	s.stopOnce.Do(func() {
+		if s.stopCh != nil {
+			close(s.stopCh)
+			<-s.doneCh
+		}
+	})
 	return nil
 }
 

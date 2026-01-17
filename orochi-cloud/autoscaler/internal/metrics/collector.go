@@ -220,6 +220,7 @@ type MetricsCollector struct {
 	historyWindow    time.Duration
 	stopCh           chan struct{}
 	doneCh           chan struct{}
+	stopOnce         sync.Once // Prevents double-close panic
 }
 
 type clusterInfo struct {
@@ -381,11 +382,14 @@ func (c *MetricsCollector) Start(ctx context.Context) error {
 }
 
 // Stop halts background metrics collection.
+// Safe to call multiple times - uses sync.Once to prevent double-close panic.
 func (c *MetricsCollector) Stop() error {
-	if c.stopCh != nil {
-		close(c.stopCh)
-		<-c.doneCh
-	}
+	c.stopOnce.Do(func() {
+		if c.stopCh != nil {
+			close(c.stopCh)
+			<-c.doneCh
+		}
+	})
 	return nil
 }
 

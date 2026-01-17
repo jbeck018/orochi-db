@@ -477,18 +477,47 @@ func (s *Service) buildClusterInfo(ctx context.Context, cluster interface{}, spe
 	}, nil
 }
 
-// buildClusterInfoFromCNPG builds cluster info from a CNPG cluster
+// buildClusterInfoFromCNPG builds cluster info from a CNPG cluster (unstructured.Unstructured)
 func (s *Service) buildClusterInfoFromCNPG(ctx context.Context, cluster interface{}) (*types.ClusterInfo, error) {
-	// Type assert to CNPG cluster
-	cnpgCluster, ok := cluster.(*struct {
-		Name      string
-		Namespace string
+	// Handle *unstructured.Unstructured from Kubernetes dynamic client
+	unstructuredCluster, ok := cluster.(interface {
+		GetName() string
+		GetNamespace() string
+		GetCreationTimestamp() interface{ Time() interface{} }
 	})
 	if !ok {
-		return nil, fmt.Errorf("unexpected cluster type")
+		// Try direct interface access for other types
+		type clusterLike interface {
+			GetName() string
+			GetNamespace() string
+		}
+		if cl, ok := cluster.(clusterLike); ok {
+			name := cl.GetName()
+			namespace := cl.GetNamespace()
+
+			status, err := s.clusterManager.GetClusterStatus(ctx, namespace, name)
+			if err != nil {
+				status = &types.ClusterStatus{
+					Phase: types.ClusterPhaseUnknown,
+				}
+			}
+
+			return &types.ClusterInfo{
+				ClusterID: fmt.Sprintf("%s-%s", namespace, name),
+				Name:      name,
+				Namespace: namespace,
+				Status:    *status,
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			}, nil
+		}
+		return nil, fmt.Errorf("unexpected cluster type: %T", cluster)
 	}
 
-	status, err := s.clusterManager.GetClusterStatus(ctx, cnpgCluster.Namespace, cnpgCluster.Name)
+	name := unstructuredCluster.GetName()
+	namespace := unstructuredCluster.GetNamespace()
+
+	status, err := s.clusterManager.GetClusterStatus(ctx, namespace, name)
 	if err != nil {
 		status = &types.ClusterStatus{
 			Phase: types.ClusterPhaseUnknown,
@@ -496,9 +525,9 @@ func (s *Service) buildClusterInfoFromCNPG(ctx context.Context, cluster interfac
 	}
 
 	return &types.ClusterInfo{
-		ClusterID: fmt.Sprintf("%s-%s", cnpgCluster.Namespace, cnpgCluster.Name),
-		Name:      cnpgCluster.Name,
-		Namespace: cnpgCluster.Namespace,
+		ClusterID: fmt.Sprintf("%s-%s", namespace, name),
+		Name:      name,
+		Namespace: namespace,
 		Status:    *status,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
