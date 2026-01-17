@@ -1,0 +1,286 @@
+name: Go CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - develop
+    paths:
+      - 'orochi-cloud/**/*.go'
+      - 'orochi-cloud/**/go.mod'
+      - 'orochi-cloud/**/go.sum'
+      - '.github/workflows/go-ci.yml'
+  pull_request:
+    branches:
+      - main
+      - master
+      - develop
+    paths:
+      - 'orochi-cloud/**/*.go'
+      - 'orochi-cloud/**/go.mod'
+      - 'orochi-cloud/**/go.sum'
+      - '.github/workflows/go-ci.yml'
+
+env:
+  GO_VERSION: '1.22'
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service:
+          - control-plane
+          - autoscaler
+          - provisioner
+          - cli
+          - shared
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: orochi-cloud/${{ matrix.service }}/go.sum
+
+      - name: Check go fmt
+        working-directory: orochi-cloud/${{ matrix.service }}
+        run: |
+          fmt_output=$(gofmt -l .)
+          if [ -n "$fmt_output" ]; then
+            echo "The following files are not formatted correctly:"
+            echo "$fmt_output"
+            echo ""
+            echo "Run 'gofmt -w .' to fix formatting"
+            exit 1
+          fi
+          echo "All files are properly formatted"
+
+      - name: Run go vet
+        working-directory: orochi-cloud/${{ matrix.service }}
+        run: go vet ./...
+
+      - name: Install golangci-lint
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: latest
+          working-directory: orochi-cloud/${{ matrix.service }}
+          args: --timeout=5m
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: lint
+    strategy:
+      matrix:
+        service:
+          - control-plane
+          - autoscaler
+          - provisioner
+          - cli
+          - shared
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: orochi-cloud/${{ matrix.service }}/go.sum
+
+      - name: Download dependencies
+        working-directory: orochi-cloud/${{ matrix.service }}
+        run: go mod download
+
+      - name: Run unit tests with coverage
+        working-directory: orochi-cloud/${{ matrix.service }}
+        run: |
+          go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+          if [ -f coverage.out ]; then
+            go tool cover -func=coverage.out
+          fi
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-${{ matrix.service }}
+          path: orochi-cloud/${{ matrix.service }}/coverage.out
+          retention-days: 7
+          if-no-files-found: ignore
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: lint
+    strategy:
+      matrix:
+        include:
+          - service: control-plane
+            binary: server
+            path: cmd/server
+          - service: autoscaler
+            binary: autoscaler
+            path: cmd/autoscaler
+          - service: provisioner
+            binary: provisioner
+            path: cmd/provisioner
+          - service: cli
+            binary: orochi
+            path: cmd/orochi
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: orochi-cloud/${{ matrix.service }}/go.sum
+
+      - name: Download dependencies
+        working-directory: orochi-cloud/${{ matrix.service }}
+        run: go mod download
+
+      - name: Build ${{ matrix.service }}
+        working-directory: orochi-cloud/${{ matrix.service }}
+        run: |
+          CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/${{ matrix.binary }} ./${{ matrix.path }}
+          echo "Built ${{ matrix.binary }} successfully"
+          ls -la bin/
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.binary }}-linux-amd64
+          path: orochi-cloud/${{ matrix.service }}/bin/${{ matrix.binary }}
+          retention-days: 7
+
+  build-multi-platform:
+    name: Build Multi-Platform
+    runs-on: ubuntu-latest
+    needs: [test, build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    strategy:
+      matrix:
+        include:
+          - service: cli
+            binary: orochi
+            path: cmd/orochi
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: orochi-cloud/${{ matrix.service }}/go.sum
+
+      - name: Download dependencies
+        working-directory: orochi-cloud/${{ matrix.service }}
+        run: go mod download
+
+      - name: Build for multiple platforms
+        working-directory: orochi-cloud/${{ matrix.service }}
+        run: |
+          mkdir -p bin
+
+          # Linux AMD64
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+            go build -ldflags="-s -w" -o bin/${{ matrix.binary }}-linux-amd64 ./${{ matrix.path }}
+
+          # Linux ARM64
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 \
+            go build -ldflags="-s -w" -o bin/${{ matrix.binary }}-linux-arm64 ./${{ matrix.path }}
+
+          # macOS AMD64
+          GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 \
+            go build -ldflags="-s -w" -o bin/${{ matrix.binary }}-darwin-amd64 ./${{ matrix.path }}
+
+          # macOS ARM64 (Apple Silicon)
+          GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 \
+            go build -ldflags="-s -w" -o bin/${{ matrix.binary }}-darwin-arm64 ./${{ matrix.path }}
+
+          # Windows AMD64
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+            go build -ldflags="-s -w" -o bin/${{ matrix.binary }}-windows-amd64.exe ./${{ matrix.path }}
+
+          echo "Built binaries:"
+          ls -la bin/
+
+      - name: Upload multi-platform binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.binary }}-all-platforms
+          path: orochi-cloud/${{ matrix.service }}/bin/
+          retention-days: 30
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run govulncheck on all services
+        run: |
+          for service in control-plane autoscaler provisioner cli shared; do
+            echo "=== Scanning $service ==="
+            cd orochi-cloud/$service
+            govulncheck ./... || true
+            cd ../..
+          done
+
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+
+  ci-status:
+    name: CI Status
+    runs-on: ubuntu-latest
+    needs: [lint, test, build]
+    if: always()
+    steps:
+      - name: Check CI Status
+        run: |
+          if [ "${{ needs.lint.result }}" != "success" ]; then
+            echo "Lint job failed"
+            exit 1
+          fi
+          if [ "${{ needs.test.result }}" != "success" ]; then
+            echo "Test job failed"
+            exit 1
+          fi
+          if [ "${{ needs.build.result }}" != "success" ]; then
+            echo "Build job failed"
+            exit 1
+          fi
+          echo "All CI checks passed successfully"
