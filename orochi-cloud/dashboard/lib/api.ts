@@ -13,6 +13,24 @@ import type {
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
 
+// Token refresh mutex to prevent concurrent refresh requests
+let refreshPromise: Promise<Awaited<ReturnType<typeof refreshTokens>>> | null = null;
+
+async function refreshTokensWithLock(): Promise<Awaited<ReturnType<typeof refreshTokens>>> {
+  // If a refresh is already in progress, wait for it
+  if (refreshPromise) {
+    return refreshPromise;
+  }
+
+  // Start a new refresh and store the promise
+  refreshPromise = refreshTokens().finally(() => {
+    // Clear the promise after completion (success or failure)
+    refreshPromise = null;
+  });
+
+  return refreshPromise;
+}
+
 class ApiError extends Error {
   constructor(
     message: string,
@@ -37,9 +55,9 @@ async function fetchWithAuth<T>(
 
   let response = await fetch(url, { ...options, headers });
 
-  // Handle token refresh on 401
+  // Handle token refresh on 401 with mutex to prevent concurrent refreshes
   if (response.status === 401) {
-    const newTokens = await refreshTokens();
+    const newTokens = await refreshTokensWithLock();
     if (newTokens) {
       headers.Authorization = `Bearer ${newTokens.accessToken}`;
       response = await fetch(url, { ...options, headers });

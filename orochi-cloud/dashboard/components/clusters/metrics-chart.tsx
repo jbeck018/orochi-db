@@ -28,40 +28,50 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import type { ClusterMetricsHistory } from "@/types";
 
+// Constants to avoid recreating objects on each render
+const CHART_MARGIN = { top: 5, right: 30, left: 20, bottom: 5 };
+const TOOLTIP_CONTENT_STYLE = {
+  backgroundColor: "hsl(var(--card))",
+  border: "1px solid hsl(var(--border))",
+  borderRadius: "var(--radius)",
+};
+const TOOLTIP_LABEL_STYLE = { color: "hsl(var(--foreground))" };
+
 interface MetricsChartProps {
   data?: ClusterMetricsHistory;
   isLoading?: boolean;
   onPeriodChange?: (period: "1h" | "6h" | "24h" | "7d" | "30d") => void;
 }
 
-export function MetricsChart({
+// Memoize MetricsChart to prevent unnecessary re-renders
+export const MetricsChart = React.memo(function MetricsChart({
   data,
   isLoading,
   onPeriodChange,
 }: MetricsChartProps): React.JSX.Element {
   const [period, setPeriod] = React.useState<"1h" | "6h" | "24h" | "7d" | "30d">("24h");
 
-  const handlePeriodChange = (value: string): void => {
+  const handlePeriodChange = React.useCallback((value: string): void => {
     const newPeriod = value as "1h" | "6h" | "24h" | "7d" | "30d";
     setPeriod(newPeriod);
     onPeriodChange?.(newPeriod);
-  };
+  }, [onPeriodChange]);
 
-  const formatTimestamp = (timestamp: string): string => {
-    const date = new Date(timestamp);
-    if (period === "1h" || period === "6h") {
-      return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    }
-    if (period === "24h") {
-      return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    }
-    return date.toLocaleDateString([], { month: "short", day: "numeric" });
-  };
+  // Memoize chart data transformation to avoid recalculating on every render
+  const chartData = React.useMemo(() => {
+    if (!data?.dataPoints) return undefined;
 
-  const chartData = data?.dataPoints.map((point) => ({
-    ...point,
-    time: formatTimestamp(point.timestamp),
-  }));
+    return data.dataPoints.map((point) => {
+      const date = new Date(point.timestamp);
+      let time: string;
+      if (period === "1h" || period === "6h" || period === "24h") {
+        time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      } else {
+        time = date.toLocaleDateString([], { month: "short", day: "numeric" });
+      }
+      return { ...point, time };
+    });
+  }, [data, period]);
 
   if (isLoading) {
     return (
@@ -112,7 +122,7 @@ export function MetricsChart({
             <ResponsiveContainer width="100%" height="100%">
               <LineChart
                 data={chartData}
-                margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                margin={CHART_MARGIN}
               >
                 <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                 <XAxis
@@ -127,12 +137,8 @@ export function MetricsChart({
                   tickFormatter={(value) => `${value}%`}
                 />
                 <Tooltip
-                  contentStyle={{
-                    backgroundColor: "hsl(var(--card))",
-                    border: "1px solid hsl(var(--border))",
-                    borderRadius: "var(--radius)",
-                  }}
-                  labelStyle={{ color: "hsl(var(--foreground))" }}
+                  contentStyle={TOOLTIP_CONTENT_STYLE}
+                  labelStyle={TOOLTIP_LABEL_STYLE}
                 />
                 <Legend />
                 <Line
@@ -177,17 +183,22 @@ interface ConnectionsChartProps {
   isLoading?: boolean;
 }
 
-export function ConnectionsChart({
+// Memoize ConnectionsChart to prevent unnecessary re-renders
+export const ConnectionsChart = React.memo(function ConnectionsChart({
   data,
   isLoading,
 }: ConnectionsChartProps): React.JSX.Element {
-  const chartData = data?.dataPoints.map((point) => ({
-    time: new Date(point.timestamp).toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    }),
-    connections: point.connections,
-  }));
+  // Memoize chart data transformation
+  const chartData = React.useMemo(() => {
+    if (!data?.dataPoints) return undefined;
+    return data.dataPoints.map((point) => ({
+      time: new Date(point.timestamp).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+      connections: point.connections,
+    }));
+  }, [data]);
 
   if (isLoading) {
     return (
@@ -228,11 +239,8 @@ export function ConnectionsChart({
                   className="text-muted-foreground"
                 />
                 <Tooltip
-                  contentStyle={{
-                    backgroundColor: "hsl(var(--card))",
-                    border: "1px solid hsl(var(--border))",
-                    borderRadius: "var(--radius)",
-                  }}
+                  contentStyle={TOOLTIP_CONTENT_STYLE}
+                  labelStyle={TOOLTIP_LABEL_STYLE}
                 />
                 <Line
                   type="monotone"
@@ -253,25 +261,30 @@ export function ConnectionsChart({
       </CardContent>
     </Card>
   );
-}
+});
 
 interface QueryPerformanceChartProps {
   data?: ClusterMetricsHistory;
   isLoading?: boolean;
 }
 
-export function QueryPerformanceChart({
+// Memoize QueryPerformanceChart to prevent unnecessary re-renders
+export const QueryPerformanceChart = React.memo(function QueryPerformanceChart({
   data,
   isLoading,
 }: QueryPerformanceChartProps): React.JSX.Element {
-  const chartData = data?.dataPoints.map((point) => ({
-    time: new Date(point.timestamp).toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    }),
-    qps: point.qps,
-    latency: point.latencyMs,
-  }));
+  // Memoize chart data transformation
+  const chartData = React.useMemo(() => {
+    if (!data?.dataPoints) return undefined;
+    return data.dataPoints.map((point) => ({
+      time: new Date(point.timestamp).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+      qps: point.qps,
+      latency: point.latencyMs,
+    }));
+  }, [data]);
 
   if (isLoading) {
     return (
@@ -320,11 +333,8 @@ export function QueryPerformanceChart({
                   tickFormatter={(value) => `${value}ms`}
                 />
                 <Tooltip
-                  contentStyle={{
-                    backgroundColor: "hsl(var(--card))",
-                    border: "1px solid hsl(var(--border))",
-                    borderRadius: "var(--radius)",
-                  }}
+                  contentStyle={TOOLTIP_CONTENT_STYLE}
+                  labelStyle={TOOLTIP_LABEL_STYLE}
                 />
                 <Legend />
                 <Line
@@ -356,4 +366,4 @@ export function QueryPerformanceChart({
       </CardContent>
     </Card>
   );
-}
+});

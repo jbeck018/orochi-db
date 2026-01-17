@@ -33,6 +33,16 @@ function ForgotPasswordPage(): React.JSX.Element {
   const [isSubmitted, setIsSubmitted] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
+  // Track mounted state to prevent state updates after unmount
+  const isMountedRef = React.useRef(true);
+
+  React.useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
     setError(null);
@@ -40,11 +50,17 @@ function ForgotPasswordPage(): React.JSX.Element {
 
     try {
       await passwordResetApi.requestReset(email);
-      setIsSubmitted(true);
+      if (isMountedRef.current) {
+        setIsSubmitted(true);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "An error occurred");
+      if (isMountedRef.current) {
+        setError(err instanceof Error ? err.message : "An error occurred");
+      }
     } finally {
-      setIsLoading(false);
+      if (isMountedRef.current) {
+        setIsLoading(false);
+      }
     }
   };
 

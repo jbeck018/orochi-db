@@ -41,7 +41,8 @@ interface ClusterCardProps {
   onRefresh?: () => void;
 }
 
-export function ClusterCard({ cluster, metrics, onRefresh }: ClusterCardProps): React.JSX.Element {
+// Memoize ClusterCard to prevent re-renders when props haven't changed
+export const ClusterCard = React.memo(function ClusterCard({ cluster, metrics, onRefresh }: ClusterCardProps): React.JSX.Element {
   const { toast } = useToast();
   const [isLoading, setIsLoading] = React.useState(false);
 
@@ -219,4 +220,4 @@ export function ClusterCard({ cluster, metrics, onRefresh }: ClusterCardProps): 
       </CardContent>
     </Card>
   );
-}
+});

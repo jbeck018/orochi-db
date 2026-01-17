@@ -40,6 +40,9 @@ export function useConfig(): UseConfigReturn {
     error: null,
   });
 
+  // Track mounted state to prevent state updates after unmount
+  const isMountedRef = React.useRef(true);
+
   const fetchConfig = React.useCallback(async () => {
     setState(prev => ({ ...prev, isLoading: true, error: null }));
 
@@ -50,6 +53,9 @@ export function useConfig(): UseConfigReturn {
         configApi.getSystemHealth(),
       ]);
 
+      // Check if still mounted before updating state
+      if (!isMountedRef.current) return;
+
       setState(prev => ({
         ...prev,
         providers: providersRes.status === "fulfilled" ? providersRes.value.data : prev.providers,
@@ -58,6 +64,9 @@ export function useConfig(): UseConfigReturn {
         isLoading: false,
       }));
     } catch (error) {
+      // Check if still mounted before updating state
+      if (!isMountedRef.current) return;
+
       setState(prev => ({
         ...prev,
         isLoading: false,
@@ -67,7 +76,11 @@ export function useConfig(): UseConfigReturn {
   }, []);
 
   React.useEffect(() => {
+    isMountedRef.current = true;
     fetchConfig();
+    return () => {
+      isMountedRef.current = false;
+    };
   }, [fetchConfig]);
 
   return {
