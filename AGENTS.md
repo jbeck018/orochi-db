@@ -696,7 +696,7 @@ Custom component library built on **Radix UI primitives** (shadcn/ui pattern):
 ### Styling
 - **Tailwind CSS 3.4.14** - Utility-first CSS framework
 - **HSL color system** - CSS variables for light/dark themes
-- **next-themes** - Theme switching (light/dark mode)
+- **Custom ThemeProvider** - SSR-safe theme switching (light/dark/system)
 - **Inter font** - Typography
 
 ### Data Visualization
@@ -709,10 +709,11 @@ Custom component library built on **Radix UI primitives** (shadcn/ui pattern):
 ```
 orochi-cloud/dashboard/
 ├── components/
-│   ├── ui/           # Styled Radix-based components
+│   ├── ui/           # Styled Radix-based components (shadcn/ui)
 │   ├── clusters/     # Cluster management components
 │   ├── auth/         # Authentication UI
-│   └── layout/       # Layout components
+│   └── layout/       # Layout components + ThemeProvider
+├── components.json   # shadcn/ui CLI configuration
 ├── lib/utils.ts      # Helper utilities (cn, formatting)
 ├── src/
 │   ├── styles/globals.css  # Tailwind + CSS variables
