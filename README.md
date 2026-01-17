@@ -2,6 +2,7 @@
 
 **A Modern HTAP PostgreSQL Extension for AI, Analytics, and Massive Scale**
 
+[![CI](https://github.com/jbeck018/orochi-db/actions/workflows/ci.yml/badge.svg)](https://github.com/jbeck018/orochi-db/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%2B-blue.svg)](https://www.postgresql.org/)
 [![Go Version](https://img.shields.io/badge/Go-1.22%2B-00ADD8.svg)](https://golang.org/)
