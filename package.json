@@ -6,18 +6,25 @@
   "workspaces": [
     "apps/*"
   ],
+  "trustedDependencies": [
+    "esbuild",
+    "@esbuild/*"
+  ],
+  "overrides": {
+    "crossws": "^0.4.1"
+  },
   "scripts": {
-    "dev": "npm run dev --workspace=apps/dashboard",
-    "build": "npm run build --workspace=apps/dashboard",
-    "lint": "npm run lint --workspace=apps/dashboard",
-    "test": "npm run test --workspaces --if-present"
+    "dev": "bun run --cwd apps/dashboard dev",
+    "build": "bun run --cwd apps/dashboard build",
+    "lint": "bun run --cwd apps/dashboard lint",
+    "type-check": "bun run --cwd apps/dashboard type-check",
+    "test": "bun test",
+    "clean": "rm -rf apps/*/dist apps/*/node_modules node_modules",
+    "install:all": "bun install"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/orochi-db/orochi-db.git"
   },
-  "license": "Apache-2.0",
-  "engines": {
-    "node": ">=20.0.0"
-  }
+  "license": "Apache-2.0"
 }

@@ -1,0 +1,36 @@
+# Dependencies (downloaded during build)
+vendor/
+
+# Test files
+*_test.go
+test/
+tests/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+docs/
+
+# Build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Fly.io config (not needed in container)
+fly.toml

@@ -136,7 +136,7 @@ export interface FileRoutesByFullPath {
   '/terms': typeof TermsRoute
   '/clusters/$id': typeof ClustersIdRouteWithChildren
   '/clusters/new': typeof ClustersNewRoute
-  '/clusters': typeof ClustersIndexRoute
+  '/clusters/': typeof ClustersIndexRoute
   '/auth/callback/$provider': typeof AuthCallbackProviderRoute
   '/clusters/$id/cdc': typeof ClustersIdCdcRoute
   '/clusters/$id/columnar': typeof ClustersIdColumnarRoute
@@ -202,7 +202,7 @@ export interface FileRouteTypes {
     | '/terms'
     | '/clusters/$id'
     | '/clusters/new'
-    | '/clusters'
+    | '/clusters/'
     | '/auth/callback/$provider'
     | '/clusters/$id/cdc'
     | '/clusters/$id/columnar'
@@ -331,7 +331,7 @@ declare module '@tanstack/react-router' {
     '/clusters/': {
       id: '/clusters/'
       path: '/clusters'
-      fullPath: '/clusters'
+      fullPath: '/clusters/'
       preLoaderRoute: typeof ClustersIndexRouteImport
       parentRoute: typeof rootRouteImport
     }

@@ -11,7 +11,14 @@ export default defineConfig({
     tsConfigPaths({
       projects: ['./tsconfig.json'],
     }),
-    tanstackStart(),
+    tanstackStart({
+      server: {
+        // Use node-server preset which includes serveStatic by default
+        // This fixes the 404 issue with static assets
+        // See: https://github.com/TanStack/router/issues/3475
+        preset: 'node-server',
+      },
+    }),
     react(),
   ],
   define: {

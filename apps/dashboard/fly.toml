@@ -1,147 +1,40 @@
 # Fly.io Configuration for Orochi Cloud Dashboard
 # Production-ready deployment configuration
-# Deploy with: flyctl deploy
+# Deploy with: fly deploy
 
-# Application name (must be globally unique on Fly.io)
 app = "orochi-dashboard"
-
-# Primary region for stateful resources
-# Choose based on primary user location:
-# - sjc: San Jose, California (US West)
-# - iad: Northern Virginia (US East)
-# - ams: Amsterdam (Europe)
-# - syd: Sydney (Australia)
 primary_region = "sjc"
 
-# Build configuration
 [build]
-  # Path to Dockerfile
   dockerfile = "Dockerfile"
+  [build.args]
+    VITE_API_URL = "https://orochi-control-plane.fly.dev"
 
-  # Docker build arguments
-  # Can override with: flyctl deploy --build-arg KEY=value
-  docker_build_args = {}
-
-# Global environment variables
-# Non-sensitive configuration only
-# Sensitive values go in secrets (see deployment guide)
 [env]
   NODE_ENV = "production"
+  PORT = "3000"
 
-# Application process definitions
-[processes]
-  app = "node dist/server/server.js"
-
-# Concurrency settings
-# Controls how many connections per instance
-# Adjust based on performance testing
-[[services.concurrency]]
-  type = "connections"
-  hard_limit = 1000      # Maximum connections per instance
-  soft_limit = 900       # Trigger rollover at this threshold
-
-# HTTP/HTTPS Service Configuration
-[[services]]
-  # Internal port - must match application listen port
+[http_service]
   internal_port = 3000
-
-  # Process name from [processes]
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 1
   processes = ["app"]
 
-  # Port configurations
-  # HTTP: Redirect to HTTPS
-  [[services.ports]]
-    port = 80
-    handlers = ["http"]
-    force_https = true
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 100
+    soft_limit = 80
 
-  # HTTPS: Primary endpoint
-  [[services.ports]]
-    port = 443
-    handlers = ["tls", "http"]
-
-  # TCP checks for service availability
-  # Fly.io uses these to determine if service is running
-  [services.tcp_checks]
-    enabled = true
-    interval = "15s"
-    timeout = "10s"
-    grace_period = "5s"
-
-  # HTTP health checks
-  # Checks if the application is responding correctly
-  [services.http_checks]
-    enabled = true
-
-    # Check every 30 seconds
+  [[http_service.checks]]
     interval = "30s"
-
-    # Wait maximum 10 seconds for response
     timeout = "10s"
-
-    # Wait 5 seconds after startup before checking
-    grace_period = "5s"
-
-    # Retries before marking unhealthy
-    retries = 3
-
-    # HTTP method and path
+    grace_period = "10s"
     method = "GET"
     path = "/"
 
-# VM Configuration
-# Production resource allocation
-[env.production]
-  # VM size - options:
-  # shared-cpu-1x (256MB RAM) - for low-traffic/dev
-  # shared-cpu-2x (512MB RAM) - recommended for dashboard
-  # dedicated-cpu-1x (2GB RAM) - for high-traffic
-  # dedicated-cpu-2x (4GB RAM) - for very high-traffic
-  SIZE = "shared-cpu-2x"
-
-  # Memory in MB (must match SIZE)
-  MEMORY = 512
-
-# Swap configuration
-# Allows system to use disk space when RAM is full
-# Prevents OOM crashes but impacts performance
-[swap]
-  size_mb = 512
-
-# Metrics port (optional)
-# For prometheus scraping if using observability stack
-# [[services.ports]]
-#   port = 9090
-#   handlers = ["metrics"]
-
-# Persistent storage (optional)
-# Uncomment if application needs persistent logs or data
-# Note: Data persists across deployments but not across regions
-# [[mounts]]
-#   source = "logs"
-#   destination = "/app/logs"
-#   size_gb = 10
-
-# Experimental features (optional)
-# [experimental]
-#   auto_rollback = true
-
-# Custom metrics (optional)
-# For detailed monitoring and alerting
-# [metrics]
-#   port = 9090
-#   interval = 30
-#   timeout = 10
-
-# Database/Service integration (if using)
-# Fly will inject connection strings automatically
-# [services.database_config]
-#   enabled = true
-
-# Security headers configuration
-# Consider these in your application code:
-# - Strict-Transport-Security: max-age=31536000; includeSubDomains
-# - X-Content-Type-Options: nosniff
-# - X-Frame-Options: DENY
-# - Content-Security-Policy: appropriate policy for React app
-# - X-XSS-Protection: 1; mode=block
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1

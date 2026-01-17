@@ -1,0 +1,17 @@
+# Bun configuration for Orochi DB monorepo
+# https://bun.sh/docs/runtime/bunfig
+
+[install]
+# Use exact versions for reproducibility
+exact = true
+
+# Trust these packages to run install scripts
+trustedDependencies = ["esbuild", "@esbuild/darwin-arm64", "@esbuild/darwin-x64", "@esbuild/linux-x64"]
+
+[install.lockfile]
+# Save lockfile
+save = true
+
+[run]
+# Shell to use for scripts (bun or system)
+shell = "system"

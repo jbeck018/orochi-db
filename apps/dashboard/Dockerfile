@@ -1,73 +1,56 @@
 # Multi-stage Dockerfile for Orochi Cloud Dashboard
 # Optimized for production deployment on Fly.io
-# Uses Alpine Linux for minimal size and attack surface
+# Uses Bun runtime for improved performance
 
 # Stage 1: Build Stage
 # Installs all dependencies and builds the React application
-FROM node:18-alpine as builder
+FROM oven/bun:1.2-alpine AS builder
+
+# Build argument for API URL (passed from fly.toml)
+ARG VITE_API_URL
+ENV VITE_API_URL=${VITE_API_URL}
 
 # Set working directory
 WORKDIR /app
 
-# Install additional build dependencies if needed
-RUN apk add --no-cache python3 make g++ \
-    && rm -rf /var/cache/apk/*
-
 # Copy package files first (leverages Docker layer caching)
-COPY package*.json ./
+COPY package.json bun.lock* ./
 
-# Install dependencies
-# Use npm ci for reproducible builds (instead of npm install)
-RUN npm ci && npm cache clean --force
+# Install dependencies with Bun
+RUN bun install --frozen-lockfile || bun install
 
 # Copy source code
 COPY . .
 
-# Build the application with Vite
-# Output goes to dist/ directory
-RUN npm run build
+# Build the application with Vite using Bun
+# VITE_API_URL is available at build time for client-side code
+RUN bun --bun run build
 
 # Stage 2: Runtime Stage
-# Minimal production image with only runtime dependencies
-FROM node:18-alpine
-
-# Install dumb-init for proper signal handling
-# Critical for graceful shutdowns in containers
-RUN apk add --no-cache dumb-init \
-    && rm -rf /var/cache/apk/*
+# Minimal production image with Bun runtime
+FROM oven/bun:1.2-alpine
 
 WORKDIR /app
 
 # Copy built application from builder stage
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/server ./server
 COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package*.json ./
+COPY --from=builder /app/package.json ./
 
-# Create non-root user for enhanced security
-# Running as root in containers is a security risk
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001 && \
-    chown -R nodejs:nodejs /app
+# The bun user already exists in oven/bun image
+# Just set ownership
+RUN chown -R bun:bun /app
 
 # Switch to non-root user
-USER nodejs
+USER bun
 
 # Expose the port the application listens on
-# Fly.io will forward traffic to this port
 EXPOSE 3000
 
 # Health check
-# Enables Fly.io to detect unhealthy instances and restart them
-# Grace period allows app startup time before first check
-# Retries and interval control how aggressively we check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD node -e "require('http').get('http://localhost:3000', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"
+    CMD bun -e "fetch('http://localhost:3000').then(r => { if (!r.ok) throw new Error(r.status) })" || exit 1
 
-# Use dumb-init as entrypoint
-# Ensures proper signal handling (SIGTERM, SIGINT)
-# Required for graceful shutdowns
-ENTRYPOINT ["dumb-init", "--"]
-
-# Start the application
-# Server is built by Vite and listens on port 3000
-CMD ["node", "dist/server/server.js"]
+# Start the application with Bun
+CMD ["bun", "run", "server/index.ts"]
