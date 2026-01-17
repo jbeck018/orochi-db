@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fatih/color"
@@ -249,15 +250,16 @@ func PrintConnectionString(connStr string) {
 
 // Spinner provides a simple spinner for long operations.
 type Spinner struct {
-	message string
-	done    chan bool
+	message  string
+	done     chan struct{}
+	stopOnce sync.Once
 }
 
 // NewSpinner creates a new spinner.
 func NewSpinner(message string) *Spinner {
 	return &Spinner{
 		message: message,
-		done:    make(chan bool),
+		done:    make(chan struct{}),
 	}
 }
 
@@ -266,21 +268,24 @@ func (s *Spinner) Start() {
 	frames := []string{"|", "/", "-", "\\"}
 	go func() {
 		i := 0
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-s.done:
 				fmt.Print("\r" + strings.Repeat(" ", len(s.message)+10) + "\r")
 				return
-			default:
+			case <-ticker.C:
 				fmt.Printf("\r%s %s", frames[i%len(frames)], s.message)
 				i++
-				time.Sleep(100 * time.Millisecond)
 			}
 		}
 	}()
 }
 
-// Stop stops the spinner.
+// Stop stops the spinner. Safe to call multiple times.
 func (s *Spinner) Stop() {
-	s.done <- true
+	s.stopOnce.Do(func() {
+		close(s.done)
+	})
 }

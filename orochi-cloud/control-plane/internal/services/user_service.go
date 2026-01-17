@@ -32,18 +32,10 @@ func NewUserService(db *db.DB, jwtManager *auth.JWTManager, logger *slog.Logger)
 }
 
 // Register creates a new user account.
+// Uses INSERT ... ON CONFLICT to atomically handle duplicate email registration.
 func (s *UserService) Register(ctx context.Context, req *models.UserCreateRequest) (*models.User, error) {
 	if err := req.Validate(); err != nil {
 		return nil, err
-	}
-
-	// Check if user already exists
-	existing, err := s.GetByEmail(ctx, req.Email)
-	if err != nil && !errors.Is(err, models.ErrUserNotFound) {
-		return nil, err
-	}
-	if existing != nil {
-		return nil, models.ErrUserExists
 	}
 
 	// Hash password
@@ -64,16 +56,27 @@ func (s *UserService) Register(ctx context.Context, req *models.UserCreateReques
 		UpdatedAt:    time.Now(),
 	}
 
+	// Use INSERT ... ON CONFLICT to atomically check for duplicate emails.
+	// This prevents race conditions where two concurrent registrations with
+	// the same email could both pass a separate existence check.
 	query := `
 		INSERT INTO users (id, email, password_hash, name, role, active, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		ON CONFLICT (email) DO NOTHING
+		RETURNING id
 	`
 
-	_, err = s.db.Pool.Exec(ctx, query,
+	var insertedID uuid.UUID
+	err = s.db.Pool.QueryRow(ctx, query,
 		user.ID, user.Email, user.PasswordHash, user.Name,
 		user.Role, user.Active, user.CreatedAt, user.UpdatedAt,
-	)
+	).Scan(&insertedID)
+
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// ON CONFLICT triggered - email already exists
+			return nil, models.ErrUserExists
+		}
 		s.logger.Error("failed to create user", "error", err)
 		return nil, errors.New("failed to create user")
 	}

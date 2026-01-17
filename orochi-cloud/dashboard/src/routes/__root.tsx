@@ -31,7 +31,7 @@ export const Route = createRootRoute({
 
 function RootLayout(): React.JSX.Element {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en">
       <head>
         <HeadContent />
       </head>

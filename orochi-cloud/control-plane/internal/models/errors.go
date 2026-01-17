@@ -31,10 +31,18 @@ var (
 
 // Authentication errors.
 var (
-	ErrTokenInvalid   = errors.New("invalid or expired token")
-	ErrTokenMissing   = errors.New("authorization token is required")
-	ErrUnauthorized   = errors.New("unauthorized access")
-	ErrForbidden      = errors.New("access forbidden")
+	ErrTokenInvalid       = errors.New("invalid or expired token")
+	ErrTokenMissing       = errors.New("authorization token is required")
+	ErrTokenExpired       = errors.New("token has expired")
+	ErrTokenNotYetValid   = errors.New("token is not yet valid")
+	ErrTokenMalformed     = errors.New("token is malformed")
+	ErrTokenSignature     = errors.New("token signature is invalid")
+	ErrTokenIssuer        = errors.New("token issuer is invalid")
+	ErrTokenTypeMismatch  = errors.New("token type does not match expected type")
+	ErrJWTSecretTooShort  = errors.New("JWT secret must be at least 32 bytes")
+	ErrJWTSecretEmpty     = errors.New("JWT secret cannot be empty")
+	ErrUnauthorized       = errors.New("unauthorized access")
+	ErrForbidden          = errors.New("access forbidden")
 )
 
 // APIError represents a structured API error response.

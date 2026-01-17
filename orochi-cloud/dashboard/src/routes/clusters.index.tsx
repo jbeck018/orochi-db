@@ -45,10 +45,17 @@ function ClustersPage(): React.JSX.Element {
   const [statusFilter, setStatusFilter] = React.useState<ClusterStatus | "all">("all");
   const [viewMode, setViewMode] = React.useState<ViewMode>("grid");
 
+  // Track mounted state to prevent state updates after unmount
+  const isMountedRef = React.useRef(true);
+
   const fetchData = React.useCallback(async (showRefresh = false): Promise<void> => {
     if (showRefresh) setIsRefreshing(true);
     try {
       const response = await clusterApi.list(1, 100);
+
+      // Check if still mounted before updating state
+      if (!isMountedRef.current) return;
+
       setClusters(response.data);
 
       // Fetch metrics for running clusters
@@ -65,29 +72,40 @@ function ClustersPage(): React.JSX.Element {
             }
           })
       );
+
+      // Check if still mounted before updating state
+      if (!isMountedRef.current) return;
+
       setMetrics(metricsMap);
     } catch (error) {
       console.error("Failed to fetch clusters:", error);
     } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
+      if (isMountedRef.current) {
+        setIsLoading(false);
+        setIsRefreshing(false);
+      }
     }
   }, []);
 
   React.useEffect(() => {
+    isMountedRef.current = true;
     fetchData();
     const interval = setInterval(() => fetchData(), 30000);
-    return () => clearInterval(interval);
+    return () => {
+      isMountedRef.current = false;
+      clearInterval(interval);
+    };
   }, [fetchData]);
 
-  const filteredClusters = clusters.filter((cluster) => {
-    const matchesSearch = cluster.name
-      .toLowerCase()
-      .includes(searchQuery.toLowerCase());
-    const matchesStatus =
-      statusFilter === "all" || cluster.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
+  // Memoize filtered clusters to avoid recalculating on every render
+  const filteredClusters = React.useMemo(() => {
+    const lowerQuery = searchQuery.toLowerCase();
+    return clusters.filter((cluster) => {
+      const matchesSearch = cluster.name.toLowerCase().includes(lowerQuery);
+      const matchesStatus = statusFilter === "all" || cluster.status === statusFilter;
+      return matchesSearch && matchesStatus;
+    });
+  }, [clusters, searchQuery, statusFilter]);
 
   return (
     <DashboardLayout>

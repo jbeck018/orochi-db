@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -163,9 +164,14 @@ func main() {
 		},
 	)
 
+	// WaitGroup to track server goroutines for graceful shutdown
+	var wg sync.WaitGroup
+
 	// Start metrics HTTP server
 	metricsServer := metrics.NewMetricsServer(cfg.Server.MetricsPort, registry)
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		fmt.Printf("Metrics server listening on port %d\n", cfg.Server.MetricsPort)
 		if err := metricsServer.Start(); err != nil && err != http.ErrServerClosed {
 			fmt.Fprintf(os.Stderr, "Metrics server error: %v\n", err)
@@ -173,10 +179,12 @@ func main() {
 	}()
 
 	// Start health server
-	healthServer := startHealthServer(cfg.Server.HealthPort)
+	healthServer := startHealthServer(cfg.Server.HealthPort, &wg)
 
 	// Start gRPC server in goroutine
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		fmt.Printf("Starting gRPC server on port %d...\n", cfg.Server.GRPCPort)
 		if err := grpcServer.Start(); err != nil {
 			fmt.Fprintf(os.Stderr, "gRPC server error: %v\n", err)
@@ -189,48 +197,88 @@ func main() {
 	fmt.Printf("  Metrics: :%d/metrics\n", cfg.Server.MetricsPort)
 	fmt.Printf("  Health:  :%d/healthz\n", cfg.Server.HealthPort)
 
-	// Wait for shutdown signal
+	// Set up signal handling with proper cleanup
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
+	// Wait for shutdown signal or context cancellation
 	select {
 	case sig := <-sigCh:
-		fmt.Printf("\nReceived signal %v, shutting down...\n", sig)
+		fmt.Printf("\nReceived signal %v, initiating graceful shutdown...\n", sig)
 	case <-ctx.Done():
-		fmt.Println("\nContext cancelled, shutting down...")
+		fmt.Println("\nContext cancelled, initiating graceful shutdown...")
 	}
 
-	// Graceful shutdown
+	// Stop receiving signals immediately to allow force exit on repeated signal
+	signal.Stop(sigCh)
+
+	// Set up force exit on repeated signal
+	go func() {
+		sig := <-sigCh
+		fmt.Fprintf(os.Stderr, "\nReceived second signal %v, forcing immediate exit\n", sig)
+		os.Exit(1)
+	}()
+
+	// Reset signal handler for force exit
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	// Cancel context to signal all goroutines to stop
+	cancel()
+
+	// Graceful shutdown with timeout
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
 	defer shutdownCancel()
 
-	// Stop components in reverse order
-	fmt.Println("Stopping gRPC server...")
-	grpcServer.Stop()
+	// Create a channel to signal shutdown completion
+	shutdownComplete := make(chan struct{})
 
-	fmt.Println("Stopping health server...")
-	healthServer.Shutdown(shutdownCtx)
+	go func() {
+		// Stop components in reverse order of startup
 
-	fmt.Println("Stopping metrics server...")
-	metricsServer.Shutdown(shutdownCtx)
+		fmt.Println("Stopping gRPC server...")
+		grpcServer.Stop()
 
-	fmt.Println("Stopping vertical scaler...")
-	verticalScaler.Stop()
+		fmt.Println("Stopping health server...")
+		if err := healthServer.Shutdown(shutdownCtx); err != nil {
+			fmt.Fprintf(os.Stderr, "Health server shutdown error: %v\n", err)
+		}
 
-	fmt.Println("Stopping horizontal scaler...")
-	horizontalScaler.Stop()
+		fmt.Println("Stopping metrics server...")
+		if err := metricsServer.Shutdown(shutdownCtx); err != nil {
+			fmt.Fprintf(os.Stderr, "Metrics server shutdown error: %v\n", err)
+		}
 
-	fmt.Println("Stopping metrics collection...")
-	metricsCollector.Stop()
+		fmt.Println("Stopping vertical scaler...")
+		verticalScaler.Stop()
 
-	fmt.Println("Stopping Kubernetes client...")
-	k8sClient.Stop()
+		fmt.Println("Stopping horizontal scaler...")
+		horizontalScaler.Stop()
 
-	fmt.Println("Shutdown complete")
+		fmt.Println("Stopping metrics collection...")
+		metricsCollector.Stop()
+
+		fmt.Println("Stopping Kubernetes client...")
+		k8sClient.Stop()
+
+		// Wait for all server goroutines to complete
+		fmt.Println("Waiting for server goroutines to complete...")
+		wg.Wait()
+
+		close(shutdownComplete)
+	}()
+
+	// Wait for shutdown to complete or timeout
+	select {
+	case <-shutdownComplete:
+		fmt.Println("Graceful shutdown complete")
+	case <-shutdownCtx.Done():
+		fmt.Fprintf(os.Stderr, "Shutdown timed out after %v, some goroutines may not have completed\n", cfg.Server.ShutdownTimeout)
+	}
 }
 
 // startHealthServer starts the health check HTTP server.
-func startHealthServer(port int) *http.Server {
+// The WaitGroup is used to track the server goroutine for graceful shutdown.
+func startHealthServer(port int, wg *sync.WaitGroup) *http.Server {
 	mux := http.NewServeMux()
 
 	// Liveness probe - always returns OK if the process is running
@@ -247,11 +295,14 @@ func startHealthServer(port int) *http.Server {
 	})
 
 	server := &http.Server{
-		Addr:    fmt.Sprintf(":%d", port),
-		Handler: mux,
+		Addr:              fmt.Sprintf(":%d", port),
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second, // Prevent slowloris attacks
 	}
 
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		fmt.Printf("Health server listening on port %d\n", port)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			fmt.Fprintf(os.Stderr, "Health server error: %v\n", err)

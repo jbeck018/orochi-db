@@ -4,7 +4,10 @@ package metrics
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/api"
@@ -14,11 +17,44 @@ import (
 	"github.com/prometheus/common/model"
 )
 
+// validLabelPattern validates label values to prevent PromQL injection.
+// Only allows alphanumeric characters, hyphens, underscores, and dots.
+var validLabelPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_\-\.]*$`)
+
+// sanitizePromQLLabel escapes special characters in PromQL label values
+// to prevent injection attacks.
+func sanitizePromQLLabel(value string) string {
+	// First validate that the value matches expected pattern
+	if !validLabelPattern.MatchString(value) {
+		// If validation fails, escape potentially dangerous characters
+		value = strings.ReplaceAll(value, `\`, `\\`)
+		value = strings.ReplaceAll(value, `"`, `\"`)
+		value = strings.ReplaceAll(value, "\n", `\n`)
+		value = strings.ReplaceAll(value, "\r", `\r`)
+		value = strings.ReplaceAll(value, "\t", `\t`)
+	}
+	return value
+}
+
+// validateMetricPrefix ensures the metric prefix is safe to use in queries.
+func validateMetricPrefix(prefix string) error {
+	if prefix == "" {
+		return nil
+	}
+	// Metric prefix should only contain alphanumeric, underscores, and end with underscore
+	pattern := regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*_?$`)
+	if !pattern.MatchString(prefix) {
+		return fmt.Errorf("invalid metric prefix: %q", prefix)
+	}
+	return nil
+}
+
 // PrometheusClient wraps the Prometheus API client.
 type PrometheusClient struct {
 	api          v1.API
 	metricPrefix string
 	timeout      time.Duration
+	logger       *slog.Logger
 }
 
 // PrometheusConfig holds Prometheus client configuration.
@@ -26,21 +62,58 @@ type PrometheusConfig struct {
 	Address      string
 	MetricPrefix string
 	Timeout      time.Duration
+	Logger       *slog.Logger
 }
+
+// Default timeouts for HTTP client
+const (
+	defaultHTTPTimeout         = 30 * time.Second
+	defaultHTTPIdleConnTimeout = 90 * time.Second
+	defaultQueryTimeout        = 10 * time.Second
+)
 
 // NewPrometheusClient creates a new Prometheus client.
 func NewPrometheusClient(cfg PrometheusConfig) (*PrometheusClient, error) {
+	// Validate metric prefix to prevent injection
+	if err := validateMetricPrefix(cfg.MetricPrefix); err != nil {
+		return nil, err
+	}
+
+	// Set default timeout if not provided
+	timeout := cfg.Timeout
+	if timeout == 0 {
+		timeout = defaultQueryTimeout
+	}
+
+	// Create HTTP client with proper timeouts
+	httpClient := &http.Client{
+		Timeout: defaultHTTPTimeout,
+		Transport: &http.Transport{
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 10,
+			IdleConnTimeout:     defaultHTTPIdleConnTimeout,
+			DisableCompression:  false,
+		},
+	}
+
 	client, err := api.NewClient(api.Config{
 		Address: cfg.Address,
+		Client:  httpClient,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Prometheus client: %w", err)
 	}
 
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	return &PrometheusClient{
 		api:          v1.NewAPI(client),
 		metricPrefix: cfg.MetricPrefix,
-		timeout:      cfg.Timeout,
+		timeout:      timeout,
+		logger:       logger,
 	}, nil
 }
 
@@ -112,6 +185,10 @@ func (c *PrometheusClient) QueryClusterMetrics(ctx context.Context, clusterID, n
 
 // queryCPUUtilization queries CPU utilization percentage.
 func (c *PrometheusClient) queryCPUUtilization(ctx context.Context, clusterID, namespace string) (float64, error) {
+	// Sanitize inputs to prevent PromQL injection
+	safeNamespace := sanitizePromQLLabel(namespace)
+	safeClusterID := sanitizePromQLLabel(clusterID)
+
 	query := fmt.Sprintf(`
 		avg(
 			rate(container_cpu_usage_seconds_total{
@@ -126,13 +203,17 @@ func (c *PrometheusClient) queryCPUUtilization(ctx context.Context, clusterID, n
 				resource="cpu"
 			}
 		) * 100
-	`, namespace, clusterID, namespace, clusterID)
+	`, safeNamespace, safeClusterID, safeNamespace, safeClusterID)
 
 	return c.queryScalar(ctx, query)
 }
 
 // queryMemoryUtilization queries memory utilization percentage.
 func (c *PrometheusClient) queryMemoryUtilization(ctx context.Context, clusterID, namespace string) (float64, error) {
+	// Sanitize inputs to prevent PromQL injection
+	safeNamespace := sanitizePromQLLabel(namespace)
+	safeClusterID := sanitizePromQLLabel(clusterID)
+
 	query := fmt.Sprintf(`
 		avg(
 			container_memory_working_set_bytes{
@@ -147,13 +228,17 @@ func (c *PrometheusClient) queryMemoryUtilization(ctx context.Context, clusterID
 				resource="memory"
 			}
 		) * 100
-	`, namespace, clusterID, namespace, clusterID)
+	`, safeNamespace, safeClusterID, safeNamespace, safeClusterID)
 
 	return c.queryScalar(ctx, query)
 }
 
 // queryActiveConnections queries the number of active database connections.
 func (c *PrometheusClient) queryActiveConnections(ctx context.Context, clusterID, namespace string) (int64, error) {
+	// Sanitize inputs to prevent PromQL injection
+	safeNamespace := sanitizePromQLLabel(namespace)
+	safeClusterID := sanitizePromQLLabel(clusterID)
+
 	query := fmt.Sprintf(`
 		sum(
 			%spg_stat_activity_count{
@@ -162,7 +247,7 @@ func (c *PrometheusClient) queryActiveConnections(ctx context.Context, clusterID
 				state="active"
 			}
 		)
-	`, c.metricPrefix, namespace, clusterID)
+	`, c.metricPrefix, safeNamespace, safeClusterID)
 
 	val, err := c.queryScalar(ctx, query)
 	if err != nil {
@@ -173,6 +258,10 @@ func (c *PrometheusClient) queryActiveConnections(ctx context.Context, clusterID
 
 // queryLatencyPercentiles queries query latency percentiles.
 func (c *PrometheusClient) queryLatencyPercentiles(ctx context.Context, clusterID, namespace string) (p50, p95, p99 float64, err error) {
+	// Sanitize inputs to prevent PromQL injection
+	safeNamespace := sanitizePromQLLabel(namespace)
+	safeClusterID := sanitizePromQLLabel(clusterID)
+
 	baseQuery := fmt.Sprintf(`
 		histogram_quantile(%%f,
 			sum(rate(%spg_query_duration_seconds_bucket{
@@ -180,7 +269,7 @@ func (c *PrometheusClient) queryLatencyPercentiles(ctx context.Context, clusterI
 				cluster="%s"
 			}[5m])) by (le)
 		) * 1000
-	`, c.metricPrefix, namespace, clusterID)
+	`, c.metricPrefix, safeNamespace, safeClusterID)
 
 	p50, _ = c.queryScalar(ctx, fmt.Sprintf(baseQuery, 0.5))
 	p95, _ = c.queryScalar(ctx, fmt.Sprintf(baseQuery, 0.95))
@@ -191,36 +280,48 @@ func (c *PrometheusClient) queryLatencyPercentiles(ctx context.Context, clusterI
 
 // queryQPS queries the queries per second rate.
 func (c *PrometheusClient) queryQPS(ctx context.Context, clusterID, namespace string) (float64, error) {
+	// Sanitize inputs to prevent PromQL injection
+	safeNamespace := sanitizePromQLLabel(namespace)
+	safeClusterID := sanitizePromQLLabel(clusterID)
+
 	query := fmt.Sprintf(`
 		sum(rate(%spg_stat_statements_calls_total{
 			namespace="%s",
 			cluster="%s"
 		}[5m]))
-	`, c.metricPrefix, namespace, clusterID)
+	`, c.metricPrefix, safeNamespace, safeClusterID)
 
 	return c.queryScalar(ctx, query)
 }
 
 // queryReplicationLag queries the replication lag in seconds.
 func (c *PrometheusClient) queryReplicationLag(ctx context.Context, clusterID, namespace string) (float64, error) {
+	// Sanitize inputs to prevent PromQL injection
+	safeNamespace := sanitizePromQLLabel(namespace)
+	safeClusterID := sanitizePromQLLabel(clusterID)
+
 	query := fmt.Sprintf(`
 		max(%spg_replication_lag_seconds{
 			namespace="%s",
 			cluster="%s"
 		})
-	`, c.metricPrefix, namespace, clusterID)
+	`, c.metricPrefix, safeNamespace, safeClusterID)
 
 	return c.queryScalar(ctx, query)
 }
 
 // queryDiskUsage queries disk usage bytes and percentage.
 func (c *PrometheusClient) queryDiskUsage(ctx context.Context, clusterID, namespace string) (int64, float64, error) {
+	// Sanitize inputs to prevent PromQL injection
+	safeNamespace := sanitizePromQLLabel(namespace)
+	safeClusterID := sanitizePromQLLabel(clusterID)
+
 	bytesQuery := fmt.Sprintf(`
 		sum(%spg_database_size_bytes{
 			namespace="%s",
 			cluster="%s"
 		})
-	`, c.metricPrefix, namespace, clusterID)
+	`, c.metricPrefix, safeNamespace, safeClusterID)
 
 	pctQuery := fmt.Sprintf(`
 		sum(kubelet_volume_stats_used_bytes{
@@ -231,7 +332,7 @@ func (c *PrometheusClient) queryDiskUsage(ctx context.Context, clusterID, namesp
 			namespace="%s",
 			persistentvolumeclaim=~"%s-.*"
 		}) * 100
-	`, namespace, clusterID, namespace, clusterID)
+	`, safeNamespace, safeClusterID, safeNamespace, safeClusterID)
 
 	bytes, _ := c.queryScalar(ctx, bytesQuery)
 	pct, _ := c.queryScalar(ctx, pctQuery)
@@ -250,7 +351,10 @@ func (c *PrometheusClient) queryScalar(ctx context.Context, query string) (float
 	}
 
 	if len(warnings) > 0 {
-		fmt.Printf("prometheus warnings: %v\n", warnings)
+		c.logger.Warn("prometheus query returned warnings",
+			"warnings", warnings,
+			"query_prefix", query[:min(50, len(query))],
+		)
 	}
 
 	switch v := result.(type) {
@@ -281,7 +385,12 @@ func (c *PrometheusClient) QueryRange(ctx context.Context, query string, start, 
 	}
 
 	if len(warnings) > 0 {
-		fmt.Printf("prometheus warnings: %v\n", warnings)
+		c.logger.Warn("prometheus range query returned warnings",
+			"warnings", warnings,
+			"query_prefix", query[:min(50, len(query))],
+			"start", start,
+			"end", end,
+		)
 	}
 
 	matrix, ok := result.(model.Matrix)
@@ -432,15 +541,32 @@ type MetricsServer struct {
 	server *http.Server
 }
 
+// Server timeout constants
+const (
+	serverReadTimeout     = 10 * time.Second
+	serverWriteTimeout    = 30 * time.Second
+	serverIdleTimeout     = 60 * time.Second
+	serverReadHeaderTime  = 5 * time.Second
+	serverMaxHeaderBytes  = 1 << 20 // 1 MB
+)
+
 // NewMetricsServer creates a new metrics HTTP server.
 func NewMetricsServer(port int, registry *prometheus.Registry) *MetricsServer {
 	mux := http.NewServeMux()
-	mux.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
+	mux.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{
+		EnableOpenMetrics: true,
+		Timeout:           serverWriteTimeout - time.Second, // Leave headroom for response writing
+	}))
 
 	return &MetricsServer{
 		server: &http.Server{
-			Addr:    fmt.Sprintf(":%d", port),
-			Handler: mux,
+			Addr:              fmt.Sprintf(":%d", port),
+			Handler:           mux,
+			ReadTimeout:       serverReadTimeout,
+			ReadHeaderTimeout: serverReadHeaderTime,
+			WriteTimeout:      serverWriteTimeout,
+			IdleTimeout:       serverIdleTimeout,
+			MaxHeaderBytes:    serverMaxHeaderBytes,
 		},
 	}
 }

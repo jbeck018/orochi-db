@@ -142,5 +142,6 @@ CREATE INDEX IF NOT EXISTS idx_clusters_status ON clusters(status);
 CREATE INDEX IF NOT EXISTS idx_clusters_deleted_at ON clusters(deleted_at);
 CREATE INDEX IF NOT EXISTS idx_cluster_metrics_cluster_id ON cluster_metrics(cluster_id);
 CREATE INDEX IF NOT EXISTS idx_cluster_metrics_timestamp ON cluster_metrics(timestamp);
+CREATE INDEX IF NOT EXISTS idx_cluster_metrics_cluster_timestamp ON cluster_metrics(cluster_id, timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 `

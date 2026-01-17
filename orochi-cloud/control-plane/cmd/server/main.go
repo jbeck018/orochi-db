@@ -47,14 +47,22 @@ func main() {
 		sig := <-signalChan
 		logger.Info("received shutdown signal", "signal", sig)
 		cancel()
+
+		// Wait for second signal to force immediate shutdown
+		sig = <-signalChan
+		logger.Warn("received second signal, forcing immediate shutdown", "signal", sig)
+		os.Exit(1)
 	}()
 
 	// Run the server
 	if err := run(ctx, cfg, logger); err != nil {
 		logger.Error("server error", "error", err)
+		signal.Stop(signalChan)
 		os.Exit(1)
 	}
 
+	// Stop signal handling and clean up
+	signal.Stop(signalChan)
 	logger.Info("server shutdown complete")
 }
 
@@ -66,7 +74,14 @@ func run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to database: %w", err)
 	}
-	defer database.Close()
+	// Use a closure to track if database was closed during shutdown
+	dbClosed := false
+	defer func() {
+		if !dbClosed {
+			logger.Info("closing database connection (defer)")
+			database.Close()
+		}
+	}()
 
 	// Run migrations
 	logger.Info("running database migrations")
@@ -111,6 +126,14 @@ func run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("failed to create gRPC listener: %w", err)
 	}
+	// Ensure listener is closed on early return
+	grpcListenerClosed := false
+	defer func() {
+		if !grpcListenerClosed {
+			logger.Info("closing gRPC listener (defer)")
+			grpcListener.Close()
+		}
+	}()
 
 	// Error channel for server errors
 	errChan := make(chan error, 2)
@@ -139,23 +162,64 @@ func run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		return err
 	}
 
-	// Graceful shutdown
+	// Graceful shutdown with timeout
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 
-	// Shutdown HTTP server
-	logger.Info("shutting down HTTP server")
-	if err := httpServer.Shutdown(shutdownCtx); err != nil {
-		logger.Error("HTTP server shutdown error", "error", err)
+	// Create error channel for shutdown errors
+	shutdownErrChan := make(chan error, 2)
+
+	// Shutdown HTTP server concurrently
+	go func() {
+		logger.Info("shutting down HTTP server")
+		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			shutdownErrChan <- fmt.Errorf("HTTP server shutdown error: %w", err)
+		} else {
+			shutdownErrChan <- nil
+		}
+	}()
+
+	// Shutdown gRPC server concurrently
+	go func() {
+		logger.Info("shutting down gRPC server")
+		// GracefulStop blocks until all RPCs complete, so run with timeout awareness
+		stopped := make(chan struct{})
+		go func() {
+			grpcServer.GracefulStop()
+			close(stopped)
+		}()
+
+		select {
+		case <-stopped:
+			grpcListenerClosed = true // GracefulStop closes the listener
+			shutdownErrChan <- nil
+		case <-shutdownCtx.Done():
+			logger.Warn("gRPC graceful shutdown timed out, forcing stop")
+			grpcServer.Stop()
+			grpcListenerClosed = true
+			shutdownErrChan <- fmt.Errorf("gRPC server shutdown timed out")
+		}
+	}()
+
+	// Wait for both servers to shutdown
+	var shutdownErrs []error
+	for i := 0; i < 2; i++ {
+		if err := <-shutdownErrChan; err != nil {
+			shutdownErrs = append(shutdownErrs, err)
+		}
 	}
 
-	// Shutdown gRPC server
-	logger.Info("shutting down gRPC server")
-	grpcServer.GracefulStop()
-
-	// Close database connection
+	// Close database connection explicitly during shutdown
 	logger.Info("closing database connection")
 	database.Close()
+	dbClosed = true
+
+	// Report any shutdown errors
+	if len(shutdownErrs) > 0 {
+		for _, err := range shutdownErrs {
+			logger.Error("shutdown error", "error", err)
+		}
+	}
 
 	return nil
 }

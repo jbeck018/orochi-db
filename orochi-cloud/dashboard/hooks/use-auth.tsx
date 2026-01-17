@@ -43,26 +43,27 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
     setIsLoading(false);
   }, [refresh]);
 
-  const login = async (credentials: LoginCredentials): Promise<void> => {
+  const login = React.useCallback(async (credentials: LoginCredentials): Promise<void> => {
     const result = await loginFn(credentials);
     setUser(result.user);
     setTokens(result.tokens);
-  };
+  }, []);
 
-  const register = async (credentials: RegisterCredentials): Promise<void> => {
+  const register = React.useCallback(async (credentials: RegisterCredentials): Promise<void> => {
     const result = await registerFn(credentials);
     setUser(result.user);
     setTokens(result.tokens);
-  };
+  }, []);
 
-  const logout = async (): Promise<void> => {
+  const logout = React.useCallback(async (): Promise<void> => {
     await logoutFn();
     setUser(null);
     setTokens(null);
     navigate({ to: "/login" });
-  };
+  }, [navigate]);
 
-  const value: AuthContextValue = {
+  // Memoize context value to prevent unnecessary re-renders
+  const value = React.useMemo<AuthContextValue>(() => ({
     user,
     tokens,
     isAuthenticated: isAuthenticated(),
@@ -71,7 +72,7 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
     register,
     logout,
     refresh,
-  };
+  }), [user, tokens, isLoading, login, register, logout, refresh]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

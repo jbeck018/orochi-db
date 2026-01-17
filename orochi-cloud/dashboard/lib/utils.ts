@@ -27,15 +27,17 @@ export function formatNumber(num: number): string {
   return num.toString();
 }
 
+// Cache date formatter for performance - avoid creating new Intl.DateTimeFormat on each call
+const DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
 export function formatDate(dateString: string): string {
-  const date = new Date(dateString);
-  return new Intl.DateTimeFormat("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
+  return DATE_FORMATTER.format(new Date(dateString));
 }
 
 export function formatRelativeTime(dateString: string): string {

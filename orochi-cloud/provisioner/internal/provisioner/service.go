@@ -65,24 +65,25 @@ func NewService(cfg *config.Config, logger *zap.Logger) (*Service, error) {
 
 // CreateCluster creates a new PostgreSQL cluster
 func (s *Service) CreateCluster(ctx context.Context, spec *types.ClusterSpec, waitForReady bool, timeoutSeconds int32) (*types.ClusterInfo, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	s.logger.Info("creating cluster",
 		zap.String("name", spec.Name),
 		zap.String("namespace", spec.Namespace),
 		zap.Bool("waitForReady", waitForReady),
 	)
 
+	// Hold lock only for quick validation and defaults - not during long operations
+	s.mu.Lock()
 	// Validate the spec
 	if err := spec.Validate(); err != nil {
+		s.mu.Unlock()
 		return nil, fmt.Errorf("invalid cluster spec: %w", err)
 	}
 
 	// Apply defaults
 	s.applyDefaults(spec)
+	s.mu.Unlock()
 
-	// Ensure namespace exists
+	// Ensure namespace exists (no lock needed - underlying client is thread-safe)
 	if err := s.resourceManager.EnsureNamespace(ctx, spec.Namespace, map[string]string{
 		"app.kubernetes.io/managed-by": "orochi-provisioner",
 	}); err != nil {
@@ -96,13 +97,14 @@ func (s *Service) CreateCluster(ctx context.Context, spec *types.ClusterSpec, wa
 		}
 	}
 
-	// Create the CloudNativePG cluster
+	// Create the CloudNativePG cluster (underlying manager handles its own synchronization)
 	cluster, err := s.clusterManager.CreateCluster(ctx, spec)
 	if err != nil {
 		return nil, err
 	}
 
 	// Wait for cluster to be ready if requested
+	// IMPORTANT: This can take up to 10 minutes - NO lock held during wait
 	if waitForReady {
 		timeout := time.Duration(timeoutSeconds) * time.Second
 		if timeout == 0 {
@@ -124,7 +126,7 @@ func (s *Service) CreateCluster(ctx context.Context, spec *types.ClusterSpec, wa
 		}
 	}
 
-	// Create scheduled backup if configured
+	// Create scheduled backup if configured (non-critical, no lock needed)
 	if spec.BackupConfig != nil && spec.BackupConfig.ScheduledBackup != nil && spec.BackupConfig.ScheduledBackup.Enabled {
 		if _, err := s.backupManager.CreateScheduledBackup(
 			ctx,
@@ -140,7 +142,7 @@ func (s *Service) CreateCluster(ctx context.Context, spec *types.ClusterSpec, wa
 		}
 	}
 
-	// Create monitoring resources if configured
+	// Create monitoring resources if configured (non-critical, no lock needed)
 	if spec.Monitoring != nil && spec.Monitoring.EnablePodMonitor {
 		if err := s.createMonitoringResources(ctx, spec); err != nil {
 			s.logger.Warn("failed to create monitoring resources",
@@ -156,24 +158,25 @@ func (s *Service) CreateCluster(ctx context.Context, spec *types.ClusterSpec, wa
 
 // UpdateCluster updates an existing cluster
 func (s *Service) UpdateCluster(ctx context.Context, spec *types.ClusterSpec, rollingUpdate bool) (*types.ClusterInfo, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	s.logger.Info("updating cluster",
 		zap.String("name", spec.Name),
 		zap.String("namespace", spec.Namespace),
 		zap.Bool("rollingUpdate", rollingUpdate),
 	)
 
+	// Hold lock only for quick validation and defaults
+	s.mu.Lock()
 	// Validate the spec
 	if err := spec.Validate(); err != nil {
+		s.mu.Unlock()
 		return nil, fmt.Errorf("invalid cluster spec: %w", err)
 	}
 
 	// Apply defaults
 	s.applyDefaults(spec)
+	s.mu.Unlock()
 
-	// Update the cluster
+	// Update the cluster (underlying manager handles its own synchronization)
 	cluster, err := s.clusterManager.UpdateCluster(ctx, spec)
 	if err != nil {
 		return nil, err
@@ -184,15 +187,15 @@ func (s *Service) UpdateCluster(ctx context.Context, spec *types.ClusterSpec, ro
 
 // DeleteCluster deletes a cluster
 func (s *Service) DeleteCluster(ctx context.Context, namespace, name string, deleteBackups, deletePVCs bool) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	s.logger.Info("deleting cluster",
 		zap.String("name", name),
 		zap.String("namespace", namespace),
 		zap.Bool("deleteBackups", deleteBackups),
 		zap.Bool("deletePVCs", deletePVCs),
 	)
+
+	// No service-level lock needed - underlying managers handle their own synchronization
+	// All operations below are independent and can proceed without blocking other service calls
 
 	// Delete scheduled backups
 	scheduledBackups, err := s.backupManager.ListScheduledBackups(ctx, namespace, name)
@@ -251,9 +254,7 @@ func (s *Service) DeleteCluster(ctx context.Context, namespace, name string, del
 
 // GetCluster retrieves a cluster
 func (s *Service) GetCluster(ctx context.Context, namespace, name string) (*types.ClusterInfo, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
+	// No lock needed - underlying client is thread-safe
 	cluster, err := s.clusterManager.GetCluster(ctx, namespace, name)
 	if err != nil {
 		if errors.IsNotFound(err) {
@@ -267,9 +268,7 @@ func (s *Service) GetCluster(ctx context.Context, namespace, name string) (*type
 
 // ListClusters lists clusters in a namespace
 func (s *Service) ListClusters(ctx context.Context, namespace string, labelSelector map[string]string, limit int32) ([]*types.ClusterInfo, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
+	// No lock needed - underlying client is thread-safe
 	clusters, err := s.clusterManager.ListClusters(ctx, namespace, labelSelector)
 	if err != nil {
 		return nil, err
@@ -297,17 +296,13 @@ func (s *Service) ListClusters(ctx context.Context, namespace string, labelSelec
 
 // GetClusterStatus returns the status of a cluster
 func (s *Service) GetClusterStatus(ctx context.Context, namespace, name string) (*types.ClusterStatus, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
+	// No lock needed - underlying client is thread-safe
 	return s.clusterManager.GetClusterStatus(ctx, namespace, name)
 }
 
 // CreateBackup creates a backup
 func (s *Service) CreateBackup(ctx context.Context, namespace, clusterName, backupName string, method types.BackupMethod) (*types.BackupInfo, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
+	// No lock needed - underlying manager handles its own synchronization
 	backup, err := s.backupManager.CreateBackup(ctx, namespace, clusterName, backupName, method)
 	if err != nil {
 		return nil, err
@@ -318,9 +313,7 @@ func (s *Service) CreateBackup(ctx context.Context, namespace, clusterName, back
 
 // ListBackups lists backups for a cluster
 func (s *Service) ListBackups(ctx context.Context, namespace, clusterName string) ([]*types.BackupInfo, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
+	// No lock needed - underlying client is thread-safe
 	backups, err := s.backupManager.ListBackups(ctx, namespace, clusterName)
 	if err != nil {
 		return nil, err
@@ -345,31 +338,30 @@ func (s *Service) ListBackups(ctx context.Context, namespace, clusterName string
 
 // DeleteBackup deletes a backup
 func (s *Service) DeleteBackup(ctx context.Context, namespace, name string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
+	// No lock needed - underlying manager handles its own synchronization
 	return s.backupManager.DeleteBackup(ctx, namespace, name)
 }
 
 // RestoreCluster restores a cluster from a backup
 func (s *Service) RestoreCluster(ctx context.Context, sourceClusterID, sourceNamespace string, targetSpec *types.ClusterSpec, options *types.RestoreOptions) (*types.ClusterInfo, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Validate restore options
+	// Validate restore options (no lock needed for validation)
 	if err := s.restoreManager.ValidateRestoreOptions(options); err != nil {
 		return nil, err
 	}
 
+	// Hold lock only for quick validation and defaults
+	s.mu.Lock()
 	// Validate target spec
 	if err := targetSpec.Validate(); err != nil {
+		s.mu.Unlock()
 		return nil, fmt.Errorf("invalid target cluster spec: %w", err)
 	}
 
 	// Apply defaults
 	s.applyDefaults(targetSpec)
+	s.mu.Unlock()
 
-	// Perform the restore
+	// Perform the restore (can be long-running - no lock held)
 	cluster, err := s.restoreManager.RestoreFromBackup(ctx, sourceClusterID, sourceNamespace, targetSpec, options)
 	if err != nil {
 		return nil, err
@@ -477,18 +469,47 @@ func (s *Service) buildClusterInfo(ctx context.Context, cluster interface{}, spe
 	}, nil
 }
 
-// buildClusterInfoFromCNPG builds cluster info from a CNPG cluster
+// buildClusterInfoFromCNPG builds cluster info from a CNPG cluster (unstructured.Unstructured)
 func (s *Service) buildClusterInfoFromCNPG(ctx context.Context, cluster interface{}) (*types.ClusterInfo, error) {
-	// Type assert to CNPG cluster
-	cnpgCluster, ok := cluster.(*struct {
-		Name      string
-		Namespace string
+	// Handle *unstructured.Unstructured from Kubernetes dynamic client
+	unstructuredCluster, ok := cluster.(interface {
+		GetName() string
+		GetNamespace() string
+		GetCreationTimestamp() interface{ Time() interface{} }
 	})
 	if !ok {
-		return nil, fmt.Errorf("unexpected cluster type")
+		// Try direct interface access for other types
+		type clusterLike interface {
+			GetName() string
+			GetNamespace() string
+		}
+		if cl, ok := cluster.(clusterLike); ok {
+			name := cl.GetName()
+			namespace := cl.GetNamespace()
+
+			status, err := s.clusterManager.GetClusterStatus(ctx, namespace, name)
+			if err != nil {
+				status = &types.ClusterStatus{
+					Phase: types.ClusterPhaseUnknown,
+				}
+			}
+
+			return &types.ClusterInfo{
+				ClusterID: fmt.Sprintf("%s-%s", namespace, name),
+				Name:      name,
+				Namespace: namespace,
+				Status:    *status,
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			}, nil
+		}
+		return nil, fmt.Errorf("unexpected cluster type: %T", cluster)
 	}
 
-	status, err := s.clusterManager.GetClusterStatus(ctx, cnpgCluster.Namespace, cnpgCluster.Name)
+	name := unstructuredCluster.GetName()
+	namespace := unstructuredCluster.GetNamespace()
+
+	status, err := s.clusterManager.GetClusterStatus(ctx, namespace, name)
 	if err != nil {
 		status = &types.ClusterStatus{
 			Phase: types.ClusterPhaseUnknown,
@@ -496,9 +517,9 @@ func (s *Service) buildClusterInfoFromCNPG(ctx context.Context, cluster interfac
 	}
 
 	return &types.ClusterInfo{
-		ClusterID: fmt.Sprintf("%s-%s", cnpgCluster.Namespace, cnpgCluster.Name),
-		Name:      cnpgCluster.Name,
-		Namespace: cnpgCluster.Namespace,
+		ClusterID: fmt.Sprintf("%s-%s", namespace, name),
+		Name:      name,
+		Namespace: namespace,
 		Status:    *status,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),

@@ -16,6 +16,9 @@ This document defines specialized agents for working on the Orochi DB codebase. 
 8. [Workload Agent](#8-workload-agent)
 9. [TimeSeries Agent](#9-timeseries-agent)
 10. [Test Agent](#10-test-agent)
+11. [Auth Agent](#11-auth-agent)
+12. [JSON Agent](#12-json-agent)
+13. [DDL Agent](#13-ddl-agent)
 
 ---
 
@@ -470,19 +473,183 @@ Creates, maintains, and runs the test suite for Orochi DB. Works with the standa
 
 ---
 
+## 11. Auth Agent
+
+### Responsibility
+
+Implements the authentication subsystem including JWT token handling, WebAuthn/FIDO2 support, magic link authentication, and GoTrue integration. Manages session authentication, branch-level access control, and role mapping.
+
+### Key Files
+
+- `src/auth/auth.c` - Main authentication system
+- `src/auth/auth.h` - Authentication types and API
+- `src/auth/auth_cache.c` - Auth caching layer
+- `src/auth/auth_hooks.c` - Hook integration
+- `src/auth/auth_webhooks.c` - Webhook handling
+- `src/auth/anonymous_auth.c` - Anonymous authentication support
+- `src/auth/jwt.c` - JWT token handling
+- `src/auth/jwt.h` - JWT structures and API
+- `src/auth/jwt_claims.c` - JWT claims processing
+- `src/auth/magic_link.c` - Magic link authentication
+- `src/auth/webauthn.c` - WebAuthn/FIDO2 support
+- `src/auth/webauthn.h` - WebAuthn API
+- `src/auth/gotrue.c` - GoTrue service integration
+- `src/auth/gotrue.h` - GoTrue API
+- `src/auth/endpoint_auth.c` - HTTP endpoint authentication
+- `src/auth/endpoint_auth.h` - Endpoint auth API
+- `src/auth/branch_access.c` - Branch-level access control
+- `src/auth/branch_access.h` - Branch access API
+- `src/auth/role_mapping.c` - Role-based mapping
+- `src/auth/role_mapping.h` - Role mapping API
+
+### Common Tasks
+
+- Implement JWT token verification and claims extraction
+- Handle WebAuthn credential registration and authentication
+- Implement magic link generation and validation
+- Manage GoTrue integration for external auth providers
+- Implement auth caching for performance optimization
+- Handle branch-level access control policies
+- Implement role-to-permission mapping
+- Manage auth webhook callbacks
+- Implement anonymous authentication flows
+- Handle session token refresh and expiration
+
+### Testing Requirements
+
+- Test JWT token verification with various claims
+- Verify WebAuthn credential lifecycle
+- Test magic link expiration and single-use
+- Validate GoTrue integration error handling
+- Test auth cache invalidation
+- Verify branch access control rules
+- Test role mapping correctness
+- Benchmark auth throughput
+
+### Dependencies
+
+| Agent | Interaction |
+|-------|-------------|
+| Security Agent | Coordinate on secure credential handling |
+| Workload Agent | Integrate with session authorization |
+| CDC Agent | Auth events may trigger CDC |
+| Test Agent | Request `test/unit/test_auth.c`, `test_jwt.c`, `test_webauthn.c` coverage |
+
+---
+
+## 12. JSON Agent
+
+### Responsibility
+
+Implements JSON processing capabilities including JSON path queries, columnar JSON storage, and JSON indexing. Optimizes JSON workloads for HTAP scenarios.
+
+### Key Files
+
+- `src/json/json_query.c` - JSON query processing
+- `src/json/json_query.h` - JSON query API
+- `src/json/json_columnar.c` - Columnar JSON storage
+- `src/json/json_columnar.h` - Columnar JSON API
+- `src/json/json_index.c` - JSON indexing
+- `src/json/json_index.h` - JSON index API
+
+### Common Tasks
+
+- Implement JSON path query execution
+- Optimize JSON traversal for columnar storage
+- Implement GIN-style JSON indexing
+- Handle JSON type coercion and extraction
+- Optimize JSON compression in columnar format
+- Implement partial JSON update support
+- Handle JSON array and object operations
+- Integrate with vectorized execution for JSON
+- Implement JSON schema inference
+
+### Testing Requirements
+
+- Test JSON path query correctness
+- Verify columnar JSON compression ratios
+- Test JSON index lookup performance
+- Validate JSON type coercion edge cases
+- Test nested JSON structure handling
+- Benchmark JSON query performance
+
+### Dependencies
+
+| Agent | Interaction |
+|-------|-------------|
+| Storage Agent | Integrate columnar JSON with storage layer |
+| Executor Agent | Support JSON in vectorized execution |
+| Pipeline Agent | Parse JSON in ingestion pipelines |
+| Test Agent | Request JSON-specific test coverage |
+
+---
+
+## 13. DDL Agent
+
+### Responsibility
+
+Manages distributed DDL operations including dynamic schema changes, DDL workflow orchestration, and streaming DDL replication across cluster nodes.
+
+### Key Files
+
+- `src/ddl/ddl_dynamic.c` - Dynamic DDL handling
+- `src/ddl/ddl_dynamic.h` - Dynamic DDL API
+- `src/ddl/ddl_workflow.c` - DDL workflow orchestration
+- `src/ddl/ddl_workflow.h` - Workflow API
+- `src/ddl/ddl_task.c` - Task-based DDL execution
+- `src/ddl/ddl_task.h` - DDL task API
+- `src/ddl/ddl_stream.c` - Streaming DDL operations
+- `src/ddl/ddl_stream.h` - DDL stream API
+
+### Common Tasks
+
+- Coordinate distributed DDL across shards
+- Implement online schema change workflows
+- Handle DDL conflict detection and resolution
+- Manage DDL task queuing and execution
+- Implement DDL streaming for cluster sync
+- Handle DDL rollback on failure
+- Implement schema version tracking
+- Coordinate DDL with Raft consensus
+- Handle DDL blocking and non-blocking modes
+- Implement DDL dependency tracking
+
+### Testing Requirements
+
+- Test distributed DDL consistency
+- Verify DDL rollback correctness
+- Test concurrent DDL handling
+- Validate DDL streaming across nodes
+- Test schema version management
+- Benchmark DDL latency
+
+### Dependencies
+
+| Agent | Interaction |
+|-------|-------------|
+| Consensus Agent | Coordinate DDL via Raft |
+| Storage Agent | Update columnar metadata |
+| TimeSeries Agent | Handle hypertable schema changes |
+| Test Agent | Request DDL-specific test coverage |
+
+---
+
 ## Agent Coordination Matrix
 
-| Agent | Security | Consensus | Storage | Executor | Pipeline | CDC | JIT | Workload | TimeSeries |
-|-------|:--------:|:---------:|:-------:|:--------:|:--------:|:---:|:---:|:--------:|:----------:|
-| Security | - | RPC | - | - | Auth | Auth | - | Session | - |
-| Consensus | RPC | - | WAL | - | - | Log | - | - | Metadata |
-| Storage | - | WAL | - | Data | Bulk | - | Decomp | - | Chunks |
-| Executor | - | - | Data | - | - | - | JIT | Limits | - |
-| Pipeline | Auth | - | Bulk | - | - | Kafka | - | - | Target |
-| CDC | Auth | Log | - | - | Kafka | - | - | - | - |
-| JIT | - | - | Decomp | JIT | - | - | - | - | - |
-| Workload | Session | - | - | Limits | - | - | - | - | - |
-| TimeSeries | - | Metadata | Chunks | - | Target | - | - | - | - |
+| Agent | Security | Consensus | Storage | Executor | Pipeline | CDC | JIT | Workload | TimeSeries | Auth | JSON | DDL |
+|-------|:--------:|:---------:|:-------:|:--------:|:--------:|:---:|:---:|:--------:|:----------:|:----:|:----:|:---:|
+| Security | - | RPC | - | - | Auth | Auth | - | Session | - | Creds | - | - |
+| Consensus | RPC | - | WAL | - | - | Log | - | - | Metadata | - | - | DDL |
+| Storage | - | WAL | - | Data | Bulk | - | Decomp | - | Chunks | - | JSON | Schema |
+| Executor | - | - | Data | - | - | - | JIT | Limits | - | - | JSON | - |
+| Pipeline | Auth | - | Bulk | - | - | Kafka | - | - | Target | - | Parse | - |
+| CDC | Auth | Log | - | - | Kafka | - | - | - | - | Events | - | - |
+| JIT | - | - | Decomp | JIT | - | - | - | - | - | - | - | - |
+| Workload | Session | - | - | Limits | - | - | - | - | - | Session | - | - |
+| TimeSeries | - | Metadata | Chunks | - | Target | - | - | - | - | - | - | Schema |
+| Auth | Creds | - | - | - | - | Events | - | Session | - | - | - | - |
+| JSON | - | - | JSON | JSON | Parse | - | - | - | - | - | - | - |
+| DDL | - | DDL | Schema | - | - | - | - | - | Schema | - | - | - |
 
 ---
 
@@ -499,5 +666,56 @@ Creates, maintains, and runs the test suite for Orochi DB. Works with the standa
 | `src/jit/` | JIT Agent | Executor Agent |
 | `src/workload/` | Workload Agent | Security Agent |
 | `src/timeseries/` | TimeSeries Agent | Storage Agent |
+| `src/auth/` | Auth Agent | Security Agent |
+| `src/json/` | JSON Agent | Storage Agent |
+| `src/ddl/` | DDL Agent | Consensus Agent |
 | `test/unit/` | Test Agent | All Agents |
 | `test/sql/` | Test Agent | All Agents |
+| `benchmark/` | Test Agent | Executor Agent |
+| `orochi-cloud/dashboard/` | Dashboard (see below) | - |
+
+---
+
+## Dashboard Technology Stack
+
+The Orochi Cloud Dashboard (`orochi-cloud/dashboard/`) uses the following technologies:
+
+### Core Framework
+- **React 19.0.0** - UI framework
+- **TanStack Start 1.121.0** - Full-stack React meta-framework (SSR, routing)
+- **TanStack Router 1.121.0** - Type-safe routing
+- **Vite 7.0.0** - Build tool and dev server
+- **TypeScript 5.6.3** - Type safety
+
+### UI Component Library
+Custom component library built on **Radix UI primitives** (shadcn/ui pattern):
+- `@radix-ui/react-*` - Unstyled, accessible primitives (dialog, dropdown, tabs, etc.)
+- `class-variance-authority` - Component variant composition
+- `tailwind-merge` + `clsx` - Intelligent class merging
+
+### Styling
+- **Tailwind CSS 3.4.14** - Utility-first CSS framework
+- **HSL color system** - CSS variables for light/dark themes
+- **Custom ThemeProvider** - SSR-safe theme switching (light/dark/system)
+- **Inter font** - Typography
+
+### Data Visualization
+- **Recharts 2.13.3** - Charts and graphs
+
+### Icons
+- **Lucide React 0.460.0** - Icon library
+
+### Directory Structure
+```
+orochi-cloud/dashboard/
+├── components/
+│   ├── ui/           # Styled Radix-based components (shadcn/ui)
+│   ├── clusters/     # Cluster management components
+│   ├── auth/         # Authentication UI
+│   └── layout/       # Layout components + ThemeProvider
+├── components.json   # shadcn/ui CLI configuration
+├── lib/utils.ts      # Helper utilities (cn, formatting)
+├── src/
+│   ├── styles/globals.css  # Tailwind + CSS variables
+│   └── routes/       # File-based routing
+└── tailwind.config.ts

@@ -16,6 +16,9 @@ Orochi DB is a PostgreSQL extension providing HTAP (Hybrid Transactional/Analyti
 - **Raft Consensus**: Distributed coordination for cluster consistency
 - **Workload Management**: Resource pools and query admission control
 - **JIT Compilation**: Just-in-time query expression compilation
+- **Authentication**: JWT, WebAuthn, Magic Links, GoTrue integration
+- **JSON Processing**: JSON query processing, columnar JSON storage, JSON indexing
+- **Dynamic DDL**: Distributed schema changes and DDL workflow orchestration
 
 **Version**: 1.0.0
 **Supported PostgreSQL**: 16, 17, 18
@@ -101,6 +104,11 @@ The unit tests use a lightweight framework (`test_framework.h`) that runs withou
 | `test_pipelines.c` | Data pipelines |
 | `test_approx.c` | HyperLogLog, T-Digest |
 | `test_vectorized.c` | SIMD vectorized execution |
+| `test_auth.c` | Authentication system |
+| `test_jwt.c` | JWT token handling |
+| `test_webauthn.c` | WebAuthn/FIDO2 |
+| `test_magic_link.c` | Magic link authentication |
+| `test_branch_access.c` | Branch access control |
 
 ### Regression Tests (Requires PostgreSQL)
 
@@ -119,6 +127,26 @@ make lint          # Run cppcheck
 make check-format  # Check clang-format compliance
 make format        # Auto-format all source code
 ```
+
+### Performance Benchmarks
+
+```bash
+# Build and run all benchmarks
+cd benchmark
+make
+./run_all.sh
+
+# Run specific benchmark suite
+cd benchmark/tpch && ./tpch_bench
+cd benchmark/vectorized && ./vectorized_bench
+```
+
+Benchmark suites:
+- `columnar/` - Columnar storage read/write performance
+- `distributed/` - Cross-node query latency
+- `timeseries/` - Time-series ingestion throughput
+- `tpch/` - TPC-H standard benchmark queries
+- `vectorized/` - SIMD vectorized operation throughput
 
 ---
 
@@ -151,6 +179,7 @@ make format        # Auto-format all source code
 │   │   └── vectorized_scan.c
 │   ├── jit/
 │   │   ├── jit.h             # JIT API
+│   │   ├── jit_expr.h        # Expression tree API
 │   │   ├── jit_compile.c     # Expression compilation
 │   │   └── jit_expr.c        # Expression tree building
 │   ├── consensus/
@@ -159,7 +188,8 @@ make format        # Auto-format all source code
 │   │   └── raft_integration.c/h
 │   ├── pipelines/
 │   │   ├── pipeline.c/h      # Real-time ingestion framework
-│   │   └── kafka_source.c    # Kafka consumer
+│   │   ├── kafka_source.c    # Kafka consumer
+│   │   └── s3_source.c       # S3 data source integration
 │   ├── cdc/
 │   │   └── cdc.c/h           # Change Data Capture
 │   ├── workload/
@@ -168,6 +198,29 @@ make format        # Auto-format all source code
 │   │   ├── hyperloglog.c/h   # Cardinality estimation
 │   │   ├── tdigest.c/h       # Percentile approximation
 │   │   └── sampling.c
+│   ├── auth/                  # Authentication system (NEW)
+│   │   ├── auth.c/h          # Main authentication system
+│   │   ├── auth_cache.c      # Auth caching layer
+│   │   ├── auth_hooks.c      # Hook integration
+│   │   ├── auth_webhooks.c   # Webhook handling
+│   │   ├── anonymous_auth.c  # Anonymous authentication support
+│   │   ├── jwt.c/h           # JWT token handling
+│   │   ├── jwt_claims.c      # JWT claims processing
+│   │   ├── magic_link.c      # Magic link authentication
+│   │   ├── webauthn.c/h      # WebAuthn/FIDO2 support
+│   │   ├── gotrue.c/h        # GoTrue service integration
+│   │   ├── endpoint_auth.c/h # HTTP endpoint authentication
+│   │   ├── branch_access.c/h # Branch-level access control
+│   │   └── role_mapping.c/h  # Role-based mapping
+│   ├── json/                  # JSON processing (NEW)
+│   │   ├── json_query.c/h    # JSON query processing
+│   │   ├── json_columnar.c/h # Columnar JSON storage
+│   │   └── json_index.c/h    # JSON indexing
+│   ├── ddl/                   # Dynamic DDL (NEW)
+│   │   ├── ddl_dynamic.c/h   # Dynamic DDL handling
+│   │   ├── ddl_workflow.c/h  # DDL workflow orchestration
+│   │   ├── ddl_task.c/h      # Task-based DDL execution
+│   │   └── ddl_stream.c/h    # Streaming DDL operations
 │   └── utils/
 │       └── utils.c
 ├── sql/
@@ -183,6 +236,16 @@ make format        # Auto-format all source code
 ├── docs/
 │   ├── architecture.md
 │   └── user-guide.md
+├── benchmark/                 # Performance benchmarking (NEW)
+│   ├── common/               # Benchmark utilities
+│   ├── columnar/             # Columnar storage benchmarks
+│   ├── distributed/          # Distributed query benchmarks
+│   ├── timeseries/           # Time-series performance benchmarks
+│   ├── tpch/                 # TPC-H benchmark suite
+│   ├── vectorized/           # Vectorized execution benchmarks
+│   └── run_all.sh            # Benchmark runner script
+├── orochi-cloud/              # Cloud-specific functionality (NEW)
+│   └── dashboard/            # Web UI dashboard (React 19 + TanStack + Tailwind)
 └── Makefile                  # PGXS build system
 ```
 
@@ -377,6 +440,10 @@ TEST_SUITE(test_my_module)
 | `orochi_create_pipeline()` | Create data ingestion pipeline |
 | `orochi_create_cdc_subscription()` | Set up CDC streaming |
 | `orochi_create_resource_pool()` | Create workload resource pool |
+| `orochi_authenticate()` | Authenticate a session (JWT/WebAuthn/Magic Link) |
+| `orochi_verify_jwt()` | Verify and decode JWT token |
+| `orochi_json_query()` | Execute JSON path query |
+| `orochi_ddl_apply()` | Apply distributed DDL change |
 
 ---
 
@@ -397,6 +464,11 @@ TEST_SUITE(test_my_module)
 | `ResourcePool` | `workload.h` | Workload resource limits |
 | `JitContext` | `jit.h` | JIT compilation context |
 | `JitExprNode` | `jit.h` | JIT expression tree node |
+| `OrochiAuthContext` | `auth.h` | Authentication session context |
+| `OrochiJWTClaims` | `jwt.h` | JWT token claims |
+| `OrochiWebAuthnCredential` | `webauthn.h` | WebAuthn credential |
+| `OrochiJSONQuery` | `json_query.h` | JSON query context |
+| `OrochiDDLWorkflow` | `ddl_workflow.h` | DDL workflow state |
 
 ---
 
