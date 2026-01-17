@@ -1,0 +1,57 @@
+# RBAC for Autoscaler - monitors and scales clusters
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: autoscaler
+  namespace: orochi-cloud
+  labels:
+    app.kubernetes.io/name: orochi-cloud
+    app.kubernetes.io/component: autoscaler
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: autoscaler
+  namespace: orochi-cloud
+  labels:
+    app.kubernetes.io/name: orochi-cloud
+    app.kubernetes.io/component: autoscaler
+rules:
+  # CloudNativePG cluster monitoring and scaling
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  # Pod metrics for scaling decisions
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  # Metrics from metrics-server
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  # ConfigMaps for scaling configs
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+  # Events for debugging
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: autoscaler
+  namespace: orochi-cloud
+  labels:
+    app.kubernetes.io/name: orochi-cloud
+    app.kubernetes.io/component: autoscaler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: autoscaler
+subjects:
+  - kind: ServiceAccount
+    name: autoscaler
+    namespace: orochi-cloud

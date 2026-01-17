@@ -69,7 +69,11 @@ func (db *DB) RunMigrations(ctx context.Context) error {
 		migrationCreateUsersTable,
 		migrationCreateClustersTable,
 		migrationCreateClusterMetricsTable,
+		migrationCreateOrganizationsTable,
+		migrationCreateOrgMembersTable,
 		migrationCreateIndexes,
+		migrationCreateOrgIndexes,
+		migrationAddPoolerAndOrgToClusters,
 	}
 
 	for i, migration := range migrations {
@@ -144,4 +148,50 @@ CREATE INDEX IF NOT EXISTS idx_cluster_metrics_cluster_id ON cluster_metrics(clu
 CREATE INDEX IF NOT EXISTS idx_cluster_metrics_timestamp ON cluster_metrics(timestamp);
 CREATE INDEX IF NOT EXISTS idx_cluster_metrics_cluster_timestamp ON cluster_metrics(cluster_id, timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+`
+
+const migrationCreateOrganizationsTable = `
+CREATE TABLE IF NOT EXISTS organizations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(64) NOT NULL,
+    slug VARCHAR(64) NOT NULL UNIQUE,
+    owner_id UUID NOT NULL REFERENCES users(id),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    deleted_at TIMESTAMP WITH TIME ZONE
+);
+`
+
+const migrationCreateOrgMembersTable = `
+CREATE TABLE IF NOT EXISTS organization_members (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role VARCHAR(20) NOT NULL DEFAULT 'member',
+    invited_by UUID REFERENCES users(id),
+    joined_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE(organization_id, user_id)
+);
+`
+
+const migrationCreateOrgIndexes = `
+CREATE INDEX IF NOT EXISTS idx_organizations_owner_id ON organizations(owner_id);
+CREATE INDEX IF NOT EXISTS idx_organizations_slug ON organizations(slug);
+CREATE INDEX IF NOT EXISTS idx_organizations_deleted_at ON organizations(deleted_at);
+CREATE INDEX IF NOT EXISTS idx_org_members_org_id ON organization_members(organization_id);
+CREATE INDEX IF NOT EXISTS idx_org_members_user_id ON organization_members(user_id);
+`
+
+const migrationAddPoolerAndOrgToClusters = `
+-- Add organization_id column for team-based cluster isolation
+ALTER TABLE clusters ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES organizations(id) ON DELETE SET NULL;
+
+-- Add pooler_url column for PgBouncer connection pooling
+ALTER TABLE clusters ADD COLUMN IF NOT EXISTS pooler_url TEXT;
+
+-- Add pooler_enabled column to track if connection pooling is enabled
+ALTER TABLE clusters ADD COLUMN IF NOT EXISTS pooler_enabled BOOLEAN NOT NULL DEFAULT false;
+
+-- Create index for organization_id lookups
+CREATE INDEX IF NOT EXISTS idx_clusters_organization_id ON clusters(organization_id);
 `

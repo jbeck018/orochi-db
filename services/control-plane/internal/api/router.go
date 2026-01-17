@@ -15,15 +15,21 @@ import (
 	"github.com/orochi-db/orochi-db/services/control-plane/internal/api/handlers"
 	"github.com/orochi-db/orochi-db/services/control-plane/internal/api/middleware"
 	"github.com/orochi-db/orochi-db/services/control-plane/internal/auth"
+	"github.com/orochi-db/orochi-db/services/control-plane/internal/models"
 	"github.com/orochi-db/orochi-db/services/control-plane/internal/services"
 )
 
 // RouterConfig holds the configuration for the router.
 type RouterConfig struct {
-	JWTManager     *auth.JWTManager
-	UserService    *services.UserService
-	ClusterService *services.ClusterService
-	Logger         *slog.Logger
+	JWTManager              *auth.JWTManager
+	UserService             *services.UserService
+	ClusterService          *services.ClusterService
+	AdminService            *services.AdminService
+	OrganizationService     *services.OrganizationService
+	InviteService           *services.InviteService
+	DataBrowserService      *services.DataBrowserService
+	ClusterSettingsService  *services.ClusterSettingsService
+	Logger                  *slog.Logger
 
 	// AllowedOrigins specifies CORS allowed origins.
 	// If empty, defaults to environment variable ALLOWED_ORIGINS or localhost only.
@@ -103,10 +109,15 @@ func NewRouter(cfg *RouterConfig) *chi.Mux {
 	r.Use(rateLimiter.Limit)
 
 	// Create handlers
-	authHandler := handlers.NewAuthHandler(cfg.UserService, cfg.Logger)
+	authHandler := handlers.NewAuthHandler(cfg.UserService, cfg.OrganizationService, cfg.InviteService, cfg.Logger)
 	clusterHandler := handlers.NewClusterHandler(cfg.ClusterService, cfg.Logger)
 	metricsHandler := handlers.NewMetricsHandler(cfg.ClusterService, cfg.Logger)
 	healthHandler := handlers.NewHealthHandler(cfg.Logger)
+	adminHandler := handlers.NewAdminHandler(cfg.AdminService, cfg.Logger)
+	organizationHandler := handlers.NewOrganizationHandler(cfg.OrganizationService, cfg.Logger)
+	inviteHandler := handlers.NewInviteHandler(cfg.InviteService, cfg.OrganizationService, cfg.Logger)
+	dataBrowserHandler := handlers.NewDataBrowserHandler(cfg.DataBrowserService, cfg.ClusterService, cfg.Logger)
+	clusterSettingsHandler := handlers.NewClusterSettingsHandler(cfg.ClusterSettingsService, cfg.ClusterService, cfg.Logger)
 
 	// Create auth middleware
 	authMiddleware := middleware.NewAuthMiddleware(cfg.JWTManager, cfg.UserService)
@@ -151,6 +162,9 @@ func NewRouter(cfg *RouterConfig) *chi.Mux {
 			})
 		})
 
+		// Public invite routes (view invite by token - no auth required)
+		r.Get("/invites/{token}", inviteHandler.GetInviteByToken)
+
 		// Protected routes
 		r.Group(func(r chi.Router) {
 			r.Use(authMiddleware.Authenticate)
@@ -169,6 +183,78 @@ func NewRouter(cfg *RouterConfig) *chi.Mux {
 					// Metrics routes
 					r.Get("/metrics", metricsHandler.GetClusterMetrics)
 					r.Get("/metrics/latest", metricsHandler.GetLatestMetrics)
+
+					// Data browser routes
+					r.Route("/data", func(r chi.Router) {
+						r.Get("/tables", dataBrowserHandler.ListTables)
+						r.Get("/tables/{schema}/{table}", dataBrowserHandler.GetTableSchema)
+						r.Get("/tables/{schema}/{table}/data", dataBrowserHandler.GetTableData)
+						r.Post("/query", dataBrowserHandler.ExecuteSQL)
+						r.Get("/history", dataBrowserHandler.GetQueryHistory)
+						r.Get("/stats", dataBrowserHandler.GetInternalStats)
+					})
+
+					// Cluster settings routes
+					r.Get("/settings", clusterSettingsHandler.GetSettings)
+					r.Patch("/settings", clusterSettingsHandler.UpdateSettings)
+					r.Get("/recommendations", clusterSettingsHandler.GetRecommendations)
+					r.Post("/recommendations/{recId}/dismiss", clusterSettingsHandler.DismissRecommendation)
+					r.Post("/recommendations/{recId}/apply", clusterSettingsHandler.ApplyRecommendation)
+				})
+			})
+
+			// Organization routes
+			r.Route("/organizations", func(r chi.Router) {
+				r.Get("/", organizationHandler.List)
+				r.Post("/", organizationHandler.Create)
+
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", organizationHandler.Get)
+					r.Patch("/", organizationHandler.Update)
+					r.Delete("/", organizationHandler.Delete)
+
+					// Members routes
+					r.Get("/members", organizationHandler.GetMembers)
+					r.Post("/members", organizationHandler.AddMember)
+					r.Delete("/members/{memberId}", organizationHandler.RemoveMember)
+
+					// Invite routes for organization
+					r.Get("/invites", inviteHandler.ListInvites)
+					r.Post("/invites", inviteHandler.CreateInvite)
+					r.Delete("/invites/{inviteId}", inviteHandler.RevokeInvite)
+					r.Post("/invites/{inviteId}/resend", inviteHandler.ResendInvite)
+				})
+			})
+
+			// User invite routes (accept invites, list my invites)
+			r.Route("/invites", func(r chi.Router) {
+				r.Get("/me", inviteHandler.ListMyInvites)
+				r.Post("/{token}/accept", inviteHandler.AcceptInvite)
+			})
+		})
+
+		// Admin routes (requires admin role)
+		r.Group(func(r chi.Router) {
+			r.Use(authMiddleware.Authenticate)
+			r.Use(authMiddleware.RequireRole(models.UserRoleAdmin))
+
+			r.Route("/admin", func(r chi.Router) {
+				// Stats
+				r.Get("/stats", adminHandler.GetStats)
+
+				// User management
+				r.Route("/users", func(r chi.Router) {
+					r.Get("/", adminHandler.ListUsers)
+					r.Get("/{id}", adminHandler.GetUser)
+					r.Patch("/{id}/role", adminHandler.UpdateUserRole)
+					r.Patch("/{id}/active", adminHandler.SetUserActive)
+				})
+
+				// Cluster management
+				r.Route("/clusters", func(r chi.Router) {
+					r.Get("/", adminHandler.ListClusters)
+					r.Get("/{id}", adminHandler.GetCluster)
+					r.Delete("/{id}/force", adminHandler.ForceDeleteCluster)
 				})
 			})
 		})

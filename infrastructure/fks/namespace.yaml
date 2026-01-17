@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: orochi-cloud
+  labels:
+    app.kubernetes.io/name: orochi-cloud
+    app.kubernetes.io/managed-by: kubectl
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: orochi-quota
+  namespace: orochi-cloud
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: 4Gi
+    limits.cpu: "8"
+    limits.memory: 8Gi
+    pods: "20"
+    persistentvolumeclaims: "10"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: orochi-limits
+  namespace: orochi-cloud
+spec:
+  limits:
+    - default:
+        cpu: "500m"
+        memory: 512Mi
+      defaultRequest:
+        cpu: "100m"
+        memory: 128Mi
+      type: Container

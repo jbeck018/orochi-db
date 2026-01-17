@@ -14,19 +14,30 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as RegisterRouteImport } from './routes/register'
 import { Route as PrivacyRouteImport } from './routes/privacy'
+import { Route as PricingRouteImport } from './routes/pricing'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as LandingRouteImport } from './routes/landing'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
+import { Route as DocsRouteImport } from './routes/docs'
+import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ClustersIndexRouteImport } from './routes/clusters.index'
+import { Route as AdminIndexRouteImport } from './routes/admin.index'
+import { Route as OrganizationsIdRouteImport } from './routes/organizations.$id'
+import { Route as InvitesTokenRouteImport } from './routes/invites.$token'
 import { Route as ClustersNewRouteImport } from './routes/clusters.new'
-import { Route as ClustersIdRouteImport } from './routes/clusters.$id'
-import { Route as ClustersIdTopologyRouteImport } from './routes/clusters.$id.topology'
-import { Route as ClustersIdTimeseriesRouteImport } from './routes/clusters.$id.timeseries'
-import { Route as ClustersIdShardingRouteImport } from './routes/clusters.$id.sharding'
-import { Route as ClustersIdSettingsRouteImport } from './routes/clusters.$id.settings'
-import { Route as ClustersIdPipelinesRouteImport } from './routes/clusters.$id.pipelines'
-import { Route as ClustersIdColumnarRouteImport } from './routes/clusters.$id.columnar'
-import { Route as ClustersIdCdcRouteImport } from './routes/clusters.$id.cdc'
+import { Route as AdminUsersRouteImport } from './routes/admin.users'
+import { Route as AdminClustersRouteImport } from './routes/admin.clusters'
+import { Route as ClustersIdRouteRouteImport } from './routes/clusters/$id/route'
+import { Route as ClustersIdIndexRouteImport } from './routes/clusters/$id/index'
+import { Route as ClustersIdTopologyRouteImport } from './routes/clusters/$id/topology'
+import { Route as ClustersIdTimeseriesRouteImport } from './routes/clusters/$id/timeseries'
+import { Route as ClustersIdShardingRouteImport } from './routes/clusters/$id/sharding'
+import { Route as ClustersIdSettingsRouteImport } from './routes/clusters/$id/settings'
+import { Route as ClustersIdPipelinesRouteImport } from './routes/clusters/$id/pipelines'
+import { Route as ClustersIdDataRouteImport } from './routes/clusters/$id/data'
+import { Route as ClustersIdColumnarRouteImport } from './routes/clusters/$id/columnar'
+import { Route as ClustersIdCdcRouteImport } from './routes/clusters/$id/cdc'
 import { Route as AuthCallbackProviderRouteImport } from './routes/auth.callback.$provider'
 
 const TermsRoute = TermsRouteImport.update({
@@ -54,14 +65,34 @@ const PrivacyRoute = PrivacyRouteImport.update({
   path: '/privacy',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PricingRoute = PricingRouteImport.update({
+  id: '/pricing',
+  path: '/pricing',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LandingRoute = LandingRouteImport.update({
+  id: '/landing',
+  path: '/landing',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
   id: '/forgot-password',
   path: '/forgot-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocsRoute = DocsRouteImport.update({
+  id: '/docs',
+  path: '/docs',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -74,50 +105,85 @@ const ClustersIndexRoute = ClustersIndexRouteImport.update({
   path: '/clusters/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminIndexRoute = AdminIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AdminRoute,
+} as any)
+const OrganizationsIdRoute = OrganizationsIdRouteImport.update({
+  id: '/organizations/$id',
+  path: '/organizations/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InvitesTokenRoute = InvitesTokenRouteImport.update({
+  id: '/invites/$token',
+  path: '/invites/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ClustersNewRoute = ClustersNewRouteImport.update({
   id: '/clusters/new',
   path: '/clusters/new',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ClustersIdRoute = ClustersIdRouteImport.update({
+const AdminUsersRoute = AdminUsersRouteImport.update({
+  id: '/users',
+  path: '/users',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminClustersRoute = AdminClustersRouteImport.update({
+  id: '/clusters',
+  path: '/clusters',
+  getParentRoute: () => AdminRoute,
+} as any)
+const ClustersIdRouteRoute = ClustersIdRouteRouteImport.update({
   id: '/clusters/$id',
   path: '/clusters/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ClustersIdIndexRoute = ClustersIdIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => ClustersIdRouteRoute,
+} as any)
 const ClustersIdTopologyRoute = ClustersIdTopologyRouteImport.update({
   id: '/topology',
   path: '/topology',
-  getParentRoute: () => ClustersIdRoute,
+  getParentRoute: () => ClustersIdRouteRoute,
 } as any)
 const ClustersIdTimeseriesRoute = ClustersIdTimeseriesRouteImport.update({
   id: '/timeseries',
   path: '/timeseries',
-  getParentRoute: () => ClustersIdRoute,
+  getParentRoute: () => ClustersIdRouteRoute,
 } as any)
 const ClustersIdShardingRoute = ClustersIdShardingRouteImport.update({
   id: '/sharding',
   path: '/sharding',
-  getParentRoute: () => ClustersIdRoute,
+  getParentRoute: () => ClustersIdRouteRoute,
 } as any)
 const ClustersIdSettingsRoute = ClustersIdSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
-  getParentRoute: () => ClustersIdRoute,
+  getParentRoute: () => ClustersIdRouteRoute,
 } as any)
 const ClustersIdPipelinesRoute = ClustersIdPipelinesRouteImport.update({
   id: '/pipelines',
   path: '/pipelines',
-  getParentRoute: () => ClustersIdRoute,
+  getParentRoute: () => ClustersIdRouteRoute,
+} as any)
+const ClustersIdDataRoute = ClustersIdDataRouteImport.update({
+  id: '/data',
+  path: '/data',
+  getParentRoute: () => ClustersIdRouteRoute,
 } as any)
 const ClustersIdColumnarRoute = ClustersIdColumnarRouteImport.update({
   id: '/columnar',
   path: '/columnar',
-  getParentRoute: () => ClustersIdRoute,
+  getParentRoute: () => ClustersIdRouteRoute,
 } as any)
 const ClustersIdCdcRoute = ClustersIdCdcRouteImport.update({
   id: '/cdc',
   path: '/cdc',
-  getParentRoute: () => ClustersIdRoute,
+  getParentRoute: () => ClustersIdRouteRoute,
 } as any)
 const AuthCallbackProviderRoute = AuthCallbackProviderRouteImport.update({
   id: '/auth/callback/$provider',
@@ -127,145 +193,213 @@ const AuthCallbackProviderRoute = AuthCallbackProviderRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRouteWithChildren
+  '/docs': typeof DocsRoute
   '/forgot-password': typeof ForgotPasswordRoute
+  '/landing': typeof LandingRoute
   '/login': typeof LoginRoute
+  '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
   '/register': typeof RegisterRoute
   '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
   '/terms': typeof TermsRoute
-  '/clusters/$id': typeof ClustersIdRouteWithChildren
+  '/clusters/$id': typeof ClustersIdRouteRouteWithChildren
+  '/admin/clusters': typeof AdminClustersRoute
+  '/admin/users': typeof AdminUsersRoute
   '/clusters/new': typeof ClustersNewRoute
+  '/invites/$token': typeof InvitesTokenRoute
+  '/organizations/$id': typeof OrganizationsIdRoute
+  '/admin/': typeof AdminIndexRoute
   '/clusters/': typeof ClustersIndexRoute
   '/auth/callback/$provider': typeof AuthCallbackProviderRoute
   '/clusters/$id/cdc': typeof ClustersIdCdcRoute
   '/clusters/$id/columnar': typeof ClustersIdColumnarRoute
+  '/clusters/$id/data': typeof ClustersIdDataRoute
   '/clusters/$id/pipelines': typeof ClustersIdPipelinesRoute
   '/clusters/$id/settings': typeof ClustersIdSettingsRoute
   '/clusters/$id/sharding': typeof ClustersIdShardingRoute
   '/clusters/$id/timeseries': typeof ClustersIdTimeseriesRoute
   '/clusters/$id/topology': typeof ClustersIdTopologyRoute
+  '/clusters/$id/': typeof ClustersIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/docs': typeof DocsRoute
   '/forgot-password': typeof ForgotPasswordRoute
+  '/landing': typeof LandingRoute
   '/login': typeof LoginRoute
+  '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
   '/register': typeof RegisterRoute
   '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
   '/terms': typeof TermsRoute
-  '/clusters/$id': typeof ClustersIdRouteWithChildren
+  '/admin/clusters': typeof AdminClustersRoute
+  '/admin/users': typeof AdminUsersRoute
   '/clusters/new': typeof ClustersNewRoute
+  '/invites/$token': typeof InvitesTokenRoute
+  '/organizations/$id': typeof OrganizationsIdRoute
+  '/admin': typeof AdminIndexRoute
   '/clusters': typeof ClustersIndexRoute
   '/auth/callback/$provider': typeof AuthCallbackProviderRoute
   '/clusters/$id/cdc': typeof ClustersIdCdcRoute
   '/clusters/$id/columnar': typeof ClustersIdColumnarRoute
+  '/clusters/$id/data': typeof ClustersIdDataRoute
   '/clusters/$id/pipelines': typeof ClustersIdPipelinesRoute
   '/clusters/$id/settings': typeof ClustersIdSettingsRoute
   '/clusters/$id/sharding': typeof ClustersIdShardingRoute
   '/clusters/$id/timeseries': typeof ClustersIdTimeseriesRoute
   '/clusters/$id/topology': typeof ClustersIdTopologyRoute
+  '/clusters/$id': typeof ClustersIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/admin': typeof AdminRouteWithChildren
+  '/docs': typeof DocsRoute
   '/forgot-password': typeof ForgotPasswordRoute
+  '/landing': typeof LandingRoute
   '/login': typeof LoginRoute
+  '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
   '/register': typeof RegisterRoute
   '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
   '/terms': typeof TermsRoute
-  '/clusters/$id': typeof ClustersIdRouteWithChildren
+  '/clusters/$id': typeof ClustersIdRouteRouteWithChildren
+  '/admin/clusters': typeof AdminClustersRoute
+  '/admin/users': typeof AdminUsersRoute
   '/clusters/new': typeof ClustersNewRoute
+  '/invites/$token': typeof InvitesTokenRoute
+  '/organizations/$id': typeof OrganizationsIdRoute
+  '/admin/': typeof AdminIndexRoute
   '/clusters/': typeof ClustersIndexRoute
   '/auth/callback/$provider': typeof AuthCallbackProviderRoute
   '/clusters/$id/cdc': typeof ClustersIdCdcRoute
   '/clusters/$id/columnar': typeof ClustersIdColumnarRoute
+  '/clusters/$id/data': typeof ClustersIdDataRoute
   '/clusters/$id/pipelines': typeof ClustersIdPipelinesRoute
   '/clusters/$id/settings': typeof ClustersIdSettingsRoute
   '/clusters/$id/sharding': typeof ClustersIdShardingRoute
   '/clusters/$id/timeseries': typeof ClustersIdTimeseriesRoute
   '/clusters/$id/topology': typeof ClustersIdTopologyRoute
+  '/clusters/$id/': typeof ClustersIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/admin'
+    | '/docs'
     | '/forgot-password'
+    | '/landing'
     | '/login'
+    | '/pricing'
     | '/privacy'
     | '/register'
     | '/reset-password'
     | '/settings'
     | '/terms'
     | '/clusters/$id'
+    | '/admin/clusters'
+    | '/admin/users'
     | '/clusters/new'
+    | '/invites/$token'
+    | '/organizations/$id'
+    | '/admin/'
     | '/clusters/'
     | '/auth/callback/$provider'
     | '/clusters/$id/cdc'
     | '/clusters/$id/columnar'
+    | '/clusters/$id/data'
     | '/clusters/$id/pipelines'
     | '/clusters/$id/settings'
     | '/clusters/$id/sharding'
     | '/clusters/$id/timeseries'
     | '/clusters/$id/topology'
+    | '/clusters/$id/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/docs'
     | '/forgot-password'
+    | '/landing'
     | '/login'
+    | '/pricing'
     | '/privacy'
     | '/register'
     | '/reset-password'
     | '/settings'
     | '/terms'
-    | '/clusters/$id'
+    | '/admin/clusters'
+    | '/admin/users'
     | '/clusters/new'
+    | '/invites/$token'
+    | '/organizations/$id'
+    | '/admin'
     | '/clusters'
     | '/auth/callback/$provider'
     | '/clusters/$id/cdc'
     | '/clusters/$id/columnar'
+    | '/clusters/$id/data'
     | '/clusters/$id/pipelines'
     | '/clusters/$id/settings'
     | '/clusters/$id/sharding'
     | '/clusters/$id/timeseries'
     | '/clusters/$id/topology'
+    | '/clusters/$id'
   id:
     | '__root__'
     | '/'
+    | '/admin'
+    | '/docs'
     | '/forgot-password'
+    | '/landing'
     | '/login'
+    | '/pricing'
     | '/privacy'
     | '/register'
     | '/reset-password'
     | '/settings'
     | '/terms'
     | '/clusters/$id'
+    | '/admin/clusters'
+    | '/admin/users'
     | '/clusters/new'
+    | '/invites/$token'
+    | '/organizations/$id'
+    | '/admin/'
     | '/clusters/'
     | '/auth/callback/$provider'
     | '/clusters/$id/cdc'
     | '/clusters/$id/columnar'
+    | '/clusters/$id/data'
     | '/clusters/$id/pipelines'
     | '/clusters/$id/settings'
     | '/clusters/$id/sharding'
     | '/clusters/$id/timeseries'
     | '/clusters/$id/topology'
+    | '/clusters/$id/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminRoute: typeof AdminRouteWithChildren
+  DocsRoute: typeof DocsRoute
   ForgotPasswordRoute: typeof ForgotPasswordRoute
+  LandingRoute: typeof LandingRoute
   LoginRoute: typeof LoginRoute
+  PricingRoute: typeof PricingRoute
   PrivacyRoute: typeof PrivacyRoute
   RegisterRoute: typeof RegisterRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   SettingsRoute: typeof SettingsRoute
   TermsRoute: typeof TermsRoute
-  ClustersIdRoute: typeof ClustersIdRouteWithChildren
+  ClustersIdRouteRoute: typeof ClustersIdRouteRouteWithChildren
   ClustersNewRoute: typeof ClustersNewRoute
+  InvitesTokenRoute: typeof InvitesTokenRoute
+  OrganizationsIdRoute: typeof OrganizationsIdRoute
   ClustersIndexRoute: typeof ClustersIndexRoute
   AuthCallbackProviderRoute: typeof AuthCallbackProviderRoute
 }
@@ -307,6 +441,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PrivacyRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/pricing': {
+      id: '/pricing'
+      path: '/pricing'
+      fullPath: '/pricing'
+      preLoaderRoute: typeof PricingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/login': {
       id: '/login'
       path: '/login'
@@ -314,11 +455,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/landing': {
+      id: '/landing'
+      path: '/landing'
+      fullPath: '/landing'
+      preLoaderRoute: typeof LandingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/forgot-password': {
       id: '/forgot-password'
       path: '/forgot-password'
       fullPath: '/forgot-password'
       preLoaderRoute: typeof ForgotPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs': {
+      id: '/docs'
+      path: '/docs'
+      fullPath: '/docs'
+      preLoaderRoute: typeof DocsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -335,6 +497,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ClustersIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/': {
+      id: '/admin/'
+      path: '/'
+      fullPath: '/admin/'
+      preLoaderRoute: typeof AdminIndexRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/organizations/$id': {
+      id: '/organizations/$id'
+      path: '/organizations/$id'
+      fullPath: '/organizations/$id'
+      preLoaderRoute: typeof OrganizationsIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/invites/$token': {
+      id: '/invites/$token'
+      path: '/invites/$token'
+      fullPath: '/invites/$token'
+      preLoaderRoute: typeof InvitesTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/clusters/new': {
       id: '/clusters/new'
       path: '/clusters/new'
@@ -342,61 +525,89 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ClustersNewRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/users': {
+      id: '/admin/users'
+      path: '/users'
+      fullPath: '/admin/users'
+      preLoaderRoute: typeof AdminUsersRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/clusters': {
+      id: '/admin/clusters'
+      path: '/clusters'
+      fullPath: '/admin/clusters'
+      preLoaderRoute: typeof AdminClustersRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/clusters/$id': {
       id: '/clusters/$id'
       path: '/clusters/$id'
       fullPath: '/clusters/$id'
-      preLoaderRoute: typeof ClustersIdRouteImport
+      preLoaderRoute: typeof ClustersIdRouteRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/clusters/$id/': {
+      id: '/clusters/$id/'
+      path: '/'
+      fullPath: '/clusters/$id/'
+      preLoaderRoute: typeof ClustersIdIndexRouteImport
+      parentRoute: typeof ClustersIdRouteRoute
     }
     '/clusters/$id/topology': {
       id: '/clusters/$id/topology'
       path: '/topology'
       fullPath: '/clusters/$id/topology'
       preLoaderRoute: typeof ClustersIdTopologyRouteImport
-      parentRoute: typeof ClustersIdRoute
+      parentRoute: typeof ClustersIdRouteRoute
     }
     '/clusters/$id/timeseries': {
       id: '/clusters/$id/timeseries'
       path: '/timeseries'
       fullPath: '/clusters/$id/timeseries'
       preLoaderRoute: typeof ClustersIdTimeseriesRouteImport
-      parentRoute: typeof ClustersIdRoute
+      parentRoute: typeof ClustersIdRouteRoute
     }
     '/clusters/$id/sharding': {
       id: '/clusters/$id/sharding'
       path: '/sharding'
       fullPath: '/clusters/$id/sharding'
       preLoaderRoute: typeof ClustersIdShardingRouteImport
-      parentRoute: typeof ClustersIdRoute
+      parentRoute: typeof ClustersIdRouteRoute
     }
     '/clusters/$id/settings': {
       id: '/clusters/$id/settings'
       path: '/settings'
       fullPath: '/clusters/$id/settings'
       preLoaderRoute: typeof ClustersIdSettingsRouteImport
-      parentRoute: typeof ClustersIdRoute
+      parentRoute: typeof ClustersIdRouteRoute
     }
     '/clusters/$id/pipelines': {
       id: '/clusters/$id/pipelines'
       path: '/pipelines'
       fullPath: '/clusters/$id/pipelines'
       preLoaderRoute: typeof ClustersIdPipelinesRouteImport
-      parentRoute: typeof ClustersIdRoute
+      parentRoute: typeof ClustersIdRouteRoute
+    }
+    '/clusters/$id/data': {
+      id: '/clusters/$id/data'
+      path: '/data'
+      fullPath: '/clusters/$id/data'
+      preLoaderRoute: typeof ClustersIdDataRouteImport
+      parentRoute: typeof ClustersIdRouteRoute
     }
     '/clusters/$id/columnar': {
       id: '/clusters/$id/columnar'
       path: '/columnar'
       fullPath: '/clusters/$id/columnar'
       preLoaderRoute: typeof ClustersIdColumnarRouteImport
-      parentRoute: typeof ClustersIdRoute
+      parentRoute: typeof ClustersIdRouteRoute
     }
     '/clusters/$id/cdc': {
       id: '/clusters/$id/cdc'
       path: '/cdc'
       fullPath: '/clusters/$id/cdc'
       preLoaderRoute: typeof ClustersIdCdcRouteImport
-      parentRoute: typeof ClustersIdRoute
+      parentRoute: typeof ClustersIdRouteRoute
     }
     '/auth/callback/$provider': {
       id: '/auth/callback/$provider'
@@ -408,41 +619,65 @@ declare module '@tanstack/react-router' {
   }
 }
 
-interface ClustersIdRouteChildren {
+interface AdminRouteChildren {
+  AdminClustersRoute: typeof AdminClustersRoute
+  AdminUsersRoute: typeof AdminUsersRoute
+  AdminIndexRoute: typeof AdminIndexRoute
+}
+
+const AdminRouteChildren: AdminRouteChildren = {
+  AdminClustersRoute: AdminClustersRoute,
+  AdminUsersRoute: AdminUsersRoute,
+  AdminIndexRoute: AdminIndexRoute,
+}
+
+const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
+
+interface ClustersIdRouteRouteChildren {
   ClustersIdCdcRoute: typeof ClustersIdCdcRoute
   ClustersIdColumnarRoute: typeof ClustersIdColumnarRoute
+  ClustersIdDataRoute: typeof ClustersIdDataRoute
   ClustersIdPipelinesRoute: typeof ClustersIdPipelinesRoute
   ClustersIdSettingsRoute: typeof ClustersIdSettingsRoute
   ClustersIdShardingRoute: typeof ClustersIdShardingRoute
   ClustersIdTimeseriesRoute: typeof ClustersIdTimeseriesRoute
   ClustersIdTopologyRoute: typeof ClustersIdTopologyRoute
+  ClustersIdIndexRoute: typeof ClustersIdIndexRoute
 }
 
-const ClustersIdRouteChildren: ClustersIdRouteChildren = {
+const ClustersIdRouteRouteChildren: ClustersIdRouteRouteChildren = {
   ClustersIdCdcRoute: ClustersIdCdcRoute,
   ClustersIdColumnarRoute: ClustersIdColumnarRoute,
+  ClustersIdDataRoute: ClustersIdDataRoute,
   ClustersIdPipelinesRoute: ClustersIdPipelinesRoute,
   ClustersIdSettingsRoute: ClustersIdSettingsRoute,
   ClustersIdShardingRoute: ClustersIdShardingRoute,
   ClustersIdTimeseriesRoute: ClustersIdTimeseriesRoute,
   ClustersIdTopologyRoute: ClustersIdTopologyRoute,
+  ClustersIdIndexRoute: ClustersIdIndexRoute,
 }
 
-const ClustersIdRouteWithChildren = ClustersIdRoute._addFileChildren(
-  ClustersIdRouteChildren,
+const ClustersIdRouteRouteWithChildren = ClustersIdRouteRoute._addFileChildren(
+  ClustersIdRouteRouteChildren,
 )
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminRoute: AdminRouteWithChildren,
+  DocsRoute: DocsRoute,
   ForgotPasswordRoute: ForgotPasswordRoute,
+  LandingRoute: LandingRoute,
   LoginRoute: LoginRoute,
+  PricingRoute: PricingRoute,
   PrivacyRoute: PrivacyRoute,
   RegisterRoute: RegisterRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   SettingsRoute: SettingsRoute,
   TermsRoute: TermsRoute,
-  ClustersIdRoute: ClustersIdRouteWithChildren,
+  ClustersIdRouteRoute: ClustersIdRouteRouteWithChildren,
   ClustersNewRoute: ClustersNewRoute,
+  InvitesTokenRoute: InvitesTokenRoute,
+  OrganizationsIdRoute: OrganizationsIdRoute,
   ClustersIndexRoute: ClustersIndexRoute,
   AuthCallbackProviderRoute: AuthCallbackProviderRoute,
 }

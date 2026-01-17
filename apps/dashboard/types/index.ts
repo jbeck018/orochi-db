@@ -1,8 +1,11 @@
 // User and Authentication Types
+export type UserRole = "admin" | "member" | "viewer";
+
 export interface User {
   id: string;
   email: string;
   name: string;
+  role: UserRole;
   createdAt: string;
   updatedAt: string;
   emailVerified: boolean;
@@ -31,6 +34,51 @@ export interface RegisterCredentials {
   email: string;
   password: string;
   name: string;
+  organizationName?: string;
+  inviteToken?: string;
+}
+
+// Organization Types
+export type OrganizationRole = "owner" | "admin" | "member" | "viewer";
+
+export interface Organization {
+  id: string;
+  name: string;
+  slug: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OrganizationMember {
+  id: string;
+  userId: string;
+  organizationId: string;
+  role: OrganizationRole;
+  email: string;
+  name: string;
+  joinedAt: string;
+}
+
+export interface OrganizationInvite {
+  id: string;
+  organizationId: string;
+  organizationName: string;
+  email: string;
+  role: OrganizationRole;
+  invitedByName: string;
+  token: string;
+  expiresAt: string;
+  acceptedAt?: string;
+  createdAt: string;
+}
+
+export interface CreateInviteRequest {
+  email: string;
+  role: OrganizationRole;
+}
+
+export interface CreateOrganizationRequest {
+  name: string;
 }
 
 // Cluster Types
@@ -38,6 +86,48 @@ export type ClusterStatus = "creating" | "running" | "stopped" | "error" | "dele
 export type ClusterTier = "free" | "standard" | "professional" | "enterprise";
 export type CloudProvider = "aws" | "gcp" | "azure";
 export type Region = string;
+
+// Connection Pooler Configuration
+export type PoolerMode = "transaction" | "session";
+
+export interface PoolerConfig {
+  enabled: boolean;
+  mode: PoolerMode;
+  maxClientConnections: number;
+  defaultPoolSize: number;
+  maxPoolSize: number;
+  idleTimeout: number;  // seconds
+}
+
+// Compute Autoscaling Configuration
+export interface AutoscaleConfig {
+  enabled: boolean;
+  minComputeUnits: number;  // 0.25 to 8 CU (like NeonDB)
+  maxComputeUnits: number;
+  scaleToZero: boolean;
+  scaleToZeroDelayMinutes: number;  // Time before scaling to zero
+}
+
+// Network/IP Allow List
+export interface IpAllowEntry {
+  id: string;
+  cidr: string;  // IP or CIDR range
+  description: string;
+  createdAt: string;
+}
+
+export interface NetworkConfig {
+  ipAllowList: IpAllowEntry[];
+  sslRequired: boolean;
+  publicAccess: boolean;  // If false, only VPC peering allowed
+}
+
+// Read Replica Configuration
+export interface ReadReplicaConfig {
+  enabled: boolean;
+  replicaCount: number;
+  regions: string[];  // Additional regions for read replicas
+}
 
 export interface ClusterConfig {
   tier: ClusterTier;
@@ -52,6 +142,11 @@ export interface ClusterConfig {
     dayOfWeek: number;
     hourUtc: number;
   };
+  // Advanced settings
+  pooler?: PoolerConfig;
+  autoscale?: AutoscaleConfig;
+  network?: NetworkConfig;
+  readReplicas?: ReadReplicaConfig;
 }
 
 export interface Cluster {
@@ -60,13 +155,17 @@ export interface Cluster {
   status: ClusterStatus;
   config: ClusterConfig;
   connectionString: string;
+  poolerUrl?: string;  // PgBouncer connection pooler URL
+  poolerEnabled: boolean;  // Whether connection pooling is enabled
   createdAt: string;
   updatedAt: string;
   ownerId: string;
+  organizationId?: string;  // Optional organization for team-based isolation
   version: string;
   endpoints: {
     primary: string;
     replica?: string;
+    pooler?: string;  // PgBouncer endpoint
   };
 }
 
@@ -149,6 +248,8 @@ export interface CreateClusterForm {
   storageGb: number;
   highAvailability: boolean;
   backupEnabled: boolean;
+  poolerEnabled?: boolean;  // Enable PgBouncer connection pooling
+  organizationId?: string;  // Optional organization for team-based isolation
 }
 
 export interface UpdateClusterForm {
@@ -161,6 +262,14 @@ export interface UpdateClusterForm {
     dayOfWeek: number;
     hourUtc: number;
   };
+  // Connection pooler settings
+  pooler?: Partial<PoolerConfig>;
+  // Autoscaling settings
+  autoscale?: Partial<AutoscaleConfig>;
+  // Network settings
+  network?: Partial<NetworkConfig>;
+  // Read replica settings
+  readReplicas?: Partial<ReadReplicaConfig>;
 }
 
 export interface UpdateUserForm {
@@ -519,4 +628,164 @@ export interface CDCMetrics {
   totalBytesPublished: number;
   avgLagMs: number;
   eventsByType: Record<CDCEventType, number>;
+}
+
+// Admin Types
+export interface AdminUser {
+  id: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+  lastLoginAt?: string;
+  clusterCount: number;
+}
+
+export interface AdminCluster {
+  id: string;
+  name: string;
+  ownerId: string;
+  ownerEmail: string;
+  ownerName: string;
+  organizationId?: string;  // Optional organization for team-based isolation
+  organizationName?: string;  // Organization name if part of a team
+  status: ClusterStatus;
+  tier: ClusterTier;
+  provider: CloudProvider;
+  region: string;
+  version: string;
+  nodeCount: number;
+  nodeSize: string;
+  storageGb: number;
+  connectionUrl: string;
+  poolerUrl?: string;  // PgBouncer connection pooler URL
+  poolerEnabled: boolean;  // Whether connection pooling is enabled
+  maintenanceDay: string;
+  maintenanceHour: number;
+  backupEnabled: boolean;
+  backupRetentionDays: number;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string;
+}
+
+export interface AdminStats {
+  totalUsers: number;
+  activeUsers: number;
+  totalClusters: number;
+  runningClusters: number;
+  totalOrganizations: number;
+  updatedAt: string;
+}
+
+export interface AdminUserListResponse {
+  users: AdminUser[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface AdminClusterListResponse {
+  clusters: AdminCluster[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+}
+
+// Data Browser Types
+export interface TableInfo {
+  schema: string;
+  name: string;
+  type: "table" | "view" | "materialized_view";
+  rowEstimate: number;
+  sizeBytes: number;
+  sizeHuman: string;
+  columns: number;
+  hasPrimaryKey: boolean;
+  createdAt?: string;
+}
+
+export interface ColumnInfo {
+  name: string;
+  type: string;
+  nullable: boolean;
+  defaultValue?: string;
+  isPrimaryKey: boolean;
+  isForeignKey: boolean;
+  fkReference?: string;
+  position: number;
+}
+
+export interface IndexInfo {
+  name: string;
+  columns: string[];
+  isUnique: boolean;
+  isPrimary: boolean;
+  type: string;
+  sizeBytes: number;
+}
+
+export interface ForeignKeyInfo {
+  name: string;
+  columns: string[];
+  referencedTable: string;
+  referencedColumns: string[];
+}
+
+export interface TableSchema {
+  schema: string;
+  name: string;
+  columns: ColumnInfo[];
+  primaryKey: string[];
+  indexes: IndexInfo[];
+  foreignKeys: ForeignKeyInfo[];
+  rowEstimate: number;
+}
+
+export interface QueryResult {
+  columns: string[];
+  columnTypes: string[];
+  rows: unknown[][];
+  rowCount: number;
+  totalCount?: number;
+  executionTimeMs: number;
+  truncated: boolean;
+}
+
+export interface QueryHistoryEntry {
+  id: string;
+  userId: string;
+  clusterId: string;
+  queryText: string;
+  description?: string;
+  executionTimeMs: number;
+  rowsAffected: number;
+  status: "success" | "error";
+  errorMessage?: string;
+  createdAt: string;
+}
+
+export interface InternalTableStats {
+  hypertables: number;
+  chunks: number;
+  compressedChunks: number;
+  shardCount: number;
+  totalSizeBytes: number;
+  totalSizeHuman: string;
+}
+
+export interface ExecuteSQLRequest {
+  sql: string;
+  readOnly?: boolean;
+}
+
+export interface TableDataRequest {
+  schema: string;
+  table: string;
+  limit?: number;
+  offset?: number;
+  orderBy?: string;
+  orderDir?: "ASC" | "DESC";
 }

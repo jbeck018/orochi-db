@@ -34,6 +34,10 @@ type UserCreateRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
 	Name     string `json:"name"`
+
+	// Organization options - one of these should be provided
+	OrganizationName string  `json:"organization_name,omitempty"` // Create new org with this name
+	InviteToken      *string `json:"invite_token,omitempty"`      // Join existing org via invite
 }
 
 // UserLoginRequest represents a login request.

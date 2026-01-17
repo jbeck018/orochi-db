@@ -41,6 +41,7 @@ func (s *ClusterService) Create(ctx context.Context, ownerID uuid.UUID, req *mod
 		ID:              uuid.New(),
 		Name:            req.Name,
 		OwnerID:         ownerID,
+		OrganizationID:  req.OrganizationID, // Optional team/organization for isolation
 		Status:          models.ClusterStatusPending,
 		Tier:            req.Tier,
 		Provider:        req.Provider,
@@ -53,6 +54,7 @@ func (s *ClusterService) Create(ctx context.Context, ownerID uuid.UUID, req *mod
 		MaintenanceHour: req.MaintenanceHour,
 		BackupEnabled:   req.BackupEnabled,
 		BackupRetention: req.BackupRetention,
+		PoolerEnabled:   req.PoolerEnabled, // PgBouncer connection pooling
 		CreatedAt:       time.Now(),
 		UpdatedAt:       time.Now(),
 	}
@@ -62,22 +64,22 @@ func (s *ClusterService) Create(ctx context.Context, ownerID uuid.UUID, req *mod
 	// pass the existence check and then both try to insert.
 	query := `
 		INSERT INTO clusters (
-			id, name, owner_id, status, tier, provider, region, version,
+			id, name, owner_id, organization_id, status, tier, provider, region, version,
 			node_count, node_size, storage_gb, maintenance_day, maintenance_hour,
-			backup_enabled, backup_retention_days, created_at, updated_at
+			backup_enabled, backup_retention_days, pooler_enabled, created_at, updated_at
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 		ON CONFLICT (owner_id, name) WHERE deleted_at IS NULL DO NOTHING
 		RETURNING id
 	`
 
 	var insertedID uuid.UUID
 	err := s.db.Pool.QueryRow(ctx, query,
-		cluster.ID, cluster.Name, cluster.OwnerID, cluster.Status,
+		cluster.ID, cluster.Name, cluster.OwnerID, cluster.OrganizationID, cluster.Status,
 		cluster.Tier, cluster.Provider, cluster.Region, cluster.Version,
 		cluster.NodeCount, cluster.NodeSize, cluster.StorageGB,
 		cluster.MaintenanceDay, cluster.MaintenanceHour,
-		cluster.BackupEnabled, cluster.BackupRetention,
+		cluster.BackupEnabled, cluster.BackupRetention, cluster.PoolerEnabled,
 		cluster.CreatedAt, cluster.UpdatedAt,
 	).Scan(&insertedID)
 
@@ -110,21 +112,21 @@ func (s *ClusterService) Create(ctx context.Context, ownerID uuid.UUID, req *mod
 // GetByID retrieves a cluster by ID.
 func (s *ClusterService) GetByID(ctx context.Context, id uuid.UUID) (*models.Cluster, error) {
 	query := `
-		SELECT id, name, owner_id, status, tier, provider, region, version,
-			   node_count, node_size, storage_gb, connection_url,
+		SELECT id, name, owner_id, organization_id, status, tier, provider, region, version,
+			   node_count, node_size, storage_gb, connection_url, pooler_url,
 			   maintenance_day, maintenance_hour, backup_enabled, backup_retention_days,
-			   created_at, updated_at, deleted_at
+			   pooler_enabled, created_at, updated_at, deleted_at
 		FROM clusters
 		WHERE id = $1 AND deleted_at IS NULL
 	`
 
 	cluster := &models.Cluster{}
 	err := s.db.Pool.QueryRow(ctx, query, id).Scan(
-		&cluster.ID, &cluster.Name, &cluster.OwnerID, &cluster.Status,
+		&cluster.ID, &cluster.Name, &cluster.OwnerID, &cluster.OrganizationID, &cluster.Status,
 		&cluster.Tier, &cluster.Provider, &cluster.Region, &cluster.Version,
-		&cluster.NodeCount, &cluster.NodeSize, &cluster.StorageGB, &cluster.ConnectionURL,
+		&cluster.NodeCount, &cluster.NodeSize, &cluster.StorageGB, &cluster.ConnectionURL, &cluster.PoolerURL,
 		&cluster.MaintenanceDay, &cluster.MaintenanceHour,
-		&cluster.BackupEnabled, &cluster.BackupRetention,
+		&cluster.BackupEnabled, &cluster.BackupRetention, &cluster.PoolerEnabled,
 		&cluster.CreatedAt, &cluster.UpdatedAt, &cluster.DeletedAt,
 	)
 	if err != nil {
@@ -141,21 +143,21 @@ func (s *ClusterService) GetByID(ctx context.Context, id uuid.UUID) (*models.Clu
 // GetByName retrieves a cluster by owner and name.
 func (s *ClusterService) GetByName(ctx context.Context, ownerID uuid.UUID, name string) (*models.Cluster, error) {
 	query := `
-		SELECT id, name, owner_id, status, tier, provider, region, version,
-			   node_count, node_size, storage_gb, connection_url,
+		SELECT id, name, owner_id, organization_id, status, tier, provider, region, version,
+			   node_count, node_size, storage_gb, connection_url, pooler_url,
 			   maintenance_day, maintenance_hour, backup_enabled, backup_retention_days,
-			   created_at, updated_at, deleted_at
+			   pooler_enabled, created_at, updated_at, deleted_at
 		FROM clusters
 		WHERE owner_id = $1 AND name = $2 AND deleted_at IS NULL
 	`
 
 	cluster := &models.Cluster{}
 	err := s.db.Pool.QueryRow(ctx, query, ownerID, name).Scan(
-		&cluster.ID, &cluster.Name, &cluster.OwnerID, &cluster.Status,
+		&cluster.ID, &cluster.Name, &cluster.OwnerID, &cluster.OrganizationID, &cluster.Status,
 		&cluster.Tier, &cluster.Provider, &cluster.Region, &cluster.Version,
-		&cluster.NodeCount, &cluster.NodeSize, &cluster.StorageGB, &cluster.ConnectionURL,
+		&cluster.NodeCount, &cluster.NodeSize, &cluster.StorageGB, &cluster.ConnectionURL, &cluster.PoolerURL,
 		&cluster.MaintenanceDay, &cluster.MaintenanceHour,
-		&cluster.BackupEnabled, &cluster.BackupRetention,
+		&cluster.BackupEnabled, &cluster.BackupRetention, &cluster.PoolerEnabled,
 		&cluster.CreatedAt, &cluster.UpdatedAt, &cluster.DeletedAt,
 	)
 	if err != nil {
@@ -194,10 +196,10 @@ func (s *ClusterService) List(ctx context.Context, ownerID uuid.UUID, page, page
 
 	// Get clusters
 	query := `
-		SELECT id, name, owner_id, status, tier, provider, region, version,
-			   node_count, node_size, storage_gb, connection_url,
+		SELECT id, name, owner_id, organization_id, status, tier, provider, region, version,
+			   node_count, node_size, storage_gb, connection_url, pooler_url,
 			   maintenance_day, maintenance_hour, backup_enabled, backup_retention_days,
-			   created_at, updated_at, deleted_at
+			   pooler_enabled, created_at, updated_at, deleted_at
 		FROM clusters
 		WHERE owner_id = $1 AND deleted_at IS NULL
 		ORDER BY created_at DESC
@@ -215,11 +217,11 @@ func (s *ClusterService) List(ctx context.Context, ownerID uuid.UUID, page, page
 	for rows.Next() {
 		cluster := &models.Cluster{}
 		err := rows.Scan(
-			&cluster.ID, &cluster.Name, &cluster.OwnerID, &cluster.Status,
+			&cluster.ID, &cluster.Name, &cluster.OwnerID, &cluster.OrganizationID, &cluster.Status,
 			&cluster.Tier, &cluster.Provider, &cluster.Region, &cluster.Version,
-			&cluster.NodeCount, &cluster.NodeSize, &cluster.StorageGB, &cluster.ConnectionURL,
+			&cluster.NodeCount, &cluster.NodeSize, &cluster.StorageGB, &cluster.ConnectionURL, &cluster.PoolerURL,
 			&cluster.MaintenanceDay, &cluster.MaintenanceHour,
-			&cluster.BackupEnabled, &cluster.BackupRetention,
+			&cluster.BackupEnabled, &cluster.BackupRetention, &cluster.PoolerEnabled,
 			&cluster.CreatedAt, &cluster.UpdatedAt, &cluster.DeletedAt,
 		)
 		if err != nil {
@@ -250,10 +252,10 @@ func (s *ClusterService) Update(ctx context.Context, id uuid.UUID, req *models.C
 
 	// Lock the row for update to prevent concurrent modifications
 	selectQuery := `
-		SELECT id, name, owner_id, status, tier, provider, region, version,
-			   node_count, node_size, storage_gb, connection_url,
+		SELECT id, name, owner_id, organization_id, status, tier, provider, region, version,
+			   node_count, node_size, storage_gb, connection_url, pooler_url,
 			   maintenance_day, maintenance_hour, backup_enabled, backup_retention_days,
-			   created_at, updated_at, deleted_at
+			   pooler_enabled, created_at, updated_at, deleted_at
 		FROM clusters
 		WHERE id = $1 AND deleted_at IS NULL
 		FOR UPDATE
@@ -261,11 +263,11 @@ func (s *ClusterService) Update(ctx context.Context, id uuid.UUID, req *models.C
 
 	cluster := &models.Cluster{}
 	err = tx.QueryRow(ctx, selectQuery, id).Scan(
-		&cluster.ID, &cluster.Name, &cluster.OwnerID, &cluster.Status,
+		&cluster.ID, &cluster.Name, &cluster.OwnerID, &cluster.OrganizationID, &cluster.Status,
 		&cluster.Tier, &cluster.Provider, &cluster.Region, &cluster.Version,
-		&cluster.NodeCount, &cluster.NodeSize, &cluster.StorageGB, &cluster.ConnectionURL,
+		&cluster.NodeCount, &cluster.NodeSize, &cluster.StorageGB, &cluster.ConnectionURL, &cluster.PoolerURL,
 		&cluster.MaintenanceDay, &cluster.MaintenanceHour,
-		&cluster.BackupEnabled, &cluster.BackupRetention,
+		&cluster.BackupEnabled, &cluster.BackupRetention, &cluster.PoolerEnabled,
 		&cluster.CreatedAt, &cluster.UpdatedAt, &cluster.DeletedAt,
 	)
 	if err != nil {
@@ -436,10 +438,10 @@ func (s *ClusterService) Scale(ctx context.Context, id uuid.UUID, req *models.Cl
 
 	// Lock the row for update to prevent concurrent modifications
 	selectQuery := `
-		SELECT id, name, owner_id, status, tier, provider, region, version,
-			   node_count, node_size, storage_gb, connection_url,
+		SELECT id, name, owner_id, organization_id, status, tier, provider, region, version,
+			   node_count, node_size, storage_gb, connection_url, pooler_url,
 			   maintenance_day, maintenance_hour, backup_enabled, backup_retention_days,
-			   created_at, updated_at, deleted_at
+			   pooler_enabled, created_at, updated_at, deleted_at
 		FROM clusters
 		WHERE id = $1 AND deleted_at IS NULL
 		FOR UPDATE
@@ -447,11 +449,11 @@ func (s *ClusterService) Scale(ctx context.Context, id uuid.UUID, req *models.Cl
 
 	cluster := &models.Cluster{}
 	err = tx.QueryRow(ctx, selectQuery, id).Scan(
-		&cluster.ID, &cluster.Name, &cluster.OwnerID, &cluster.Status,
+		&cluster.ID, &cluster.Name, &cluster.OwnerID, &cluster.OrganizationID, &cluster.Status,
 		&cluster.Tier, &cluster.Provider, &cluster.Region, &cluster.Version,
-		&cluster.NodeCount, &cluster.NodeSize, &cluster.StorageGB, &cluster.ConnectionURL,
+		&cluster.NodeCount, &cluster.NodeSize, &cluster.StorageGB, &cluster.ConnectionURL, &cluster.PoolerURL,
 		&cluster.MaintenanceDay, &cluster.MaintenanceHour,
-		&cluster.BackupEnabled, &cluster.BackupRetention,
+		&cluster.BackupEnabled, &cluster.BackupRetention, &cluster.PoolerEnabled,
 		&cluster.CreatedAt, &cluster.UpdatedAt, &cluster.DeletedAt,
 	)
 	if err != nil {
@@ -609,21 +611,21 @@ func (s *ClusterService) CheckOwnership(ctx context.Context, clusterID, userID u
 // This avoids the N+1 query problem of calling CheckOwnership then GetByID separately.
 func (s *ClusterService) GetByIDWithOwnerCheck(ctx context.Context, clusterID, userID uuid.UUID) (*models.Cluster, error) {
 	query := `
-		SELECT id, name, owner_id, status, tier, provider, region, version,
-			   node_count, node_size, storage_gb, connection_url,
+		SELECT id, name, owner_id, organization_id, status, tier, provider, region, version,
+			   node_count, node_size, storage_gb, connection_url, pooler_url,
 			   maintenance_day, maintenance_hour, backup_enabled, backup_retention_days,
-			   created_at, updated_at, deleted_at
+			   pooler_enabled, created_at, updated_at, deleted_at
 		FROM clusters
 		WHERE id = $1 AND deleted_at IS NULL
 	`
 
 	cluster := &models.Cluster{}
 	err := s.db.Pool.QueryRow(ctx, query, clusterID).Scan(
-		&cluster.ID, &cluster.Name, &cluster.OwnerID, &cluster.Status,
+		&cluster.ID, &cluster.Name, &cluster.OwnerID, &cluster.OrganizationID, &cluster.Status,
 		&cluster.Tier, &cluster.Provider, &cluster.Region, &cluster.Version,
-		&cluster.NodeCount, &cluster.NodeSize, &cluster.StorageGB, &cluster.ConnectionURL,
+		&cluster.NodeCount, &cluster.NodeSize, &cluster.StorageGB, &cluster.ConnectionURL, &cluster.PoolerURL,
 		&cluster.MaintenanceDay, &cluster.MaintenanceHour,
-		&cluster.BackupEnabled, &cluster.BackupRetention,
+		&cluster.BackupEnabled, &cluster.BackupRetention, &cluster.PoolerEnabled,
 		&cluster.CreatedAt, &cluster.UpdatedAt, &cluster.DeletedAt,
 	)
 	if err != nil {
@@ -654,10 +656,10 @@ func (s *ClusterService) UpdateWithOwnerCheck(ctx context.Context, id, userID uu
 
 	// Lock the row for update to prevent concurrent modifications
 	selectQuery := `
-		SELECT id, name, owner_id, status, tier, provider, region, version,
-			   node_count, node_size, storage_gb, connection_url,
+		SELECT id, name, owner_id, organization_id, status, tier, provider, region, version,
+			   node_count, node_size, storage_gb, connection_url, pooler_url,
 			   maintenance_day, maintenance_hour, backup_enabled, backup_retention_days,
-			   created_at, updated_at, deleted_at
+			   pooler_enabled, created_at, updated_at, deleted_at
 		FROM clusters
 		WHERE id = $1 AND deleted_at IS NULL
 		FOR UPDATE
@@ -665,11 +667,11 @@ func (s *ClusterService) UpdateWithOwnerCheck(ctx context.Context, id, userID uu
 
 	cluster := &models.Cluster{}
 	err = tx.QueryRow(ctx, selectQuery, id).Scan(
-		&cluster.ID, &cluster.Name, &cluster.OwnerID, &cluster.Status,
+		&cluster.ID, &cluster.Name, &cluster.OwnerID, &cluster.OrganizationID, &cluster.Status,
 		&cluster.Tier, &cluster.Provider, &cluster.Region, &cluster.Version,
-		&cluster.NodeCount, &cluster.NodeSize, &cluster.StorageGB, &cluster.ConnectionURL,
+		&cluster.NodeCount, &cluster.NodeSize, &cluster.StorageGB, &cluster.ConnectionURL, &cluster.PoolerURL,
 		&cluster.MaintenanceDay, &cluster.MaintenanceHour,
-		&cluster.BackupEnabled, &cluster.BackupRetention,
+		&cluster.BackupEnabled, &cluster.BackupRetention, &cluster.PoolerEnabled,
 		&cluster.CreatedAt, &cluster.UpdatedAt, &cluster.DeletedAt,
 	)
 	if err != nil {
@@ -851,10 +853,10 @@ func (s *ClusterService) ScaleWithOwnerCheck(ctx context.Context, id, userID uui
 
 	// Lock the row for update to prevent concurrent modifications
 	selectQuery := `
-		SELECT id, name, owner_id, status, tier, provider, region, version,
-			   node_count, node_size, storage_gb, connection_url,
+		SELECT id, name, owner_id, organization_id, status, tier, provider, region, version,
+			   node_count, node_size, storage_gb, connection_url, pooler_url,
 			   maintenance_day, maintenance_hour, backup_enabled, backup_retention_days,
-			   created_at, updated_at, deleted_at
+			   pooler_enabled, created_at, updated_at, deleted_at
 		FROM clusters
 		WHERE id = $1 AND deleted_at IS NULL
 		FOR UPDATE
@@ -862,11 +864,11 @@ func (s *ClusterService) ScaleWithOwnerCheck(ctx context.Context, id, userID uui
 
 	cluster := &models.Cluster{}
 	err = tx.QueryRow(ctx, selectQuery, id).Scan(
-		&cluster.ID, &cluster.Name, &cluster.OwnerID, &cluster.Status,
+		&cluster.ID, &cluster.Name, &cluster.OwnerID, &cluster.OrganizationID, &cluster.Status,
 		&cluster.Tier, &cluster.Provider, &cluster.Region, &cluster.Version,
-		&cluster.NodeCount, &cluster.NodeSize, &cluster.StorageGB, &cluster.ConnectionURL,
+		&cluster.NodeCount, &cluster.NodeSize, &cluster.StorageGB, &cluster.ConnectionURL, &cluster.PoolerURL,
 		&cluster.MaintenanceDay, &cluster.MaintenanceHour,
-		&cluster.BackupEnabled, &cluster.BackupRetention,
+		&cluster.BackupEnabled, &cluster.BackupRetention, &cluster.PoolerEnabled,
 		&cluster.CreatedAt, &cluster.UpdatedAt, &cluster.DeletedAt,
 	)
 	if err != nil {
@@ -961,16 +963,34 @@ func (s *ClusterService) startProvisioning(ctx context.Context, clusterID uuid.U
 	case <-time.After(10 * time.Second):
 	}
 
-	// Generate connection URL and mark as running
-	connectionURL := fmt.Sprintf("postgresql://orochi:%s@cluster-%s.orochi.cloud:5432/orochi",
-		uuid.New().String()[:8], clusterID.String()[:8])
+	// Get cluster to check if pooler is enabled
+	cluster, err := s.GetByID(ctx, clusterID)
+	if err != nil {
+		s.logger.Error("failed to get cluster for provisioning", "cluster_id", clusterID, "error", err)
+		if updateErr := s.updateStatus(context.Background(), clusterID, models.ClusterStatusFailed); updateErr != nil {
+			s.logger.Error("failed to update status to failed", "cluster_id", clusterID, "error", updateErr)
+		}
+		return
+	}
+
+	// Generate connection URL and pooler URL (if pooler is enabled)
+	clusterHost := fmt.Sprintf("cluster-%s.orochi.cloud", clusterID.String()[:8])
+	password := uuid.New().String()[:8]
+	connectionURL := fmt.Sprintf("postgresql://orochi:%s@%s:5432/orochi", password, clusterHost)
+
+	var poolerURL *string
+	if cluster.PoolerEnabled {
+		// PgBouncer pooler typically runs on port 6432
+		poolerStr := fmt.Sprintf("postgresql://orochi:%s@%s:6432/orochi?pgbouncer=true", password, clusterHost)
+		poolerURL = &poolerStr
+	}
 
 	query := `
 		UPDATE clusters
-		SET status = $2, connection_url = $3, updated_at = NOW()
+		SET status = $2, connection_url = $3, pooler_url = $4, updated_at = NOW()
 		WHERE id = $1
 	`
-	if _, err := s.db.Pool.Exec(ctx, query, clusterID, models.ClusterStatusRunning, connectionURL); err != nil {
+	if _, err := s.db.Pool.Exec(ctx, query, clusterID, models.ClusterStatusRunning, connectionURL, poolerURL); err != nil {
 		s.logger.Error("failed to update cluster after provisioning", "error", err)
 		if updateErr := s.updateStatus(context.Background(), clusterID, models.ClusterStatusFailed); updateErr != nil {
 			s.logger.Error("failed to update status to failed after provisioning error", "cluster_id", clusterID, "error", updateErr)
@@ -978,7 +998,10 @@ func (s *ClusterService) startProvisioning(ctx context.Context, clusterID uuid.U
 		return
 	}
 
-	s.logger.Info("cluster provisioning complete", "cluster_id", clusterID)
+	s.logger.Info("cluster provisioning complete",
+		"cluster_id", clusterID,
+		"pooler_enabled", cluster.PoolerEnabled,
+	)
 }
 
 // startDeprovisioning simulates the deprovisioning process.

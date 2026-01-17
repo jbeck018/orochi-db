@@ -530,3 +530,13 @@ func (s *Service) buildClusterInfoFromCNPG(ctx context.Context, cluster interfac
 func (s *Service) GetConnectionString(ctx context.Context, namespace, name string) (string, error) {
 	return s.clusterManager.GetConnectionString(ctx, namespace, name)
 }
+
+// GetPoolerConnectionString returns the connection string via the PgBouncer pooler
+func (s *Service) GetPoolerConnectionString(ctx context.Context, namespace, name string) (string, error) {
+	return s.clusterManager.GetPoolerConnectionString(ctx, namespace, name)
+}
+
+// GetConnectionInfo returns both direct and pooler connection strings
+func (s *Service) GetConnectionInfo(ctx context.Context, namespace, name string) (direct, pooler string, err error) {
+	return s.clusterManager.GetConnectionInfo(ctx, namespace, name)
+}

@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { Link } from "@tanstack/react-router";
-import { Eye, EyeOff, Loader2, Check, X } from "lucide-react";
+import { Eye, EyeOff, Loader2, Check, X, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,18 +23,28 @@ const passwordRequirements: PasswordRequirement[] = [
   { label: "Contains number", test: (p) => /[0-9]/.test(p) },
 ];
 
-export function RegisterForm(): React.JSX.Element {
+interface RegisterFormProps {
+  inviteToken?: string;
+  inviteEmail?: string;
+  organizationName?: string;
+}
+
+export function RegisterForm({ inviteToken, inviteEmail, organizationName: inviteOrgName }: RegisterFormProps): React.JSX.Element {
   const [name, setName] = React.useState("");
-  const [email, setEmail] = React.useState("");
+  const [email, setEmail] = React.useState(inviteEmail ?? "");
   const [password, setPassword] = React.useState("");
   const [confirmPassword, setConfirmPassword] = React.useState("");
+  const [organizationName, setOrganizationName] = React.useState("");
   const [showPassword, setShowPassword] = React.useState(false);
   const [validationError, setValidationError] = React.useState<string | null>(null);
+
+  const hasInvite = Boolean(inviteToken);
 
   const registerMutation = useRegister();
 
   const isPasswordValid = passwordRequirements.every((req) => req.test(password));
   const passwordsMatch = password === confirmPassword && password.length > 0;
+  const hasOrganization = hasInvite || organizationName.trim().length > 0;
 
   const handleSubmit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
@@ -50,7 +60,18 @@ export function RegisterForm(): React.JSX.Element {
       return;
     }
 
-    registerMutation.mutate({ name, email, password });
+    if (!hasOrganization) {
+      setValidationError("Organization name is required");
+      return;
+    }
+
+    registerMutation.mutate({
+      name,
+      email,
+      password,
+      organizationName: hasInvite ? undefined : organizationName,
+      inviteToken: hasInvite ? inviteToken : undefined,
+    });
   };
 
   const error = validationError || (registerMutation.isError ? registerMutation.error instanceof Error ? registerMutation.error.message : "An error occurred" : null);
@@ -61,6 +82,38 @@ export function RegisterForm(): React.JSX.Element {
         <Alert variant="destructive">
           <AlertDescription>{error}</AlertDescription>
         </Alert>
+      )}
+
+      {hasInvite && inviteOrgName && (
+        <div className="rounded-lg border bg-muted/50 p-3">
+          <div className="flex items-center gap-2 text-sm">
+            <Building2 className="h-4 w-4 text-primary" />
+            <span>You're joining <strong>{inviteOrgName}</strong></span>
+          </div>
+        </div>
+      )}
+
+      {!hasInvite && (
+        <div className="space-y-2">
+          <Label htmlFor="organizationName">Organization Name</Label>
+          <Input
+            id="organizationName"
+            type="text"
+            placeholder="Acme Inc."
+            value={organizationName}
+            onChange={(e) => setOrganizationName(e.target.value)}
+            required
+            disabled={registerMutation.isPending}
+            autoComplete="organization"
+          />
+          <p className="text-xs text-muted-foreground">
+            Create a new organization or{" "}
+            <Link to="/login" className="text-primary hover:underline">
+              sign in
+            </Link>{" "}
+            to join an existing one with an invite.
+          </p>
+        </div>
       )}
 
       <div className="space-y-2">
@@ -86,9 +139,14 @@ export function RegisterForm(): React.JSX.Element {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           required
-          disabled={registerMutation.isPending}
+          disabled={hasInvite || registerMutation.isPending}
           autoComplete="email"
         />
+        {hasInvite && (
+          <p className="text-xs text-muted-foreground">
+            Email is pre-filled from your invitation
+          </p>
+        )}
       </div>
 
       <div className="space-y-2">
@@ -165,7 +223,7 @@ export function RegisterForm(): React.JSX.Element {
       <Button
         type="submit"
         className="w-full"
-        disabled={registerMutation.isPending || !isPasswordValid || !passwordsMatch}
+        disabled={registerMutation.isPending || !isPasswordValid || !passwordsMatch || !hasOrganization}
       >
         {registerMutation.isPending ? (
           <>

@@ -1,0 +1,92 @@
+# Provisioner Deployment for FKS (Fly.io Kubernetes Service)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: provisioner
+  namespace: orochi-cloud
+  labels:
+    app.kubernetes.io/name: orochi-cloud
+    app.kubernetes.io/component: provisioner
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: orochi-cloud
+      app.kubernetes.io/component: provisioner
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: orochi-cloud
+        app.kubernetes.io/component: provisioner
+    spec:
+      serviceAccountName: provisioner
+      containers:
+        - name: provisioner
+          image: registry.fly.io/orochi-provisioner:latest
+          imagePullPolicy: Always
+          ports:
+            - name: grpc
+              containerPort: 50051
+              protocol: TCP
+            - name: health
+              containerPort: 8081
+              protocol: TCP
+          env:
+            - name: GRPC_PORT
+              value: "50051"
+            - name: HEALTH_PORT
+              value: "8081"
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: CONTROL_PLANE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: orochi-secrets
+                  key: CONTROL_PLANE_URL
+            - name: LOG_LEVEL
+              value: "info"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+      terminationGracePeriodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: provisioner
+  namespace: orochi-cloud
+  labels:
+    app.kubernetes.io/name: orochi-cloud
+    app.kubernetes.io/component: provisioner
+spec:
+  type: ClusterIP
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: grpc
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: orochi-cloud
+    app.kubernetes.io/component: provisioner

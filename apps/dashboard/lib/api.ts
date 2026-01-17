@@ -15,6 +15,17 @@ import type {
   ClusterTopology,
   PipelineMetrics,
   CDCMetrics,
+  AdminStats,
+  AdminUser,
+  AdminCluster,
+  AdminUserListResponse,
+  AdminClusterListResponse,
+  UserRole,
+  TableInfo,
+  TableSchema,
+  QueryResult,
+  QueryHistoryEntry,
+  InternalTableStats,
 } from "@/types";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
@@ -96,6 +107,7 @@ interface ApiCluster {
   id: string;
   name: string;
   owner_id: string;
+  organization_id?: string;
   status: string;
   tier: string;
   provider: string;
@@ -105,6 +117,8 @@ interface ApiCluster {
   node_size: string;
   storage_gb: number;
   connection_url: string;
+  pooler_url?: string;
+  pooler_enabled: boolean;
   maintenance_day: string;
   maintenance_hour: number;
   backup_enabled: boolean;
@@ -134,12 +148,16 @@ function transformCluster(c: ApiCluster): Cluster {
       },
     },
     connectionString: c.connection_url,
+    poolerUrl: c.pooler_url,
+    poolerEnabled: c.pooler_enabled,
     createdAt: c.created_at,
     updatedAt: c.updated_at,
     ownerId: c.owner_id,
+    organizationId: c.organization_id,
     version: c.version,
     endpoints: {
       primary: c.connection_url,
+      pooler: c.pooler_url,
     },
   };
 }
@@ -169,57 +187,11 @@ export const clusterApi = {
   get: async (id: string): Promise<ApiResponse<Cluster>> => {
     // API returns snake_case format, map to frontend format
     const response = await fetchWithAuth<{
-      cluster: {
-        id: string;
-        name: string;
-        owner_id: string;
-        status: string;
-        tier: string;
-        provider: string;
-        region: string;
-        version: string;
-        node_count: number;
-        node_size: string;
-        storage_gb: number;
-        connection_url: string;
-        maintenance_day: string;
-        maintenance_hour: number;
-        backup_enabled: boolean;
-        backup_retention_days: number;
-        created_at: string;
-        updated_at: string;
-      };
+      cluster: ApiCluster;
     }>(`/api/v1/clusters/${id}`);
 
-    const c = response.cluster;
     return {
-      data: {
-        id: c.id,
-        name: c.name,
-        status: c.status as Cluster["status"],
-        config: {
-          tier: c.tier as Cluster["config"]["tier"],
-          provider: c.provider as Cluster["config"]["provider"],
-          region: c.region,
-          nodeCount: c.node_count,
-          storageGb: c.storage_gb,
-          highAvailability: false,
-          backupEnabled: c.backup_enabled,
-          backupRetentionDays: c.backup_retention_days,
-          maintenanceWindow: {
-            dayOfWeek: ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"].indexOf(c.maintenance_day),
-            hourUtc: c.maintenance_hour,
-          },
-        },
-        connectionString: c.connection_url,
-        createdAt: c.created_at,
-        updatedAt: c.updated_at,
-        ownerId: c.owner_id,
-        version: c.version,
-        endpoints: {
-          primary: c.connection_url,
-        },
-      },
+      data: transformCluster(response.cluster),
     };
   },
 
@@ -568,6 +540,674 @@ export const orochiApi = {
       `/api/v1/clusters/${clusterId}/cdc/${subscriptionId}/resume`,
       { method: "POST" }
     );
+  },
+};
+
+// Admin API Types from backend
+interface ApiAdminUser {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+  last_login_at?: string;
+  cluster_count: number;
+}
+
+interface ApiAdminCluster {
+  id: string;
+  name: string;
+  owner_id: string;
+  owner_email: string;
+  owner_name: string;
+  organization_id?: string;
+  organization_name?: string;
+  status: string;
+  tier: string;
+  provider: string;
+  region: string;
+  version: string;
+  node_count: number;
+  node_size: string;
+  storage_gb: number;
+  connection_url: string;
+  pooler_url?: string;
+  pooler_enabled: boolean;
+  maintenance_day: string;
+  maintenance_hour: number;
+  backup_enabled: boolean;
+  backup_retention_days: number;
+  created_at: string;
+  updated_at: string;
+  deleted_at?: string;
+}
+
+function transformAdminUser(u: ApiAdminUser): AdminUser {
+  return {
+    id: u.id,
+    email: u.email,
+    name: u.name,
+    role: u.role as UserRole,
+    active: u.active,
+    createdAt: u.created_at,
+    updatedAt: u.updated_at,
+    lastLoginAt: u.last_login_at,
+    clusterCount: u.cluster_count,
+  };
+}
+
+function transformAdminCluster(c: ApiAdminCluster): AdminCluster {
+  return {
+    id: c.id,
+    name: c.name,
+    ownerId: c.owner_id,
+    ownerEmail: c.owner_email,
+    ownerName: c.owner_name,
+    organizationId: c.organization_id,
+    organizationName: c.organization_name,
+    status: c.status as AdminCluster["status"],
+    tier: c.tier as AdminCluster["tier"],
+    provider: c.provider as AdminCluster["provider"],
+    region: c.region,
+    version: c.version,
+    nodeCount: c.node_count,
+    nodeSize: c.node_size,
+    storageGb: c.storage_gb,
+    connectionUrl: c.connection_url,
+    poolerUrl: c.pooler_url,
+    poolerEnabled: c.pooler_enabled,
+    maintenanceDay: c.maintenance_day,
+    maintenanceHour: c.maintenance_hour,
+    backupEnabled: c.backup_enabled,
+    backupRetentionDays: c.backup_retention_days,
+    createdAt: c.created_at,
+    updatedAt: c.updated_at,
+    deletedAt: c.deleted_at,
+  };
+}
+
+// Admin API
+export const adminApi = {
+  getStats: async (): Promise<ApiResponse<AdminStats>> => {
+    const response = await fetchWithAuth<{
+      success: boolean;
+      data: {
+        total_users: number;
+        active_users: number;
+        total_clusters: number;
+        running_clusters: number;
+        total_organizations: number;
+        updated_at: string;
+      };
+    }>("/api/v1/admin/stats");
+
+    return {
+      data: {
+        totalUsers: response.data.total_users,
+        activeUsers: response.data.active_users,
+        totalClusters: response.data.total_clusters,
+        runningClusters: response.data.running_clusters,
+        totalOrganizations: response.data.total_organizations,
+        updatedAt: response.data.updated_at,
+      },
+    };
+  },
+
+  listUsers: async (
+    page = 1,
+    pageSize = 20,
+    search?: string
+  ): Promise<AdminUserListResponse> => {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      page_size: pageSize.toString(),
+    });
+    if (search) {
+      params.set("search", search);
+    }
+
+    const response = await fetchWithAuth<{
+      success: boolean;
+      data: {
+        users: ApiAdminUser[];
+        total_count: number;
+        page: number;
+        page_size: number;
+      };
+    }>(`/api/v1/admin/users?${params.toString()}`);
+
+    return {
+      users: response.data.users.map(transformAdminUser),
+      totalCount: response.data.total_count,
+      page: response.data.page,
+      pageSize: response.data.page_size,
+    };
+  },
+
+  getUser: async (id: string): Promise<ApiResponse<AdminUser>> => {
+    const response = await fetchWithAuth<{
+      success: boolean;
+      data: ApiAdminUser;
+    }>(`/api/v1/admin/users/${id}`);
+
+    return {
+      data: transformAdminUser(response.data),
+    };
+  },
+
+  updateUserRole: async (id: string, role: UserRole): Promise<void> => {
+    await fetchWithAuth<{ success: boolean }>(`/api/v1/admin/users/${id}/role`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
+    });
+  },
+
+  setUserActive: async (id: string, active: boolean): Promise<void> => {
+    await fetchWithAuth<{ success: boolean }>(`/api/v1/admin/users/${id}/active`, {
+      method: "PATCH",
+      body: JSON.stringify({ active }),
+    });
+  },
+
+  listClusters: async (
+    page = 1,
+    pageSize = 20,
+    status?: string
+  ): Promise<AdminClusterListResponse> => {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      page_size: pageSize.toString(),
+    });
+    if (status) {
+      params.set("status", status);
+    }
+
+    const response = await fetchWithAuth<{
+      success: boolean;
+      data: {
+        clusters: ApiAdminCluster[];
+        total_count: number;
+        page: number;
+        page_size: number;
+      };
+    }>(`/api/v1/admin/clusters?${params.toString()}`);
+
+    return {
+      clusters: response.data.clusters.map(transformAdminCluster),
+      totalCount: response.data.total_count,
+      page: response.data.page,
+      pageSize: response.data.page_size,
+    };
+  },
+
+  getCluster: async (id: string): Promise<ApiResponse<AdminCluster>> => {
+    const response = await fetchWithAuth<{
+      success: boolean;
+      data: ApiAdminCluster;
+    }>(`/api/v1/admin/clusters/${id}`);
+
+    return {
+      data: transformAdminCluster(response.data),
+    };
+  },
+
+  forceDeleteCluster: async (id: string): Promise<void> => {
+    await fetchWithAuth<{ success: boolean }>(`/api/v1/admin/clusters/${id}/force`, {
+      method: "DELETE",
+    });
+  },
+};
+
+// Organization API Types
+interface ApiOrganization {
+  id: string;
+  name: string;
+  slug: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface ApiOrganizationMember {
+  id: string;
+  user_id: string;
+  organization_id: string;
+  role: string;
+  email: string;
+  name: string;
+  joined_at: string;
+}
+
+interface ApiOrganizationInvite {
+  id: string;
+  organization_id: string;
+  organization_name: string;
+  email: string;
+  role: string;
+  invited_by_name: string;
+  token: string;
+  expires_at: string;
+  accepted_at?: string;
+  created_at: string;
+}
+
+import type {
+  Organization,
+  OrganizationMember,
+  OrganizationInvite,
+  OrganizationRole,
+  CreateInviteRequest,
+  CreateOrganizationRequest,
+} from "@/types";
+
+function transformOrganization(o: ApiOrganization): Organization {
+  return {
+    id: o.id,
+    name: o.name,
+    slug: o.slug,
+    createdAt: o.created_at,
+    updatedAt: o.updated_at,
+  };
+}
+
+function transformOrganizationMember(m: ApiOrganizationMember): OrganizationMember {
+  return {
+    id: m.id,
+    userId: m.user_id,
+    organizationId: m.organization_id,
+    role: m.role as OrganizationRole,
+    email: m.email,
+    name: m.name,
+    joinedAt: m.joined_at,
+  };
+}
+
+function transformOrganizationInvite(i: ApiOrganizationInvite): OrganizationInvite {
+  return {
+    id: i.id,
+    organizationId: i.organization_id,
+    organizationName: i.organization_name,
+    email: i.email,
+    role: i.role as OrganizationRole,
+    invitedByName: i.invited_by_name,
+    token: i.token,
+    expiresAt: i.expires_at,
+    acceptedAt: i.accepted_at,
+    createdAt: i.created_at,
+  };
+}
+
+// Organization API
+export const organizationApi = {
+  list: async (): Promise<Organization[]> => {
+    const response = await fetchWithAuth<{
+      organizations: ApiOrganization[];
+    }>("/api/v1/organizations");
+    return (response.organizations ?? []).map(transformOrganization);
+  },
+
+  get: async (id: string): Promise<Organization> => {
+    const response = await fetchWithAuth<ApiOrganization>(`/api/v1/organizations/${id}`);
+    return transformOrganization(response);
+  },
+
+  create: async (data: CreateOrganizationRequest): Promise<Organization> => {
+    const response = await fetchWithAuth<ApiOrganization>("/api/v1/organizations", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return transformOrganization(response);
+  },
+
+  update: async (id: string, data: Partial<CreateOrganizationRequest>): Promise<Organization> => {
+    const response = await fetchWithAuth<ApiOrganization>(`/api/v1/organizations/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+    return transformOrganization(response);
+  },
+
+  delete: async (id: string): Promise<void> => {
+    await fetchWithAuth<void>(`/api/v1/organizations/${id}`, {
+      method: "DELETE",
+    });
+  },
+
+  getMembers: async (organizationId: string): Promise<OrganizationMember[]> => {
+    const response = await fetchWithAuth<{
+      members: ApiOrganizationMember[];
+    }>(`/api/v1/organizations/${organizationId}/members`);
+    return (response.members ?? []).map(transformOrganizationMember);
+  },
+
+  removeMember: async (organizationId: string, memberId: string): Promise<void> => {
+    await fetchWithAuth<void>(`/api/v1/organizations/${organizationId}/members/${memberId}`, {
+      method: "DELETE",
+    });
+  },
+};
+
+// Invite API
+export const inviteApi = {
+  // Get invite by token (public - no auth needed)
+  getByToken: async (token: string): Promise<OrganizationInvite> => {
+    const response = await fetch(`${API_URL}/api/v1/invites/${token}`);
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: "Invite not found" }));
+      throw new ApiError(error.message ?? "Invite not found", response.status);
+    }
+    const data = await response.json();
+    return transformOrganizationInvite(data);
+  },
+
+  // Accept invite (auth required)
+  accept: async (token: string): Promise<void> => {
+    await fetchWithAuth<void>(`/api/v1/invites/${token}/accept`, {
+      method: "POST",
+    });
+  },
+
+  // List my pending invites (auth required)
+  listMine: async (): Promise<OrganizationInvite[]> => {
+    const response = await fetchWithAuth<{
+      invites: ApiOrganizationInvite[];
+    }>("/api/v1/invites/me");
+    return (response.invites ?? []).map(transformOrganizationInvite);
+  },
+
+  // List invites for an organization (admin only)
+  listForOrganization: async (organizationId: string): Promise<OrganizationInvite[]> => {
+    const response = await fetchWithAuth<{
+      invites: ApiOrganizationInvite[];
+    }>(`/api/v1/organizations/${organizationId}/invites`);
+    return (response.invites ?? []).map(transformOrganizationInvite);
+  },
+
+  // Create invite (admin only)
+  create: async (organizationId: string, data: CreateInviteRequest): Promise<OrganizationInvite> => {
+    const response = await fetchWithAuth<ApiOrganizationInvite>(
+      `/api/v1/organizations/${organizationId}/invites`,
+      {
+        method: "POST",
+        body: JSON.stringify(data),
+      }
+    );
+    return transformOrganizationInvite(response);
+  },
+
+  // Revoke invite (admin only)
+  revoke: async (organizationId: string, inviteId: string): Promise<void> => {
+    await fetchWithAuth<void>(`/api/v1/organizations/${organizationId}/invites/${inviteId}`, {
+      method: "DELETE",
+    });
+  },
+
+  // Resend invite (admin only)
+  resend: async (organizationId: string, inviteId: string): Promise<void> => {
+    await fetchWithAuth<void>(`/api/v1/organizations/${organizationId}/invites/${inviteId}/resend`, {
+      method: "POST",
+    });
+  },
+};
+
+// Data Browser API Types (snake_case from backend)
+interface ApiTableInfo {
+  schema: string;
+  name: string;
+  type: "table" | "view" | "materialized_view";
+  row_estimate: number;
+  size_bytes: number;
+  size_human: string;
+  columns: number;
+  has_primary_key: boolean;
+  created_at?: string;
+}
+
+interface ApiColumnInfo {
+  name: string;
+  type: string;
+  nullable: boolean;
+  default_value?: string;
+  is_primary_key: boolean;
+  is_foreign_key: boolean;
+  fk_reference?: string;
+  position: number;
+}
+
+interface ApiIndexInfo {
+  name: string;
+  columns: string[];
+  is_unique: boolean;
+  is_primary: boolean;
+  type: string;
+  size_bytes: number;
+}
+
+interface ApiForeignKeyInfo {
+  name: string;
+  columns: string[];
+  referenced_table: string;
+  referenced_columns: string[];
+  on_delete: string;
+  on_update: string;
+}
+
+interface ApiTableSchema {
+  schema: string;
+  name: string;
+  columns: ApiColumnInfo[];
+  primary_key: string[];
+  indexes: ApiIndexInfo[];
+  foreign_keys: ApiForeignKeyInfo[];
+  row_estimate: number;
+}
+
+interface ApiQueryResult {
+  columns: string[];
+  column_types: string[];
+  rows: unknown[][];
+  row_count: number;
+  total_count?: number;
+  execution_time_ms: number;
+  truncated: boolean;
+}
+
+interface ApiQueryHistoryEntry {
+  id: string;
+  user_id: string;
+  cluster_id: string;
+  query_text: string;
+  description?: string;
+  execution_time_ms: number;
+  rows_affected: number;
+  status: "success" | "error";
+  error_message?: string;
+  created_at: string;
+}
+
+interface ApiInternalTableStats {
+  hypertables: number;
+  chunks: number;
+  compressed_chunks: number;
+  shard_count: number;
+  total_size_bytes: number;
+  total_size_human: string;
+}
+
+function transformTableInfo(t: ApiTableInfo): TableInfo {
+  return {
+    schema: t.schema,
+    name: t.name,
+    type: t.type,
+    rowEstimate: t.row_estimate,
+    sizeBytes: t.size_bytes,
+    sizeHuman: t.size_human,
+    columns: t.columns,
+    hasPrimaryKey: t.has_primary_key,
+    createdAt: t.created_at,
+  };
+}
+
+function transformTableSchema(s: ApiTableSchema): TableSchema {
+  return {
+    schema: s.schema,
+    name: s.name,
+    columns: s.columns.map((c) => ({
+      name: c.name,
+      type: c.type,
+      nullable: c.nullable,
+      defaultValue: c.default_value,
+      isPrimaryKey: c.is_primary_key,
+      isForeignKey: c.is_foreign_key,
+      fkReference: c.fk_reference,
+      position: c.position,
+    })),
+    primaryKey: s.primary_key,
+    indexes: s.indexes.map((i) => ({
+      name: i.name,
+      columns: i.columns,
+      isUnique: i.is_unique,
+      isPrimary: i.is_primary,
+      type: i.type,
+      sizeBytes: i.size_bytes,
+    })),
+    foreignKeys: s.foreign_keys.map((f) => ({
+      name: f.name,
+      columns: f.columns,
+      referencedTable: f.referenced_table,
+      referencedColumns: f.referenced_columns,
+      onDelete: f.on_delete,
+      onUpdate: f.on_update,
+    })),
+    rowEstimate: s.row_estimate,
+  };
+}
+
+function transformQueryResult(r: ApiQueryResult): QueryResult {
+  return {
+    columns: r.columns,
+    columnTypes: r.column_types,
+    rows: r.rows,
+    rowCount: r.row_count,
+    totalCount: r.total_count,
+    executionTimeMs: r.execution_time_ms,
+    truncated: r.truncated,
+  };
+}
+
+function transformQueryHistoryEntry(e: ApiQueryHistoryEntry): QueryHistoryEntry {
+  return {
+    id: e.id,
+    userId: e.user_id,
+    clusterId: e.cluster_id,
+    queryText: e.query_text,
+    description: e.description,
+    executionTimeMs: e.execution_time_ms,
+    rowsAffected: e.rows_affected,
+    status: e.status,
+    errorMessage: e.error_message,
+    createdAt: e.created_at,
+  };
+}
+
+function transformInternalStats(s: ApiInternalTableStats): InternalTableStats {
+  return {
+    hypertables: s.hypertables,
+    chunks: s.chunks,
+    compressedChunks: s.compressed_chunks,
+    shardCount: s.shard_count,
+    totalSizeBytes: s.total_size_bytes,
+    totalSizeHuman: s.total_size_human,
+  };
+}
+
+// Data Browser API
+export interface DataBrowserTableParams {
+  page?: number;
+  pageSize?: number;
+  sortColumn?: string;
+  sortDirection?: "asc" | "desc";
+  filters?: Record<string, string>;
+}
+
+export const dataBrowserApi = {
+  // List all user-visible tables (excludes internal tables)
+  listTables: async (clusterId: string): Promise<TableInfo[]> => {
+    const response = await fetchWithAuth<{
+      tables: ApiTableInfo[];
+    }>(`/api/v1/clusters/${clusterId}/data/tables`);
+    return (response.tables ?? []).map(transformTableInfo);
+  },
+
+  // Get table schema (columns, indexes, foreign keys)
+  getTableSchema: async (
+    clusterId: string,
+    schema: string,
+    table: string
+  ): Promise<TableSchema> => {
+    const response = await fetchWithAuth<ApiTableSchema>(
+      `/api/v1/clusters/${clusterId}/data/tables/${encodeURIComponent(schema)}/${encodeURIComponent(table)}`
+    );
+    return transformTableSchema(response);
+  },
+
+  // Get table data with pagination and sorting
+  getTableData: async (
+    clusterId: string,
+    schema: string,
+    table: string,
+    params: DataBrowserTableParams = {}
+  ): Promise<QueryResult> => {
+    const queryParams = new URLSearchParams();
+    if (params.page) queryParams.set("page", params.page.toString());
+    if (params.pageSize) queryParams.set("page_size", params.pageSize.toString());
+    if (params.sortColumn) queryParams.set("sort_column", params.sortColumn);
+    if (params.sortDirection) queryParams.set("sort_direction", params.sortDirection);
+    if (params.filters) {
+      Object.entries(params.filters).forEach(([key, value]) => {
+        queryParams.set(`filter_${key}`, value);
+      });
+    }
+
+    const url = `/api/v1/clusters/${clusterId}/data/tables/${encodeURIComponent(schema)}/${encodeURIComponent(table)}/data?${queryParams.toString()}`;
+    const response = await fetchWithAuth<ApiQueryResult>(url);
+    return transformQueryResult(response);
+  },
+
+  // Execute arbitrary SQL query
+  executeSQL: async (
+    clusterId: string,
+    sql: string,
+    readOnly = true
+  ): Promise<QueryResult> => {
+    const response = await fetchWithAuth<ApiQueryResult>(
+      `/api/v1/clusters/${clusterId}/data/query`,
+      {
+        method: "POST",
+        body: JSON.stringify({ sql, read_only: readOnly }),
+      }
+    );
+    return transformQueryResult(response);
+  },
+
+  // Get query history
+  getQueryHistory: async (
+    clusterId: string,
+    limit = 50
+  ): Promise<QueryHistoryEntry[]> => {
+    const response = await fetchWithAuth<{
+      history: ApiQueryHistoryEntry[];
+    }>(`/api/v1/clusters/${clusterId}/data/history?limit=${limit}`);
+    return (response.history ?? []).map(transformQueryHistoryEntry);
+  },
+
+  // Get internal table statistics (hypertables, shards, etc.)
+  getInternalStats: async (clusterId: string): Promise<InternalTableStats> => {
+    const response = await fetchWithAuth<ApiInternalTableStats>(
+      `/api/v1/clusters/${clusterId}/data/stats`
+    );
+    return transformInternalStats(response);
   },
 };
 

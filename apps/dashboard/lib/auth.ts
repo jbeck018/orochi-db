@@ -54,6 +54,23 @@ export function isAuthenticated(): boolean {
   return tokens !== null && tokens.expiresAt > Date.now();
 }
 
+export function isAdmin(): boolean {
+  const user = getStoredUser();
+  return user !== null && user.role === "admin";
+}
+
+export function requireAuth(): { isAuthenticated: boolean; isAdmin: boolean; user: User | null } {
+  const tokens = getStoredTokens();
+  const user = getStoredUser();
+  const authenticated = tokens !== null && tokens.expiresAt > Date.now();
+
+  return {
+    isAuthenticated: authenticated,
+    isAdmin: authenticated && user?.role === "admin",
+    user: authenticated ? user : null,
+  };
+}
+
 export function getAuthHeader(): Record<string, string> {
   const tokens = getStoredTokens();
   if (!tokens) return {};
@@ -94,10 +111,25 @@ export async function login(credentials: LoginCredentials): Promise<{ tokens: Au
 }
 
 export async function register(credentials: RegisterCredentials): Promise<{ tokens: AuthTokens; user: User }> {
+  // Map frontend format (camelCase) to API format (snake_case)
+  const body: Record<string, string> = {
+    email: credentials.email,
+    password: credentials.password,
+    name: credentials.name,
+  };
+
+  if (credentials.organizationName) {
+    body.organization_name = credentials.organizationName;
+  }
+
+  if (credentials.inviteToken) {
+    body.invite_token = credentials.inviteToken;
+  }
+
   const response = await fetch(`${API_URL}/api/v1/auth/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(credentials),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {

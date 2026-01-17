@@ -1,0 +1,53 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: control-plane-lb
+  namespace: orochi-cloud
+  labels:
+    app: control-plane
+  annotations:
+    service.beta.kubernetes.io/do-loadbalancer-name: "orochi-api-lb"
+    service.beta.kubernetes.io/do-loadbalancer-protocol: "http"
+    service.beta.kubernetes.io/do-loadbalancer-tls-ports: "443"
+    service.beta.kubernetes.io/do-loadbalancer-certificate-id: ""
+    service.beta.kubernetes.io/do-loadbalancer-redirect-http-to-https: "true"
+    service.beta.kubernetes.io/do-loadbalancer-healthcheck-path: "/health"
+    service.beta.kubernetes.io/do-loadbalancer-healthcheck-protocol: "http"
+spec:
+  type: LoadBalancer
+  selector:
+    app: control-plane
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+    - name: https
+      port: 443
+      targetPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard-lb
+  namespace: orochi-cloud
+  labels:
+    app: dashboard
+  annotations:
+    service.beta.kubernetes.io/do-loadbalancer-name: "orochi-dashboard-lb"
+    service.beta.kubernetes.io/do-loadbalancer-protocol: "http"
+    service.beta.kubernetes.io/do-loadbalancer-tls-ports: "443"
+    service.beta.kubernetes.io/do-loadbalancer-certificate-id: ""
+    service.beta.kubernetes.io/do-loadbalancer-redirect-http-to-https: "true"
+    service.beta.kubernetes.io/do-loadbalancer-healthcheck-path: "/"
+    service.beta.kubernetes.io/do-loadbalancer-healthcheck-protocol: "http"
+spec:
+  type: LoadBalancer
+  selector:
+    app: dashboard
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3000
+    - name: https
+      port: 443
+      targetPort: 3000

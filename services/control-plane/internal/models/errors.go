@@ -4,14 +4,15 @@ import "errors"
 
 // User-related errors.
 var (
-	ErrEmailRequired    = errors.New("email is required")
-	ErrPasswordRequired = errors.New("password is required")
-	ErrPasswordTooShort = errors.New("password must be at least 8 characters")
-	ErrNameRequired     = errors.New("name is required")
-	ErrUserNotFound     = errors.New("user not found")
-	ErrUserExists       = errors.New("user with this email already exists")
-	ErrInvalidCredentials = errors.New("invalid email or password")
-	ErrUserInactive     = errors.New("user account is inactive")
+	ErrEmailRequired       = errors.New("email is required")
+	ErrPasswordRequired    = errors.New("password is required")
+	ErrPasswordTooShort    = errors.New("password must be at least 8 characters")
+	ErrNameRequired        = errors.New("name is required")
+	ErrUserNotFound        = errors.New("user not found")
+	ErrUserExists          = errors.New("user with this email already exists")
+	ErrInvalidCredentials  = errors.New("invalid email or password")
+	ErrUserInactive        = errors.New("user account is inactive")
+	ErrOrganizationRequired = errors.New("organization name or invite token is required")
 )
 
 // Cluster-related errors.
@@ -43,6 +44,32 @@ var (
 	ErrJWTSecretEmpty     = errors.New("JWT secret cannot be empty")
 	ErrUnauthorized       = errors.New("unauthorized access")
 	ErrForbidden          = errors.New("access forbidden")
+)
+
+// Organization-related errors.
+var (
+	ErrOrgNameRequired  = errors.New("organization name is required")
+	ErrOrgNameInvalid   = errors.New("organization name must be between 2 and 64 characters")
+	ErrOrgNotFound      = errors.New("organization not found")
+	ErrOrgAlreadyExists = errors.New("organization with this slug already exists")
+	ErrNotOrgMember     = errors.New("user is not a member of this organization")
+	ErrInsufficientOrgPermissions = errors.New("insufficient organization permissions")
+)
+
+// Invite-related errors.
+var (
+	ErrInviteNotFound    = errors.New("invitation not found")
+	ErrInviteExpired     = errors.New("invitation has expired")
+	ErrInviteAlreadyUsed = errors.New("invitation has already been used")
+	ErrAlreadyMember     = errors.New("user is already a member of this organization")
+	ErrInvalidRole       = errors.New("invalid organization role")
+)
+
+// Data browser errors.
+var (
+	ErrTableNotFound    = errors.New("table not found")
+	ErrQueryNotAllowed  = errors.New("query not allowed")
+	ErrConnectionFailed = errors.New("failed to connect to cluster database")
 )
 
 // APIError represents a structured API error response.

@@ -8,9 +8,11 @@ import {
   Settings,
   Plus,
   X,
+  Shield,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { getStoredUser } from "@/lib/auth";
 
 interface SidebarProps {
   open?: boolean;
@@ -21,6 +23,7 @@ interface NavItem {
   title: string;
   href: string;
   icon: React.ElementType;
+  adminOnly?: boolean;
 }
 
 const navItems: NavItem[] = [
@@ -39,11 +42,24 @@ const navItems: NavItem[] = [
     href: "/settings",
     icon: Settings,
   },
+  {
+    title: "Admin",
+    href: "/admin",
+    icon: Shield,
+    adminOnly: true,
+  },
 ];
 
 export function Sidebar({ open, onClose }: SidebarProps): React.JSX.Element {
   const location = useLocation();
   const pathname = location.pathname;
+  const user = getStoredUser();
+  const isAdmin = user?.role === "admin";
+
+  // Filter nav items based on user role
+  const filteredNavItems = navItems.filter(
+    (item) => !item.adminOnly || isAdmin
+  );
 
   return (
     <>
@@ -83,7 +99,7 @@ export function Sidebar({ open, onClose }: SidebarProps): React.JSX.Element {
 
           {/* Navigation */}
           <nav className="flex-1 space-y-1 px-2">
-            {navItems.map((item) => {
+            {filteredNavItems.map((item) => {
               const isActive =
                 pathname === item.href ||
                 (item.href !== "/" && pathname.startsWith(item.href));

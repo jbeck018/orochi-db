@@ -290,10 +290,16 @@ func (m *ClusterManager) buildClusterSpec(spec *types.ClusterSpec) *unstructured
 		specObj["affinity"] = m.buildAffinityConfiguration(spec.Affinity)
 	}
 
+	// Configure connection pooler (PgBouncer)
+	if spec.Pooler != nil && spec.Pooler.Enabled {
+		specObj := cluster.Object["spec"].(map[string]interface{})
+		specObj["pooler"] = m.buildPoolerConfiguration(spec.Pooler)
+	}
+
 	return cluster
 }
 
-// buildLabels builds labels for the cluster
+// buildLabels builds labels for the cluster including owner/tenant isolation
 func (m *ClusterManager) buildLabels(spec *types.ClusterSpec) map[string]interface{} {
 	labels := map[string]interface{}{
 		"app.kubernetes.io/name":       "orochi-db",
@@ -301,6 +307,18 @@ func (m *ClusterManager) buildLabels(spec *types.ClusterSpec) map[string]interfa
 		"app.kubernetes.io/component":  "database",
 		"app.kubernetes.io/managed-by": "orochi-provisioner",
 		"orochi.io/cluster-name":       spec.Name,
+	}
+
+	// Add owner/tenant labels for isolation (passed via spec.Labels)
+	// These are critical for multi-tenant isolation
+	if ownerID, ok := spec.Labels["orochi.io/owner-id"]; ok {
+		labels["orochi.io/owner-id"] = ownerID
+	}
+	if orgID, ok := spec.Labels["orochi.io/organization-id"]; ok {
+		labels["orochi.io/organization-id"] = orgID
+	}
+	if tier, ok := spec.Labels["orochi.io/tier"]; ok {
+		labels["orochi.io/tier"] = tier
 	}
 
 	for k, v := range spec.Labels {
@@ -502,6 +520,44 @@ func (m *ClusterManager) buildAffinityConfiguration(affinity *types.AffinityConf
 	return config
 }
 
+// buildPoolerConfiguration builds PgBouncer connection pooler configuration
+func (m *ClusterManager) buildPoolerConfiguration(pooler *types.ConnectionPoolerSpec) map[string]interface{} {
+	config := map[string]interface{}{
+		"instances": int64(pooler.Instances),
+		"type":      "rw", // Read-write pooler by default
+	}
+
+	if pooler.Type != "" {
+		config["type"] = pooler.Type
+	}
+
+	if pooler.PgBouncer != nil {
+		pgbouncer := map[string]interface{}{
+			"poolMode": string(pooler.PgBouncer.PoolMode),
+		}
+
+		if pooler.PgBouncer.DefaultPoolSize > 0 {
+			pgbouncer["defaultPoolSize"] = int64(pooler.PgBouncer.DefaultPoolSize)
+		}
+
+		if pooler.PgBouncer.MaxClientConn > 0 {
+			pgbouncer["maxClientConn"] = int64(pooler.PgBouncer.MaxClientConn)
+		}
+
+		if len(pooler.PgBouncer.Parameters) > 0 {
+			params := map[string]interface{}{}
+			for k, v := range pooler.PgBouncer.Parameters {
+				params[k] = v
+			}
+			pgbouncer["parameters"] = params
+		}
+
+		config["pgbouncer"] = pgbouncer
+	}
+
+	return config
+}
+
 // GetConnectionString returns the connection string for a cluster
 func (m *ClusterManager) GetConnectionString(ctx context.Context, namespace, name string) (string, error) {
 	cluster, err := m.GetCluster(ctx, namespace, name)
@@ -523,6 +579,41 @@ func (m *ClusterManager) GetConnectionString(ctx context.Context, namespace, nam
 	}
 
 	return "", fmt.Errorf("connection URI not found in secret %s", secretName)
+}
+
+// GetPoolerConnectionString returns the connection string via the PgBouncer pooler
+func (m *ClusterManager) GetPoolerConnectionString(ctx context.Context, namespace, name string) (string, error) {
+	// The pooler service is named <cluster-name>-pooler-rw for read-write pooler
+	poolerSecretName := fmt.Sprintf("%s-pooler-rw", name)
+	secret := &corev1.Secret{}
+	if err := m.k8sClient.Get(ctx, client.ObjectKey{Namespace: namespace, Name: poolerSecretName}, secret); err != nil {
+		// Fall back to regular connection if pooler secret doesn't exist
+		m.logger.Debug("pooler secret not found, falling back to direct connection",
+			zap.String("cluster", name),
+			zap.Error(err),
+		)
+		return m.GetConnectionString(ctx, namespace, name)
+	}
+
+	if uri, ok := secret.Data["uri"]; ok {
+		return string(uri), nil
+	}
+
+	// Fall back to regular connection if URI not found
+	return m.GetConnectionString(ctx, namespace, name)
+}
+
+// GetConnectionInfo returns both direct and pooler connection strings
+func (m *ClusterManager) GetConnectionInfo(ctx context.Context, namespace, name string) (direct, pooler string, err error) {
+	direct, err = m.GetConnectionString(ctx, namespace, name)
+	if err != nil {
+		return "", "", err
+	}
+
+	// Try to get pooler connection, don't fail if it doesn't exist
+	pooler, _ = m.GetPoolerConnectionString(ctx, namespace, name)
+
+	return direct, pooler, nil
 }
 
 // ScaleCluster scales the number of instances in a cluster

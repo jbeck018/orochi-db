@@ -1,7 +1,7 @@
 // Production server entry point for Orochi Dashboard
 // Uses Bun's native server and file APIs for optimal performance
 
-import { readdir, stat } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import { resolve, join, extname } from 'node:path';
 
 // Configuration
@@ -132,7 +132,7 @@ function serveStaticAsset(pathname: string, request: Request): Response | null {
     });
   }
 
-  return new Response(cached.content, {
+  return new Response(cached.content.buffer as ArrayBuffer, {
     status: 200,
     headers: {
       'Content-Type': cached.contentType,

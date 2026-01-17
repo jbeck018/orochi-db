@@ -89,22 +89,48 @@ func run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		return fmt.Errorf("failed to run migrations: %w", err)
 	}
 
-	// Initialize JWT manager
+	// Initialize JWT manager (needed for user service)
 	jwtManager, err := auth.NewJWTManager(&cfg.JWT)
 	if err != nil {
 		return fmt.Errorf("failed to initialize JWT manager: %w", err)
 	}
 
-	// Initialize services
+	// Initialize user service early for admin seeding
 	userService := services.NewUserService(database, jwtManager, logger)
+
+	// Seed admin user if credentials are provided via environment variables
+	adminEmail := os.Getenv("ADMIN_EMAIL")
+	adminPassword := os.Getenv("ADMIN_PASSWORD")
+	adminName := os.Getenv("ADMIN_NAME")
+	if adminEmail != "" && adminPassword != "" {
+		if adminName == "" {
+			adminName = "Admin"
+		}
+		logger.Info("seeding admin user", "email", adminEmail)
+		if _, err := userService.EnsureAdminExists(ctx, adminEmail, adminPassword, adminName); err != nil {
+			logger.Warn("failed to seed admin user", "error", err)
+		}
+	}
+
+	// Initialize remaining services
 	clusterService := services.NewClusterService(database, logger)
+	adminService := services.NewAdminService(database, logger)
+	organizationService := services.NewOrganizationService(database, logger)
+	inviteService := services.NewInviteService(database, logger)
+	dataBrowserService := services.NewDataBrowserService(database, logger)
+	clusterSettingsService := services.NewClusterSettingsService(database, logger)
 
 	// Create HTTP router
 	router := api.NewRouter(&api.RouterConfig{
-		JWTManager:     jwtManager,
-		UserService:    userService,
-		ClusterService: clusterService,
-		Logger:         logger,
+		JWTManager:             jwtManager,
+		UserService:            userService,
+		ClusterService:         clusterService,
+		AdminService:           adminService,
+		OrganizationService:    organizationService,
+		InviteService:          inviteService,
+		DataBrowserService:     dataBrowserService,
+		ClusterSettingsService: clusterSettingsService,
+		Logger:                 logger,
 	})
 
 	// Create HTTP server

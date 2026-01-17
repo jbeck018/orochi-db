@@ -34,32 +34,36 @@ const (
 type CloudProvider string
 
 const (
-	CloudProviderAWS   CloudProvider = "aws"
-	CloudProviderGCP   CloudProvider = "gcp"
-	CloudProviderAzure CloudProvider = "azure"
+	CloudProviderAWS          CloudProvider = "aws"
+	CloudProviderGCP          CloudProvider = "gcp"
+	CloudProviderAzure        CloudProvider = "azure"
+	CloudProviderDigitalOcean CloudProvider = "digitalocean"
 )
 
 // Cluster represents an Orochi DB cluster.
 type Cluster struct {
-	ID             uuid.UUID     `json:"id"`
-	Name           string        `json:"name"`
-	OwnerID        uuid.UUID     `json:"owner_id"`
-	Status         ClusterStatus `json:"status"`
-	Tier           ClusterTier   `json:"tier"`
-	Provider       CloudProvider `json:"provider"`
-	Region         string        `json:"region"`
-	Version        string        `json:"version"`
-	NodeCount      int           `json:"node_count"`
-	NodeSize       string        `json:"node_size"`
-	StorageGB      int           `json:"storage_gb"`
-	ConnectionURL  string        `json:"connection_url,omitempty"`
-	MaintenanceDay string        `json:"maintenance_day"`
-	MaintenanceHour int          `json:"maintenance_hour"`
-	BackupEnabled  bool          `json:"backup_enabled"`
-	BackupRetention int          `json:"backup_retention_days"`
-	CreatedAt      time.Time     `json:"created_at"`
-	UpdatedAt      time.Time     `json:"updated_at"`
-	DeletedAt      *time.Time    `json:"deleted_at,omitempty"`
+	ID               uuid.UUID     `json:"id"`
+	Name             string        `json:"name"`
+	OwnerID          uuid.UUID     `json:"owner_id"`
+	OrganizationID   *uuid.UUID    `json:"organization_id,omitempty"` // Optional team/organization for multi-tenant isolation
+	Status           ClusterStatus `json:"status"`
+	Tier             ClusterTier   `json:"tier"`
+	Provider         CloudProvider `json:"provider"`
+	Region           string        `json:"region"`
+	Version          string        `json:"version"`
+	NodeCount        int           `json:"node_count"`
+	NodeSize         string        `json:"node_size"`
+	StorageGB        int           `json:"storage_gb"`
+	ConnectionURL    *string       `json:"connection_url,omitempty"`       // Direct PostgreSQL connection
+	PoolerURL        *string       `json:"pooler_url,omitempty"`           // PgBouncer pooler connection
+	MaintenanceDay   string        `json:"maintenance_day"`
+	MaintenanceHour  int           `json:"maintenance_hour"`
+	BackupEnabled    bool          `json:"backup_enabled"`
+	BackupRetention  int           `json:"backup_retention_days"`
+	PoolerEnabled    bool          `json:"pooler_enabled"`                 // Whether connection pooling is enabled
+	CreatedAt        time.Time     `json:"created_at"`
+	UpdatedAt        time.Time     `json:"updated_at"`
+	DeletedAt        *time.Time    `json:"deleted_at,omitempty"`
 }
 
 // ClusterCreateRequest represents a request to create a new cluster.
@@ -76,6 +80,8 @@ type ClusterCreateRequest struct {
 	MaintenanceHour int           `json:"maintenance_hour,omitempty"`
 	BackupEnabled   bool          `json:"backup_enabled,omitempty"`
 	BackupRetention int           `json:"backup_retention_days,omitempty"`
+	PoolerEnabled   bool          `json:"pooler_enabled,omitempty"` // Enable PgBouncer connection pooling
+	OrganizationID  *uuid.UUID    `json:"organization_id,omitempty"` // Optional team/organization
 }
 
 // ClusterUpdateRequest represents a request to update a cluster.
@@ -194,5 +200,10 @@ func (r *ClusterCreateRequest) ApplyDefaults() {
 	}
 	if r.BackupRetention == 0 {
 		r.BackupRetention = 7
+	}
+	// Enable pooler by default for production and enterprise tiers
+	// Connection pooling is recommended for all production workloads
+	if r.Tier == ClusterTierProduction || r.Tier == ClusterTierEnterprise {
+		r.PoolerEnabled = true
 	}
 }

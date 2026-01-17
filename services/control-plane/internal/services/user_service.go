@@ -227,3 +227,104 @@ func (s *UserService) updateLastLogin(ctx context.Context, userID uuid.UUID) err
 	_, err := s.db.Pool.Exec(ctx, query, time.Now(), userID)
 	return err
 }
+
+// EnsureAdminExists creates an admin user if one doesn't exist.
+// This is used for initial setup/seeding of the admin account.
+func (s *UserService) EnsureAdminExists(ctx context.Context, email, password, name string) (*models.User, error) {
+	// Check if an admin user already exists
+	existingQuery := `SELECT id FROM users WHERE role = $1 LIMIT 1`
+	var existingID uuid.UUID
+	err := s.db.Pool.QueryRow(ctx, existingQuery, models.UserRoleAdmin).Scan(&existingID)
+	if err == nil {
+		s.logger.Info("admin user already exists", "admin_id", existingID)
+		return s.GetByID(ctx, existingID)
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		s.logger.Error("failed to check for existing admin", "error", err)
+		return nil, errors.New("failed to check for existing admin")
+	}
+
+	// No admin exists, create one
+	passwordHash, err := auth.HashPassword(password)
+	if err != nil {
+		s.logger.Error("failed to hash admin password", "error", err)
+		return nil, errors.New("failed to create admin user")
+	}
+
+	user := &models.User{
+		ID:           uuid.New(),
+		Email:        email,
+		PasswordHash: passwordHash,
+		Name:         name,
+		Role:         models.UserRoleAdmin,
+		Active:       true,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+
+	query := `
+		INSERT INTO users (id, email, password_hash, name, role, active, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		ON CONFLICT (email) DO UPDATE SET role = $5, updated_at = $8
+		RETURNING id
+	`
+
+	var insertedID uuid.UUID
+	err = s.db.Pool.QueryRow(ctx, query,
+		user.ID, user.Email, user.PasswordHash, user.Name,
+		user.Role, user.Active, user.CreatedAt, user.UpdatedAt,
+	).Scan(&insertedID)
+
+	if err != nil {
+		s.logger.Error("failed to create admin user", "error", err)
+		return nil, errors.New("failed to create admin user")
+	}
+
+	user.ID = insertedID
+	s.logger.Info("admin user created", "admin_id", user.ID, "email", user.Email)
+	return user, nil
+}
+
+// CreateAdmin creates a new admin user (used by admins to add more admins).
+func (s *UserService) CreateAdmin(ctx context.Context, email, password, name string) (*models.User, error) {
+	passwordHash, err := auth.HashPassword(password)
+	if err != nil {
+		s.logger.Error("failed to hash admin password", "error", err)
+		return nil, errors.New("failed to create admin user")
+	}
+
+	user := &models.User{
+		ID:           uuid.New(),
+		Email:        email,
+		PasswordHash: passwordHash,
+		Name:         name,
+		Role:         models.UserRoleAdmin,
+		Active:       true,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+
+	query := `
+		INSERT INTO users (id, email, password_hash, name, role, active, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		ON CONFLICT (email) DO NOTHING
+		RETURNING id
+	`
+
+	var insertedID uuid.UUID
+	err = s.db.Pool.QueryRow(ctx, query,
+		user.ID, user.Email, user.PasswordHash, user.Name,
+		user.Role, user.Active, user.CreatedAt, user.UpdatedAt,
+	).Scan(&insertedID)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, models.ErrUserExists
+		}
+		s.logger.Error("failed to create admin user", "error", err)
+		return nil, errors.New("failed to create admin user")
+	}
+
+	s.logger.Info("admin user created", "admin_id", user.ID, "email", user.Email)
+	return user, nil
+}
