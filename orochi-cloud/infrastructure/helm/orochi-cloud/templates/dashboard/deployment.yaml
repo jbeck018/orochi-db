@@ -1,0 +1,209 @@
+{{- if .Values.dashboard.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "orochi-cloud.dashboard.fullname" . }}
+  namespace: {{ include "orochi-cloud.namespace" . }}
+  labels:
+    {{- include "orochi-cloud.dashboard.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.dashboard.autoscaling.enabled }}
+  replicas: {{ .Values.dashboard.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "orochi-cloud.dashboard.selectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/dashboard/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/dashboard/secret.yaml") . | sha256sum }}
+        {{- with .Values.dashboard.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "orochi-cloud.dashboard.labels" . | nindent 8 }}
+        {{- with .Values.dashboard.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- include "orochi-cloud.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "orochi-cloud.dashboard.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.dashboard.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Values.dashboard.name }}
+          image: "{{ .Values.dashboard.image.repository }}:{{ .Values.dashboard.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.dashboard.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.dashboard.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.dashboard.service.targetPort }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "orochi-cloud.dashboard.fullname" . }}-config
+            - secretRef:
+                name: {{ include "orochi-cloud.dashboard.fullname" . }}-secret
+          {{- with .Values.dashboard.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          livenessProbe:
+            {{- toYaml .Values.dashboard.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.dashboard.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.dashboard.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: nextjs-cache
+              mountPath: /app/.next/cache
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: nextjs-cache
+          emptyDir: {}
+      {{- with .Values.dashboard.nodeSelector | default .Values.global.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.dashboard.affinity | default .Values.global.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.dashboard.tolerations | default .Values.global.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: 30
+---
+{{- if .Values.dashboard.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "orochi-cloud.dashboard.fullname" . }}
+  namespace: {{ include "orochi-cloud.namespace" . }}
+  labels:
+    {{- include "orochi-cloud.dashboard.labels" . | nindent 4 }}
+spec:
+  {{- if .Values.dashboard.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ .Values.dashboard.podDisruptionBudget.minAvailable }}
+  {{- end }}
+  {{- if .Values.dashboard.podDisruptionBudget.maxUnavailable }}
+  maxUnavailable: {{ .Values.dashboard.podDisruptionBudget.maxUnavailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "orochi-cloud.dashboard.selectorLabels" . | nindent 6 }}
+{{- end }}
+---
+{{- if .Values.dashboard.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "orochi-cloud.dashboard.fullname" . }}
+  namespace: {{ include "orochi-cloud.namespace" . }}
+  labels:
+    {{- include "orochi-cloud.dashboard.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "orochi-cloud.dashboard.fullname" . }}
+  minReplicas: {{ .Values.dashboard.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.dashboard.autoscaling.maxReplicas }}
+  metrics:
+    {{- if .Values.dashboard.autoscaling.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.dashboard.autoscaling.targetCPUUtilizationPercentage }}
+    {{- end }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 10
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+{{- end }}
+---
+{{- if .Values.dashboard.serviceAccount.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "orochi-cloud.dashboard.serviceAccountName" . }}
+  namespace: {{ include "orochi-cloud.namespace" . }}
+  labels:
+    {{- include "orochi-cloud.dashboard.labels" . | nindent 4 }}
+  {{- with .Values.dashboard.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+automountServiceAccountToken: false
+{{- end }}
+---
+# ConfigMap for Dashboard
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "orochi-cloud.dashboard.fullname" . }}-config
+  namespace: {{ include "orochi-cloud.namespace" . }}
+  labels:
+    {{- include "orochi-cloud.dashboard.labels" . | nindent 4 }}
+data:
+  NODE_ENV: {{ .Values.dashboard.config.nodeEnv | quote }}
+  NEXT_TELEMETRY_DISABLED: "1"
+
+  # API configuration
+  NEXT_PUBLIC_API_URL: {{ .Values.dashboard.config.publicApiUrl | default (printf "http://%s:%d" (include "orochi-cloud.controlPlane.fullname" .) (.Values.controlPlane.service.port | int)) | quote }}
+  INTERNAL_API_URL: {{ .Values.dashboard.config.apiUrl | quote }}
+
+  # Server configuration
+  PORT: {{ .Values.dashboard.service.targetPort | quote }}
+  HOSTNAME: "0.0.0.0"
+---
+# Secret for Dashboard
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "orochi-cloud.dashboard.fullname" . }}-secret
+  namespace: {{ include "orochi-cloud.namespace" . }}
+  labels:
+    {{- include "orochi-cloud.dashboard.labels" . | nindent 4 }}
+type: Opaque
+data:
+  {{- if .Values.dashboard.secrets.nextAuthSecret }}
+  NEXTAUTH_SECRET: {{ .Values.dashboard.secrets.nextAuthSecret | b64enc | quote }}
+  {{- else }}
+  NEXTAUTH_SECRET: {{ "change-me-nextauth-secret-production" | b64enc | quote }}
+  {{- end }}
+  {{- if .Values.dashboard.secrets.githubClientId }}
+  GITHUB_CLIENT_ID: {{ .Values.dashboard.secrets.githubClientId | b64enc | quote }}
+  {{- end }}
+  {{- if .Values.dashboard.secrets.githubClientSecret }}
+  GITHUB_CLIENT_SECRET: {{ .Values.dashboard.secrets.githubClientSecret | b64enc | quote }}
+  {{- end }}
+  {{- if .Values.dashboard.secrets.googleClientId }}
+  GOOGLE_CLIENT_ID: {{ .Values.dashboard.secrets.googleClientId | b64enc | quote }}
+  {{- end }}
+  {{- if .Values.dashboard.secrets.googleClientSecret }}
+  GOOGLE_CLIENT_SECRET: {{ .Values.dashboard.secrets.googleClientSecret | b64enc | quote }}
+  {{- end }}
+{{- end }}

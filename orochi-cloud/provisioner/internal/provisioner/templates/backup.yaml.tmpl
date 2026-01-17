@@ -1,0 +1,15 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Backup
+metadata:
+  name: {{ .Name }}
+  namespace: {{ .Namespace }}
+  labels:
+    app.kubernetes.io/name: orochi-db
+    app.kubernetes.io/instance: {{ .ClusterName }}
+    app.kubernetes.io/component: backup
+    app.kubernetes.io/managed-by: orochi-provisioner
+    orochi.io/cluster-name: {{ .ClusterName }}
+spec:
+  cluster:
+    name: {{ .ClusterName }}
+  method: {{ default "barmanObjectStore" .Method }}

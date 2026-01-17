@@ -29,6 +29,7 @@
 
 #define WORKLOAD_MAX_POOLS              32
 #define WORKLOAD_MAX_CLASSES            64
+#define WORKLOAD_MAX_SESSIONS           1024    /* Max tracked sessions */
 #define WORKLOAD_MAX_POOL_NAME          64
 #define WORKLOAD_MAX_CLASS_NAME         64
 #define WORKLOAD_DEFAULT_POOL_NAME      "default"
@@ -39,6 +40,7 @@
 #define WORKLOAD_DEFAULT_MEMORY_MB      0       /* Unlimited */
 #define WORKLOAD_DEFAULT_IO_MBPS        0       /* Unlimited */
 #define WORKLOAD_DEFAULT_CONCURRENCY    0       /* Unlimited */
+#define WORKLOAD_SESSION_IDLE_TIMEOUT   (30 * 60 * 1000000L)  /* 30 min in usec */
 
 /* ============================================================
  * Query Priority Levels
@@ -183,13 +185,16 @@ typedef struct SessionResourceTracker
 typedef struct WorkloadSharedState
 {
     LWLock         *main_lock;          /* Main workload lock */
+    LWLock         *session_lock;       /* Lock for session tracker */
     int             num_pools;          /* Number of resource pools */
     int             num_classes;        /* Number of workload classes */
+    int             num_sessions;       /* Number of tracked sessions */
     int             total_active_queries;   /* Total active queries */
     int             total_queued_queries;   /* Total queued queries */
     ResourcePool    pools[WORKLOAD_MAX_POOLS];       /* Resource pools */
     WorkloadClass   classes[WORKLOAD_MAX_CLASSES];   /* Workload classes */
     QueryEntry      queue[WORKLOAD_QUEUE_SIZE];      /* Query queue */
+    SessionResourceTracker sessions[WORKLOAD_MAX_SESSIONS]; /* Session trackers */
     int             queue_head;         /* Queue head index */
     int             queue_tail;         /* Queue tail index */
     bool            is_initialized;     /* Initialization flag */

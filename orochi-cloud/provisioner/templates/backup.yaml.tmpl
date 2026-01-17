@@ -1,0 +1,56 @@
+# CloudNativePG Backup Template
+# This template is used by the provisioner to create on-demand backups
+# of PostgreSQL clusters.
+#
+# Variables:
+#   .Name         - Backup name
+#   .Namespace    - Kubernetes namespace
+#   .ClusterName  - Name of the cluster to backup
+#   .Method       - Backup method (barmanObjectStore or volumeSnapshot)
+
+apiVersion: postgresql.cnpg.io/v1
+kind: Backup
+metadata:
+  name: {{ .Name }}
+  namespace: {{ .Namespace }}
+  labels:
+    app.kubernetes.io/name: orochi-db
+    app.kubernetes.io/instance: {{ .ClusterName }}
+    app.kubernetes.io/component: backup
+    app.kubernetes.io/managed-by: orochi-provisioner
+    orochi.io/cluster-name: {{ .ClusterName }}
+spec:
+  # Reference to the cluster to backup
+  cluster:
+    name: {{ .ClusterName }}
+
+  # Backup method: barmanObjectStore (default) or volumeSnapshot
+  method: {{ default "barmanObjectStore" .Method }}
+
+---
+# CloudNativePG ScheduledBackup Template
+# Use this for automatic scheduled backups
+
+# apiVersion: postgresql.cnpg.io/v1
+# kind: ScheduledBackup
+# metadata:
+#   name: {{ .ClusterName }}-scheduled
+#   namespace: {{ .Namespace }}
+#   labels:
+#     app.kubernetes.io/name: orochi-db
+#     app.kubernetes.io/instance: {{ .ClusterName }}
+#     app.kubernetes.io/component: scheduled-backup
+#     app.kubernetes.io/managed-by: orochi-provisioner
+#     orochi.io/cluster-name: {{ .ClusterName }}
+# spec:
+#   # Cron schedule (e.g., "0 0 * * *" for daily at midnight)
+#   schedule: "0 0 * * *"
+#
+#   # Whether to take an immediate backup when created
+#   immediate: true
+#
+#   # Owner reference ensures backup is deleted with cluster
+#   backupOwnerReference: cluster
+#
+#   cluster:
+#     name: {{ .ClusterName }}

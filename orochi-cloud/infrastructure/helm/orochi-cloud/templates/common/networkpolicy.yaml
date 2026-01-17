@@ -1,0 +1,268 @@
+{{- if .Values.networkPolicy.enabled }}
+# Default deny all ingress traffic
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "orochi-cloud.fullname" . }}-default-deny-ingress
+  namespace: {{ include "orochi-cloud.namespace" . }}
+  labels:
+    {{- include "orochi-cloud.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# Allow internal communication between orochi-cloud components
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "orochi-cloud.fullname" . }}-allow-internal
+  namespace: {{ include "orochi-cloud.namespace" . }}
+  labels:
+    {{- include "orochi-cloud.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: orochi-cloud
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow traffic from other orochi-cloud pods
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: orochi-cloud
+  egress:
+    # Allow traffic to other orochi-cloud pods
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: orochi-cloud
+    # Allow DNS resolution
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Allow egress to external services
+    {{- if .Values.networkPolicy.egressCIDRs }}
+    - to:
+        {{- range .Values.networkPolicy.egressCIDRs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+    {{- end }}
+---
+# Control Plane network policy
+{{- if .Values.controlPlane.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "orochi-cloud.controlPlane.fullname" . }}
+  namespace: {{ include "orochi-cloud.namespace" . }}
+  labels:
+    {{- include "orochi-cloud.controlPlane.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "orochi-cloud.controlPlane.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    # Allow from dashboard
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "orochi-cloud.dashboard.selectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.controlPlane.service.targetPort }}
+    # Allow from autoscaler
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "orochi-cloud.autoscaler.selectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.controlPlane.service.targetPort }}
+    # Allow from provisioner
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "orochi-cloud.provisioner.selectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.controlPlane.service.targetPort }}
+    # Allow from ingress namespaces
+    {{- range .Values.networkPolicy.ingressNamespaces }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+      ports:
+        - protocol: TCP
+          port: {{ $.Values.controlPlane.service.targetPort }}
+    {{- end }}
+    # Allow metrics scraping
+    {{- if $.Values.metrics.enabled }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: {{ $.Values.metrics.port }}
+    {{- end }}
+{{- end }}
+---
+# Dashboard network policy
+{{- if .Values.dashboard.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "orochi-cloud.dashboard.fullname" . }}
+  namespace: {{ include "orochi-cloud.namespace" . }}
+  labels:
+    {{- include "orochi-cloud.dashboard.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "orochi-cloud.dashboard.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    # Allow from ingress namespaces
+    {{- range .Values.networkPolicy.ingressNamespaces }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+      ports:
+        - protocol: TCP
+          port: {{ $.Values.dashboard.service.targetPort }}
+    {{- end }}
+{{- end }}
+---
+# Autoscaler network policy
+{{- if .Values.autoscaler.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "orochi-cloud.autoscaler.fullname" . }}
+  namespace: {{ include "orochi-cloud.namespace" . }}
+  labels:
+    {{- include "orochi-cloud.autoscaler.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "orochi-cloud.autoscaler.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow from control plane
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "orochi-cloud.controlPlane.selectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.autoscaler.service.targetPort }}
+    # Allow metrics scraping
+    {{- if $.Values.metrics.enabled }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: {{ $.Values.metrics.port }}
+    {{- end }}
+  egress:
+    # Allow access to CloudNativePG clusters in any namespace
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 5432
+    # Allow access to Kubernetes API for metrics
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+{{- end }}
+---
+# Provisioner network policy
+{{- if .Values.provisioner.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "orochi-cloud.provisioner.fullname" . }}
+  namespace: {{ include "orochi-cloud.namespace" . }}
+  labels:
+    {{- include "orochi-cloud.provisioner.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "orochi-cloud.provisioner.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow from control plane
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "orochi-cloud.controlPlane.selectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.provisioner.service.targetPort }}
+    # Allow from autoscaler
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "orochi-cloud.autoscaler.selectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.provisioner.service.targetPort }}
+    # Allow metrics scraping
+    {{- if $.Values.metrics.enabled }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: {{ $.Values.metrics.port }}
+    {{- end }}
+  egress:
+    # Allow access to Kubernetes API
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+    # Allow access to CloudNativePG clusters in any namespace
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 5432
+    # Allow cloud provider APIs
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+{{- end }}
+{{- end }}

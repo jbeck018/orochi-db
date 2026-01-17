@@ -1,0 +1,587 @@
+# Default values for orochi-cloud
+# This is a YAML-formatted file.
+
+# Global settings
+global:
+  # Image pull secrets for private registries
+  imagePullSecrets: []
+  # Storage class for persistent volumes
+  storageClass: ""
+  # Node selector applied to all components
+  nodeSelector: {}
+  # Tolerations applied to all components
+  tolerations: []
+  # Affinity rules applied to all components
+  affinity: {}
+
+# Namespace configuration
+namespace:
+  create: true
+  name: orochi-cloud
+  labels: {}
+  annotations: {}
+
+# CloudNativePG dependency
+cloudnativepg:
+  enabled: true
+  # Additional CloudNativePG configuration
+  config:
+    data:
+      INHERITED_ANNOTATIONS: "orochi-cloud.io/*"
+      INHERITED_LABELS: "orochi-cloud.io/*"
+
+# =============================================================================
+# Control Plane API
+# =============================================================================
+controlPlane:
+  enabled: true
+  name: control-plane
+
+  image:
+    repository: ghcr.io/orochi-db/control-plane
+    tag: "1.0.0"
+    pullPolicy: IfNotPresent
+
+  replicaCount: 2
+
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 8080
+    targetPort: 8080
+    annotations: {}
+
+  # Resource limits and requests
+  resources:
+    limits:
+      cpu: "2"
+      memory: 2Gi
+    requests:
+      cpu: "500m"
+      memory: 512Mi
+
+  # Health checks
+  livenessProbe:
+    httpGet:
+      path: /health/live
+      port: http
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /health/ready
+      port: http
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  # Pod security context
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+
+  # Container security context
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+
+  # Pod disruption budget
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+  # Autoscaling
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+  # Service account
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+
+  # Configuration
+  config:
+    # Log level: debug, info, warn, error
+    logLevel: info
+    # Log format: json, text
+    logFormat: json
+    # Database connection pool size
+    dbPoolSize: 20
+    # JWT token expiration (hours)
+    jwtExpiration: 24
+    # Rate limiting (requests per minute)
+    rateLimit: 1000
+
+  # Secret configuration (use external secrets in production)
+  secrets:
+    # Database connection string
+    databaseUrl: ""
+    # JWT signing key
+    jwtSecret: ""
+    # Encryption key for sensitive data
+    encryptionKey: ""
+
+  # Extra environment variables
+  extraEnv: []
+
+  # Extra volume mounts
+  extraVolumeMounts: []
+
+  # Extra volumes
+  extraVolumes: []
+
+  # Node selector
+  nodeSelector: {}
+
+  # Tolerations
+  tolerations: []
+
+  # Affinity
+  affinity: {}
+
+  # Pod annotations
+  podAnnotations: {}
+
+  # Pod labels
+  podLabels: {}
+
+# =============================================================================
+# Dashboard (Next.js)
+# =============================================================================
+dashboard:
+  enabled: true
+  name: dashboard
+
+  image:
+    repository: ghcr.io/orochi-db/dashboard
+    tag: "1.0.0"
+    pullPolicy: IfNotPresent
+
+  replicaCount: 2
+
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 3000
+    targetPort: 3000
+    annotations: {}
+
+  # Ingress configuration
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    hosts:
+      - host: console.orochi-cloud.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: dashboard-tls
+        hosts:
+          - console.orochi-cloud.local
+
+  # Resource limits and requests
+  resources:
+    limits:
+      cpu: "1"
+      memory: 1Gi
+    requests:
+      cpu: "250m"
+      memory: 256Mi
+
+  # Health checks
+  livenessProbe:
+    httpGet:
+      path: /api/health
+      port: http
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /api/health
+      port: http
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  # Pod security context
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+
+  # Container security context
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+
+  # Pod disruption budget
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+  # Autoscaling
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+
+  # Service account
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+
+  # Configuration
+  config:
+    # Control Plane API URL (internal)
+    apiUrl: "http://control-plane:8080"
+    # Public API URL for client-side calls
+    publicApiUrl: ""
+    # Node environment
+    nodeEnv: production
+
+  # Secret configuration
+  secrets:
+    # NextAuth secret
+    nextAuthSecret: ""
+    # OAuth providers (optional)
+    githubClientId: ""
+    githubClientSecret: ""
+    googleClientId: ""
+    googleClientSecret: ""
+
+  # Extra environment variables
+  extraEnv: []
+
+  # Node selector
+  nodeSelector: {}
+
+  # Tolerations
+  tolerations: []
+
+  # Affinity
+  affinity: {}
+
+  # Pod annotations
+  podAnnotations: {}
+
+  # Pod labels
+  podLabels: {}
+
+# =============================================================================
+# Autoscaler
+# =============================================================================
+autoscaler:
+  enabled: true
+  name: autoscaler
+
+  image:
+    repository: ghcr.io/orochi-db/autoscaler
+    tag: "1.0.0"
+    pullPolicy: IfNotPresent
+
+  replicaCount: 1
+
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 8081
+    targetPort: 8081
+    annotations: {}
+
+  # Resource limits and requests
+  resources:
+    limits:
+      cpu: "1"
+      memory: 512Mi
+    requests:
+      cpu: "200m"
+      memory: 256Mi
+
+  # Health checks
+  livenessProbe:
+    httpGet:
+      path: /health/live
+      port: http
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /health/ready
+      port: http
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  # Pod security context
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+
+  # Container security context
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+
+  # Service account
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+
+  # Configuration
+  config:
+    # Metrics collection interval (seconds)
+    metricsInterval: 30
+    # Scale up cooldown (seconds)
+    scaleUpCooldown: 300
+    # Scale down cooldown (seconds)
+    scaleDownCooldown: 600
+    # CPU threshold for scale up (percentage)
+    cpuScaleUpThreshold: 80
+    # CPU threshold for scale down (percentage)
+    cpuScaleDownThreshold: 30
+    # Memory threshold for scale up (percentage)
+    memoryScaleUpThreshold: 85
+    # Connection threshold for scale up
+    connectionScaleUpThreshold: 80
+    # Minimum instances per cluster
+    minInstances: 1
+    # Maximum instances per cluster
+    maxInstances: 10
+
+  # Extra environment variables
+  extraEnv: []
+
+  # Node selector
+  nodeSelector: {}
+
+  # Tolerations
+  tolerations: []
+
+  # Affinity
+  affinity: {}
+
+  # Pod annotations
+  podAnnotations: {}
+
+  # Pod labels
+  podLabels: {}
+
+# =============================================================================
+# Provisioner
+# =============================================================================
+provisioner:
+  enabled: true
+  name: provisioner
+
+  image:
+    repository: ghcr.io/orochi-db/provisioner
+    tag: "1.0.0"
+    pullPolicy: IfNotPresent
+
+  replicaCount: 1
+
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 8082
+    targetPort: 8082
+    annotations: {}
+
+  # Resource limits and requests
+  resources:
+    limits:
+      cpu: "1"
+      memory: 512Mi
+    requests:
+      cpu: "200m"
+      memory: 256Mi
+
+  # Health checks
+  livenessProbe:
+    httpGet:
+      path: /health/live
+      port: http
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /health/ready
+      port: http
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  # Pod security context
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+
+  # Container security context
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+
+  # Service account (needs elevated RBAC)
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+
+  # RBAC configuration
+  rbac:
+    create: true
+    # Additional rules beyond the default
+    additionalRules: []
+
+  # Configuration
+  config:
+    # Reconciliation interval (seconds)
+    reconcileInterval: 60
+    # Default storage class for database PVCs
+    defaultStorageClass: ""
+    # Default backup storage class
+    backupStorageClass: ""
+    # Maximum concurrent provisions
+    maxConcurrentProvisions: 5
+    # Provision timeout (minutes)
+    provisionTimeout: 30
+
+  # Cloud provider configuration
+  cloudProvider:
+    # Provider type: aws, gcp, azure, local
+    type: local
+    # AWS configuration
+    aws:
+      region: ""
+      accessKeyId: ""
+      secretAccessKey: ""
+    # GCP configuration
+    gcp:
+      project: ""
+      credentials: ""
+    # Azure configuration
+    azure:
+      subscriptionId: ""
+      tenantId: ""
+      clientId: ""
+      clientSecret: ""
+
+  # Extra environment variables
+  extraEnv: []
+
+  # Node selector
+  nodeSelector: {}
+
+  # Tolerations
+  tolerations: []
+
+  # Affinity
+  affinity: {}
+
+  # Pod annotations
+  podAnnotations: {}
+
+  # Pod labels
+  podLabels: {}
+
+# =============================================================================
+# Network Policies
+# =============================================================================
+networkPolicy:
+  enabled: true
+  # Allow ingress from specific namespaces
+  ingressNamespaces:
+    - ingress-nginx
+    - monitoring
+  # Allow egress to specific CIDRs
+  egressCIDRs:
+    - 0.0.0.0/0
+
+# =============================================================================
+# Monitoring
+# =============================================================================
+monitoring:
+  # ServiceMonitor for Prometheus Operator
+  serviceMonitor:
+    enabled: false
+    namespace: ""
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+
+  # PodMonitor for Prometheus Operator
+  podMonitor:
+    enabled: false
+    namespace: ""
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+
+  # Grafana dashboards
+  grafanaDashboards:
+    enabled: false
+    labels:
+      grafana_dashboard: "1"
+
+# =============================================================================
+# Metrics Server (for internal metrics)
+# =============================================================================
+metrics:
+  enabled: true
+  port: 9090

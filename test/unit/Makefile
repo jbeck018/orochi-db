@@ -24,7 +24,12 @@ TEST_SRCS = run_tests.c \
             test_hypertable.c \
             test_columnar.c \
             test_distribution.c \
-            test_executor.c
+            test_executor.c \
+            test_auth.c \
+            test_jwt.c \
+            test_webauthn.c \
+            test_magic_link.c \
+            test_branch_access.c
 
 # Object files for tests
 TEST_OBJS = $(TEST_SRCS:.c=.o)
@@ -97,6 +102,13 @@ test_hypertable.o: test_hypertable.c test_framework.h mocks/postgres_mock.h
 test_columnar.o: test_columnar.c test_framework.h mocks/postgres_mock.h
 test_distribution.o: test_distribution.c test_framework.h mocks/postgres_mock.h
 test_executor.o: test_executor.c test_framework.h mocks/postgres_mock.h
+
+# Auth test files
+test_auth.o: test_auth.c test_framework.h mocks/postgres_mock.h
+test_jwt.o: test_jwt.c test_framework.h mocks/postgres_mock.h
+test_webauthn.o: test_webauthn.c test_framework.h mocks/postgres_mock.h
+test_magic_link.o: test_magic_link.c test_framework.h mocks/postgres_mock.h
+test_branch_access.o: test_branch_access.c test_framework.h mocks/postgres_mock.h
 
 # Additional test files (add as implemented)
 # test_hyperloglog.o: test_hyperloglog.c test_framework.h mocks/postgres_mock.h

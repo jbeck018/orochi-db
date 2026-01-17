@@ -1,0 +1,187 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ .Name }}
+  namespace: {{ .Namespace }}
+  labels:
+    app.kubernetes.io/name: orochi-db
+    app.kubernetes.io/instance: {{ .Name }}
+    app.kubernetes.io/component: database
+    app.kubernetes.io/managed-by: orochi-provisioner
+    orochi.io/cluster-name: {{ .Name }}
+{{- if .Labels }}
+{{ toYaml .Labels | indent 4 }}
+{{- end }}
+{{- if .Annotations }}
+  annotations:
+{{ toYaml .Annotations | indent 4 }}
+{{- end }}
+spec:
+  instances: {{ .Instances }}
+  imageName: {{ default "ghcr.io/orochi-db/orochi-pg:16" .ImageName }}
+  primaryUpdateStrategy: unsupervised
+
+  postgresql:
+    parameters:
+      shared_preload_libraries: "orochi"
+      # Connection settings
+      max_connections: "200"
+      # Memory settings
+      shared_buffers: "256MB"
+      effective_cache_size: "768MB"
+      work_mem: "16MB"
+      maintenance_work_mem: "64MB"
+      # WAL settings
+      wal_buffers: "16MB"
+      max_wal_size: "4GB"
+      min_wal_size: "1GB"
+      checkpoint_completion_target: "0.9"
+      # Query planner
+      random_page_cost: "1.1"
+      effective_io_concurrency: "200"
+      # Logging
+      log_statement: "ddl"
+      log_min_duration_statement: "1000"
+{{- if .OrochiConfig }}
+{{- if .OrochiConfig.DefaultShardCount }}
+      orochi.default_shard_count: "{{ .OrochiConfig.DefaultShardCount }}"
+{{- end }}
+{{- if .OrochiConfig.ChunkInterval }}
+      orochi.default_chunk_interval: "{{ .OrochiConfig.ChunkInterval }}"
+{{- end }}
+{{- if .OrochiConfig.DefaultCompression }}
+      orochi.default_compression: "{{ .OrochiConfig.DefaultCompression }}"
+{{- end }}
+{{- if .OrochiConfig.EnableColumnar }}
+      orochi.enable_columnar: "on"
+{{- end }}
+{{- if .OrochiConfig.CustomParameters }}
+{{- range $key, $value := .OrochiConfig.CustomParameters }}
+      {{ $key }}: "{{ $value }}"
+{{- end }}
+{{- end }}
+{{- end }}
+
+  storage:
+    size: {{ .Storage.Size }}
+{{- if .Storage.StorageClass }}
+    storageClass: {{ .Storage.StorageClass }}
+{{- end }}
+    resizeInUseVolumes: {{ boolToString .Storage.ResizeInUseVolumes }}
+{{- if .Storage.WALSize }}
+
+  walStorage:
+    size: {{ .Storage.WALSize }}
+{{- if .Storage.WALStorageClass }}
+    storageClass: {{ .Storage.WALStorageClass }}
+{{- end }}
+{{- end }}
+
+  resources:
+    requests:
+{{- if .Resources.CPURequest }}
+      cpu: "{{ .Resources.CPURequest }}"
+{{- end }}
+{{- if .Resources.MemoryRequest }}
+      memory: "{{ .Resources.MemoryRequest }}"
+{{- end }}
+    limits:
+{{- if .Resources.CPULimit }}
+      cpu: "{{ .Resources.CPULimit }}"
+{{- end }}
+{{- if .Resources.MemoryLimit }}
+      memory: "{{ .Resources.MemoryLimit }}"
+{{- end }}
+{{- if .Resources.HugePages2Mi }}
+      hugepages-2Mi: "{{ .Resources.HugePages2Mi }}"
+{{- end }}
+{{- if .Resources.HugePages1Gi }}
+      hugepages-1Gi: "{{ .Resources.HugePages1Gi }}"
+{{- end }}
+
+{{- if .Affinity }}
+  affinity:
+    enablePodAntiAffinity: {{ boolToString .Affinity.EnablePodAntiAffinity }}
+{{- if .Affinity.TopologyKey }}
+    topologyKey: {{ .Affinity.TopologyKey }}
+{{- end }}
+{{- if .Affinity.NodeSelector }}
+    nodeSelector:
+{{ toYaml .Affinity.NodeSelector | indent 6 }}
+{{- end }}
+{{- if .Affinity.Tolerations }}
+    tolerations:
+{{- range .Affinity.Tolerations }}
+    - key: {{ .Key }}
+      operator: {{ .Operator }}
+{{- if .Value }}
+      value: {{ .Value }}
+{{- end }}
+{{- if .Effect }}
+      effect: {{ .Effect }}
+{{- end }}
+{{- if .TolerationSeconds }}
+      tolerationSeconds: {{ .TolerationSeconds }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- if .Monitoring }}
+{{- if .Monitoring.EnablePodMonitor }}
+  monitoring:
+    enablePodMonitor: true
+{{- end }}
+{{- end }}
+
+{{- if .BackupConfig }}
+{{- if .BackupConfig.BarmanObjectStore }}
+  backup:
+    retentionPolicy: "{{ default "30d" .BackupConfig.RetentionPolicy }}"
+    barmanObjectStore:
+      destinationPath: {{ .BackupConfig.BarmanObjectStore.DestinationPath }}
+{{- if .BackupConfig.BarmanObjectStore.Endpoint }}
+      endpointURL: {{ .BackupConfig.BarmanObjectStore.Endpoint }}
+{{- end }}
+{{- if .BackupConfig.BarmanObjectStore.S3Credentials }}
+      s3Credentials:
+{{- if .BackupConfig.BarmanObjectStore.S3Credentials.InheritFromIAMRole }}
+        inheritFromIAMRole: true
+{{- else }}
+        accessKeyId:
+          name: {{ .BackupConfig.BarmanObjectStore.S3Credentials.AccessKeyIDSecret }}
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: {{ .BackupConfig.BarmanObjectStore.S3Credentials.SecretAccessKeySecret }}
+          key: SECRET_ACCESS_KEY
+{{- end }}
+{{- end }}
+{{- if .BackupConfig.BarmanObjectStore.WAL }}
+      wal:
+        compression: {{ .BackupConfig.BarmanObjectStore.WAL.Compression }}
+{{- if .BackupConfig.BarmanObjectStore.WAL.MaxParallel }}
+        maxParallel: {{ .BackupConfig.BarmanObjectStore.WAL.MaxParallel }}
+{{- end }}
+{{- end }}
+{{- if .BackupConfig.BarmanObjectStore.Data }}
+      data:
+        compression: {{ .BackupConfig.BarmanObjectStore.Data.Compression }}
+{{- if .BackupConfig.BarmanObjectStore.Data.Jobs }}
+        jobs: {{ .BackupConfig.BarmanObjectStore.Data.Jobs }}
+{{- end }}
+        immediateCheckpoint: {{ boolToString .BackupConfig.BarmanObjectStore.Data.ImmediateCheckpoint }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+  # Superuser secret
+  superuserSecret:
+    name: {{ .Name }}-superuser
+
+  # Enable replication slots
+  replicationSlots:
+    highAvailability:
+      enabled: true
+
+  # PostgreSQL extended configuration
+  enableSuperuserAccess: true

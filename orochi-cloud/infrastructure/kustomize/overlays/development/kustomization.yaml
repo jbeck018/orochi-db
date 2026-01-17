@@ -1,0 +1,76 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: orochi-cloud-development
+
+namespace: orochi-cloud-dev
+
+# Inherit from base
+resources:
+  - ../../base
+
+# Development-specific name prefix
+namePrefix: dev-
+
+# Development-specific labels
+commonLabels:
+  environment: development
+
+# Development-specific annotations
+commonAnnotations:
+  orochi-cloud.io/environment: development
+
+# Patches for development environment
+patches:
+  # Reduce replicas for development
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+    target:
+      kind: Deployment
+      name: control-plane
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+    target:
+      kind: Deployment
+      name: dashboard
+
+  # Reduce resource limits for development
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: "500m"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: 512Mi
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: "100m"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: 128Mi
+    target:
+      kind: Deployment
+
+# Development images (use latest tag)
+images:
+  - name: ghcr.io/orochi-db/control-plane
+    newTag: "latest"
+  - name: ghcr.io/orochi-db/dashboard
+    newTag: "latest"
+  - name: ghcr.io/orochi-db/autoscaler
+    newTag: "latest"
+  - name: ghcr.io/orochi-db/provisioner
+    newTag: "latest"
+
+# ConfigMap generator for development-specific config
+configMapGenerator:
+  - name: dev-config
+    literals:
+      - LOG_LEVEL=debug
+      - LOG_FORMAT=text
+      - RATE_LIMIT_REQUESTS_PER_MINUTE=10000

@@ -1,0 +1,124 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: orochi-cloud-production
+
+namespace: orochi-cloud
+
+# Inherit from base
+resources:
+  - ../../base
+  - ingress.yaml
+  - hpa.yaml
+  - pdb.yaml
+  - networkpolicy.yaml
+
+# Production-specific labels
+commonLabels:
+  environment: production
+
+# Production-specific annotations
+commonAnnotations:
+  orochi-cloud.io/environment: production
+
+# Patches for production environment
+patches:
+  # Set production replicas
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 3
+    target:
+      kind: Deployment
+      name: control-plane
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 3
+    target:
+      kind: Deployment
+      name: dashboard
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+    target:
+      kind: Deployment
+      name: autoscaler
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+    target:
+      kind: Deployment
+      name: provisioner
+
+  # Increase resource limits for production
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: "4"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: 4Gi
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: "1"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: 1Gi
+    target:
+      kind: Deployment
+      name: control-plane
+
+  # Add pod anti-affinity for production
+  - patch: |-
+      - op: add
+        path: /spec/template/spec/affinity
+        value:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/component: control-plane
+                  topologyKey: kubernetes.io/hostname
+    target:
+      kind: Deployment
+      name: control-plane
+  - patch: |-
+      - op: add
+        path: /spec/template/spec/affinity
+        value:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/component: dashboard
+                  topologyKey: kubernetes.io/hostname
+    target:
+      kind: Deployment
+      name: dashboard
+
+# Production images
+images:
+  - name: ghcr.io/orochi-db/control-plane
+    newTag: "1.0.0"
+  - name: ghcr.io/orochi-db/dashboard
+    newTag: "1.0.0"
+  - name: ghcr.io/orochi-db/autoscaler
+    newTag: "1.0.0"
+  - name: ghcr.io/orochi-db/provisioner
+    newTag: "1.0.0"
+
+# ConfigMap generator for production-specific config
+configMapGenerator:
+  - name: production-config
+    literals:
+      - LOG_LEVEL=info
+      - LOG_FORMAT=json
+      - RATE_LIMIT_REQUESTS_PER_MINUTE=5000

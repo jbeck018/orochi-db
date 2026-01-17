@@ -1661,3 +1661,342 @@ FROM orochi.orochi_json_columns c
 JOIN orochi.orochi_tables t ON c.table_oid = t.table_oid
 JOIN pg_attribute a ON c.table_oid = a.attrelid AND c.source_attnum = a.attnum
 ORDER BY c.table_oid, c.path;
+
+-- ============================================================
+-- Authentication Audit Logging Tables
+-- ============================================================
+
+/*
+ * Main audit log table - partitioned by created_at (monthly)
+ * This table stores all authentication-related events for compliance
+ * with SOC2, HIPAA, GDPR, and other regulatory requirements.
+ */
+CREATE TABLE IF NOT EXISTS orochi.orochi_auth_audit_log (
+    audit_id BIGSERIAL,
+    tenant_id TEXT,
+    user_id TEXT,
+    session_id TEXT,
+    event_type INTEGER NOT NULL,
+    event_name TEXT NOT NULL,
+    ip_address TEXT,
+    user_agent TEXT,
+    resource_type TEXT,
+    resource_id TEXT,
+    metadata JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (audit_id, created_at)
+) PARTITION BY RANGE (created_at);
+
+-- Create indexes on the audit log table for efficient querying
+CREATE INDEX IF NOT EXISTS idx_auth_audit_tenant
+    ON orochi.orochi_auth_audit_log (tenant_id, created_at DESC)
+    WHERE tenant_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_auth_audit_user
+    ON orochi.orochi_auth_audit_log (user_id, created_at DESC)
+    WHERE user_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_auth_audit_session
+    ON orochi.orochi_auth_audit_log (session_id, created_at DESC)
+    WHERE session_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_auth_audit_event_type
+    ON orochi.orochi_auth_audit_log (event_type, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_auth_audit_ip
+    ON orochi.orochi_auth_audit_log (ip_address, created_at DESC)
+    WHERE ip_address IS NOT NULL;
+
+/*
+ * Create initial default partition for any data that doesn't fit
+ * specific month partitions. The background worker will create
+ * proper monthly partitions as needed.
+ */
+CREATE TABLE IF NOT EXISTS orochi.orochi_auth_audit_log_default
+    PARTITION OF orochi.orochi_auth_audit_log DEFAULT;
+
+-- ============================================================
+-- Authentication Audit Log Functions
+-- ============================================================
+
+/*
+ * Function to manually log an audit event
+ * Can be called from application code or triggers
+ */
+CREATE FUNCTION auth_audit_log(
+    p_tenant_id TEXT DEFAULT NULL,
+    p_user_id TEXT DEFAULT NULL,
+    p_session_id TEXT DEFAULT NULL,
+    p_event_type INTEGER DEFAULT 0,
+    p_event_name TEXT DEFAULT 'unknown',
+    p_ip_address TEXT DEFAULT NULL,
+    p_user_agent TEXT DEFAULT NULL,
+    p_resource_type TEXT DEFAULT NULL,
+    p_resource_id TEXT DEFAULT NULL,
+    p_metadata JSONB DEFAULT NULL
+) RETURNS BIGINT AS $$
+DECLARE
+    v_audit_id BIGINT;
+BEGIN
+    INSERT INTO orochi.orochi_auth_audit_log (
+        tenant_id, user_id, session_id, event_type, event_name,
+        ip_address, user_agent, resource_type, resource_id, metadata
+    ) VALUES (
+        p_tenant_id, p_user_id, p_session_id, p_event_type, p_event_name,
+        p_ip_address, p_user_agent, p_resource_type, p_resource_id, p_metadata
+    ) RETURNING audit_id INTO v_audit_id;
+
+    RETURN v_audit_id;
+END;
+$$ LANGUAGE plpgsql;
+
+/*
+ * Function to query audit log entries with filtering
+ */
+CREATE FUNCTION auth_audit_query(
+    p_tenant_id TEXT DEFAULT NULL,
+    p_user_id TEXT DEFAULT NULL,
+    p_session_id TEXT DEFAULT NULL,
+    p_event_types INTEGER[] DEFAULT NULL,
+    p_start_time TIMESTAMPTZ DEFAULT NULL,
+    p_end_time TIMESTAMPTZ DEFAULT NULL,
+    p_ip_address TEXT DEFAULT NULL,
+    p_limit INTEGER DEFAULT 1000
+) RETURNS TABLE (
+    audit_id BIGINT,
+    tenant_id TEXT,
+    user_id TEXT,
+    session_id TEXT,
+    event_type INTEGER,
+    event_name TEXT,
+    ip_address TEXT,
+    user_agent TEXT,
+    resource_type TEXT,
+    resource_id TEXT,
+    metadata JSONB,
+    created_at TIMESTAMPTZ
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        a.audit_id,
+        a.tenant_id,
+        a.user_id,
+        a.session_id,
+        a.event_type,
+        a.event_name,
+        a.ip_address,
+        a.user_agent,
+        a.resource_type,
+        a.resource_id,
+        a.metadata,
+        a.created_at
+    FROM orochi.orochi_auth_audit_log a
+    WHERE (p_tenant_id IS NULL OR a.tenant_id = p_tenant_id)
+      AND (p_user_id IS NULL OR a.user_id = p_user_id)
+      AND (p_session_id IS NULL OR a.session_id = p_session_id)
+      AND (p_event_types IS NULL OR a.event_type = ANY(p_event_types))
+      AND (p_start_time IS NULL OR a.created_at >= p_start_time)
+      AND (p_end_time IS NULL OR a.created_at <= p_end_time)
+      AND (p_ip_address IS NULL OR a.ip_address = p_ip_address)
+    ORDER BY a.created_at DESC
+    LIMIT p_limit;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+/*
+ * Function to get audit log statistics
+ */
+CREATE FUNCTION auth_audit_stats(
+    p_tenant_id TEXT DEFAULT NULL,
+    p_start_time TIMESTAMPTZ DEFAULT NOW() - INTERVAL '24 hours',
+    p_end_time TIMESTAMPTZ DEFAULT NOW()
+) RETURNS TABLE (
+    event_name TEXT,
+    event_count BIGINT,
+    unique_users BIGINT,
+    unique_sessions BIGINT,
+    unique_ips BIGINT
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        a.event_name,
+        COUNT(*) as event_count,
+        COUNT(DISTINCT a.user_id) as unique_users,
+        COUNT(DISTINCT a.session_id) as unique_sessions,
+        COUNT(DISTINCT a.ip_address) as unique_ips
+    FROM orochi.orochi_auth_audit_log a
+    WHERE (p_tenant_id IS NULL OR a.tenant_id = p_tenant_id)
+      AND a.created_at >= p_start_time
+      AND a.created_at <= p_end_time
+    GROUP BY a.event_name
+    ORDER BY event_count DESC;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+/*
+ * Function to manually create audit partitions for a given month
+ */
+CREATE FUNCTION auth_audit_create_partition(
+    p_year INTEGER,
+    p_month INTEGER
+) RETURNS TEXT AS $$
+DECLARE
+    v_partition_name TEXT;
+    v_start_date DATE;
+    v_end_date DATE;
+BEGIN
+    v_partition_name := format('orochi_auth_audit_log_y%04dm%02d', p_year, p_month);
+    v_start_date := make_date(p_year, p_month, 1);
+
+    -- Calculate end date (first day of next month)
+    IF p_month = 12 THEN
+        v_end_date := make_date(p_year + 1, 1, 1);
+    ELSE
+        v_end_date := make_date(p_year, p_month + 1, 1);
+    END IF;
+
+    -- Create the partition
+    EXECUTE format(
+        'CREATE TABLE IF NOT EXISTS orochi.%I PARTITION OF orochi.orochi_auth_audit_log '
+        'FOR VALUES FROM (%L) TO (%L)',
+        v_partition_name, v_start_date, v_end_date
+    );
+
+    RAISE NOTICE 'Created partition % for range % to %',
+        v_partition_name, v_start_date, v_end_date;
+
+    RETURN v_partition_name;
+EXCEPTION WHEN duplicate_table THEN
+    RAISE NOTICE 'Partition % already exists', v_partition_name;
+    RETURN v_partition_name;
+END;
+$$ LANGUAGE plpgsql;
+
+/*
+ * Function to list audit log partitions
+ */
+CREATE FUNCTION auth_audit_list_partitions()
+RETURNS TABLE (
+    partition_name TEXT,
+    partition_oid OID,
+    range_start TEXT,
+    range_end TEXT,
+    row_count BIGINT,
+    size_bytes BIGINT,
+    size_pretty TEXT
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        c.relname::TEXT as partition_name,
+        c.oid as partition_oid,
+        pg_get_expr(c.relpartbound, c.oid) as range_start,
+        '' as range_end,
+        c.reltuples::BIGINT as row_count,
+        pg_total_relation_size(c.oid) as size_bytes,
+        pg_size_pretty(pg_total_relation_size(c.oid)) as size_pretty
+    FROM pg_inherits i
+    JOIN pg_class c ON i.inhrelid = c.oid
+    JOIN pg_class p ON i.inhparent = p.oid
+    JOIN pg_namespace n ON p.relnamespace = n.oid
+    WHERE n.nspname = 'orochi'
+      AND p.relname = 'orochi_auth_audit_log'
+    ORDER BY c.relname;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+/*
+ * Function to archive (detach and optionally drop) old audit partitions
+ */
+CREATE FUNCTION auth_audit_archive_partition(
+    p_partition_name TEXT,
+    p_drop_after_detach BOOLEAN DEFAULT FALSE
+) RETURNS BOOLEAN AS $$
+BEGIN
+    -- Detach the partition
+    EXECUTE format(
+        'ALTER TABLE orochi.orochi_auth_audit_log DETACH PARTITION orochi.%I',
+        p_partition_name
+    );
+
+    RAISE NOTICE 'Detached partition %', p_partition_name;
+
+    -- Optionally drop the detached partition
+    IF p_drop_after_detach THEN
+        EXECUTE format('DROP TABLE orochi.%I', p_partition_name);
+        RAISE NOTICE 'Dropped partition %', p_partition_name;
+    END IF;
+
+    RETURN TRUE;
+EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING 'Failed to archive partition %: %', p_partition_name, SQLERRM;
+    RETURN FALSE;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ============================================================
+-- Authentication Audit Log Views
+-- ============================================================
+
+/*
+ * View for recent authentication events (last 24 hours)
+ */
+CREATE VIEW orochi.auth_audit_recent AS
+SELECT
+    audit_id,
+    tenant_id,
+    user_id,
+    session_id,
+    event_type,
+    event_name,
+    ip_address,
+    CASE
+        WHEN length(user_agent) > 50 THEN substring(user_agent, 1, 50) || '...'
+        ELSE user_agent
+    END as user_agent_short,
+    resource_type,
+    resource_id,
+    created_at
+FROM orochi.orochi_auth_audit_log
+WHERE created_at >= NOW() - INTERVAL '24 hours'
+ORDER BY created_at DESC;
+
+/*
+ * View for failed authentication attempts (security monitoring)
+ */
+CREATE VIEW orochi.auth_audit_failures AS
+SELECT
+    audit_id,
+    tenant_id,
+    user_id,
+    ip_address,
+    event_name,
+    user_agent,
+    created_at
+FROM orochi.orochi_auth_audit_log
+WHERE event_type IN (1, 10, 18, 19)  -- LOGIN_FAILED, MFA_FAILED, PERMISSION_DENIED, RATE_LIMITED
+ORDER BY created_at DESC;
+
+/*
+ * View for suspicious activity alerts
+ */
+CREATE VIEW orochi.auth_audit_suspicious AS
+SELECT
+    tenant_id,
+    user_id,
+    ip_address,
+    COUNT(*) FILTER (WHERE event_type = 1) as failed_logins,
+    COUNT(*) FILTER (WHERE event_type = 10) as failed_mfa,
+    COUNT(*) FILTER (WHERE event_type = 18) as permission_denied,
+    COUNT(*) FILTER (WHERE event_type = 19) as rate_limited,
+    COUNT(*) as total_failures,
+    MIN(created_at) as first_seen,
+    MAX(created_at) as last_seen
+FROM orochi.orochi_auth_audit_log
+WHERE event_type IN (1, 10, 18, 19, 20)  -- All failure/suspicious events
+  AND created_at >= NOW() - INTERVAL '1 hour'
+GROUP BY tenant_id, user_id, ip_address
+HAVING COUNT(*) >= 5  -- Threshold for suspicious activity
+ORDER BY total_failures DESC;

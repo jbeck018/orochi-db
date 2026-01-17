@@ -1,0 +1,163 @@
+{{- if and .Values.provisioner.enabled .Values.provisioner.rbac.create }}
+# ClusterRole for Provisioner - needs cluster-wide access to manage database resources
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "orochi-cloud.provisioner.fullname" . }}
+  labels:
+    {{- include "orochi-cloud.provisioner.labels" . | nindent 4 }}
+rules:
+  # Core Kubernetes resources
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch", "create", "patch"]
+
+  # Storage resources
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["persistentvolumes"]
+    verbs: ["get", "list", "watch"]
+
+  # Apps resources
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "replicasets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # Batch resources (for backup jobs)
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # Network policies
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # Ingress resources
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # RBAC resources (for creating per-database roles)
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # CloudNativePG resources
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters/finalizers"]
+    verbs: ["update"]
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["backups"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["scheduledbackups"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["poolers"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # Metrics
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list"]
+
+  # Custom resources for Orochi (if defined)
+  - apiGroups: ["orochi-cloud.io"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # Additional rules from values
+  {{- with .Values.provisioner.rbac.additionalRules }}
+  {{- toYaml . | nindent 2 }}
+  {{- end }}
+---
+# ClusterRoleBinding for Provisioner
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "orochi-cloud.provisioner.fullname" . }}
+  labels:
+    {{- include "orochi-cloud.provisioner.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "orochi-cloud.provisioner.serviceAccountName" . }}
+    namespace: {{ include "orochi-cloud.namespace" . }}
+roleRef:
+  kind: ClusterRole
+  name: {{ include "orochi-cloud.provisioner.fullname" . }}
+  apiGroup: rbac.authorization.k8s.io
+---
+# Role for namespace-specific operations
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "orochi-cloud.provisioner.fullname" . }}
+  namespace: {{ include "orochi-cloud.namespace" . }}
+  labels:
+    {{- include "orochi-cloud.provisioner.labels" . | nindent 4 }}
+rules:
+  # Leader election
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Config management in own namespace
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+# RoleBinding for namespace-specific operations
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "orochi-cloud.provisioner.fullname" . }}
+  namespace: {{ include "orochi-cloud.namespace" . }}
+  labels:
+    {{- include "orochi-cloud.provisioner.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "orochi-cloud.provisioner.serviceAccountName" . }}
+    namespace: {{ include "orochi-cloud.namespace" . }}
+roleRef:
+  kind: Role
+  name: {{ include "orochi-cloud.provisioner.fullname" . }}
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}

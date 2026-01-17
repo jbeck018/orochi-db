@@ -1,0 +1,307 @@
+# CloudNativePG Operator Reference Manifest
+# This file contains example configurations for CloudNativePG operator
+# used by Orochi Cloud for PostgreSQL cluster management.
+#
+# For production deployments, install via Helm:
+#   helm repo add cnpg https://cloudnative-pg.github.io/charts
+#   helm install cnpg cnpg/cloudnative-pg -n cnpg-system --create-namespace
+#
+# Or apply the official operator manifest:
+#   kubectl apply -f https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.22/releases/cnpg-1.22.0.yaml
+
+---
+# Namespace for CloudNativePG operator
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cnpg-system
+  labels:
+    app.kubernetes.io/name: cloudnative-pg
+    app.kubernetes.io/component: operator
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+---
+# Example PostgreSQL Cluster for Orochi Cloud
+# This is a template that the Provisioner uses as a reference
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: orochi-cluster-template
+  namespace: orochi-cloud
+  labels:
+    app.kubernetes.io/name: orochi-db
+    app.kubernetes.io/part-of: orochi-cloud
+    orochi-cloud.io/cluster-type: htap
+spec:
+  # PostgreSQL version
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.2
+
+  # Number of instances (primary + replicas)
+  instances: 3
+
+  # PostgreSQL configuration
+  postgresql:
+    parameters:
+      # Memory settings
+      shared_buffers: "256MB"
+      effective_cache_size: "768MB"
+      work_mem: "16MB"
+      maintenance_work_mem: "128MB"
+
+      # Checkpoint settings
+      checkpoint_completion_target: "0.9"
+      wal_buffers: "16MB"
+      min_wal_size: "1GB"
+      max_wal_size: "4GB"
+
+      # Query planner
+      random_page_cost: "1.1"
+      effective_io_concurrency: "200"
+
+      # Parallel query
+      max_parallel_workers_per_gather: "2"
+      max_parallel_workers: "8"
+      max_parallel_maintenance_workers: "2"
+
+      # Logging
+      log_statement: "ddl"
+      log_min_duration_statement: "1000"
+      log_checkpoints: "on"
+      log_connections: "on"
+      log_disconnections: "on"
+      log_lock_waits: "on"
+
+      # Extensions
+      shared_preload_libraries: "pg_stat_statements,orochi"
+
+    # pg_hba.conf entries
+    pg_hba:
+      - host all all 10.0.0.0/8 scram-sha-256
+      - host all all 172.16.0.0/12 scram-sha-256
+      - host all all 192.168.0.0/16 scram-sha-256
+
+  # Storage configuration
+  storage:
+    size: 10Gi
+    storageClass: fast-ssd
+    pvcTemplate:
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 10Gi
+
+  # WAL storage (separate disk for performance)
+  walStorage:
+    size: 2Gi
+    storageClass: fast-ssd
+
+  # Resource limits
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "2"
+
+  # Affinity rules
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: preferred
+
+  # Primary update strategy
+  primaryUpdateStrategy: unsupervised
+  primaryUpdateMethod: switchover
+
+  # Backup configuration
+  backup:
+    barmanObjectStore:
+      destinationPath: "s3://orochi-backups/clusters/"
+      endpointURL: "https://s3.amazonaws.com"
+      s3Credentials:
+        accessKeyId:
+          name: backup-credentials
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: backup-credentials
+          key: SECRET_ACCESS_KEY
+      wal:
+        compression: gzip
+        maxParallel: 8
+      data:
+        compression: gzip
+        immediateCheckpoint: false
+        jobs: 2
+    retentionPolicy: "30d"
+
+  # Monitoring
+  monitoring:
+    enablePodMonitor: true
+    customQueriesConfigMap:
+      - name: orochi-custom-queries
+        key: queries
+
+  # Bootstrap configuration
+  bootstrap:
+    initdb:
+      database: orochi
+      owner: orochi_admin
+      secret:
+        name: orochi-cluster-credentials
+      postInitSQL:
+        - CREATE EXTENSION IF NOT EXISTS orochi
+        - CREATE EXTENSION IF NOT EXISTS pg_stat_statements
+
+  # Superuser secret
+  superuserSecret:
+    name: orochi-cluster-superuser
+
+  # Enable SSL
+  enableSuperuserAccess: true
+
+  # Node maintenance window
+  nodeMaintenanceWindow:
+    inProgress: false
+    reusePVC: true
+
+  # Log level
+  logLevel: info
+
+  # Start delay
+  startDelay: 3600
+  stopDelay: 1800
+  switchoverDelay: 3600
+---
+# Example ScheduledBackup
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: orochi-cluster-backup
+  namespace: orochi-cloud
+spec:
+  schedule: "0 2 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: orochi-cluster-template
+  immediate: false
+  suspend: false
+---
+# Example Pooler (PgBouncer)
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: orochi-cluster-pooler-rw
+  namespace: orochi-cloud
+spec:
+  cluster:
+    name: orochi-cluster-template
+  instances: 2
+  type: rw
+  pgbouncer:
+    poolMode: transaction
+    parameters:
+      max_client_conn: "1000"
+      default_pool_size: "25"
+      min_pool_size: "5"
+      reserve_pool_size: "5"
+      reserve_pool_timeout: "5"
+      max_db_connections: "100"
+      max_user_connections: "100"
+      stats_period: "60"
+      server_reset_query: "DISCARD ALL"
+      server_check_query: "SELECT 1"
+      server_check_delay: "30"
+      application_name_add_host: "1"
+      log_connections: "1"
+      log_disconnections: "1"
+      log_pooler_errors: "1"
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: orochi-pooler
+    spec:
+      containers:
+        - name: pgbouncer
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+# Custom monitoring queries ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: orochi-custom-queries
+  namespace: orochi-cloud
+data:
+  queries: |
+    orochi_shard_stats:
+      query: |
+        SELECT
+          table_name,
+          shard_count,
+          total_rows,
+          avg_rows_per_shard
+        FROM orochi_shard_statistics()
+      metrics:
+        - table_name:
+            usage: "LABEL"
+            description: "Name of the distributed table"
+        - shard_count:
+            usage: "GAUGE"
+            description: "Number of shards"
+        - total_rows:
+            usage: "GAUGE"
+            description: "Total rows across all shards"
+        - avg_rows_per_shard:
+            usage: "GAUGE"
+            description: "Average rows per shard"
+
+    orochi_chunk_stats:
+      query: |
+        SELECT
+          hypertable_name,
+          chunk_count,
+          total_size_bytes,
+          compression_ratio
+        FROM orochi_chunk_statistics()
+      metrics:
+        - hypertable_name:
+            usage: "LABEL"
+            description: "Name of the hypertable"
+        - chunk_count:
+            usage: "GAUGE"
+            description: "Number of chunks"
+        - total_size_bytes:
+            usage: "GAUGE"
+            description: "Total size in bytes"
+        - compression_ratio:
+            usage: "GAUGE"
+            description: "Compression ratio"
+
+    orochi_columnar_stats:
+      query: |
+        SELECT
+          table_name,
+          stripe_count,
+          total_size_bytes,
+          compression_type
+        FROM orochi_columnar_statistics()
+      metrics:
+        - table_name:
+            usage: "LABEL"
+            description: "Name of the columnar table"
+        - stripe_count:
+            usage: "GAUGE"
+            description: "Number of stripes"
+        - total_size_bytes:
+            usage: "GAUGE"
+            description: "Total size in bytes"
+        - compression_type:
+            usage: "LABEL"
+            description: "Compression type used"

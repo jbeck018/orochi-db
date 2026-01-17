@@ -1,0 +1,55 @@
+{{- if .Values.controlPlane.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "orochi-cloud.controlPlane.fullname" . }}-config
+  namespace: {{ include "orochi-cloud.namespace" . }}
+  labels:
+    {{- include "orochi-cloud.controlPlane.labels" . | nindent 4 }}
+data:
+  # Server configuration
+  SERVER_PORT: {{ .Values.controlPlane.service.targetPort | quote }}
+  SERVER_HOST: "0.0.0.0"
+
+  # Logging configuration
+  LOG_LEVEL: {{ .Values.controlPlane.config.logLevel | quote }}
+  LOG_FORMAT: {{ .Values.controlPlane.config.logFormat | quote }}
+
+  # Database configuration
+  DB_POOL_SIZE: {{ .Values.controlPlane.config.dbPoolSize | quote }}
+  DB_POOL_MIN: "5"
+  DB_POOL_MAX_LIFETIME: "1800"
+  DB_POOL_IDLE_TIMEOUT: "600"
+
+  # Authentication configuration
+  JWT_EXPIRATION_HOURS: {{ .Values.controlPlane.config.jwtExpiration | quote }}
+  JWT_REFRESH_ENABLED: "true"
+  JWT_REFRESH_EXPIRATION_DAYS: "7"
+
+  # Rate limiting
+  RATE_LIMIT_REQUESTS_PER_MINUTE: {{ .Values.controlPlane.config.rateLimit | quote }}
+  RATE_LIMIT_BURST_SIZE: "100"
+
+  # Metrics configuration
+  METRICS_ENABLED: {{ .Values.metrics.enabled | quote }}
+  METRICS_PORT: {{ .Values.metrics.port | quote }}
+  METRICS_PATH: "/metrics"
+
+  # Service discovery
+  AUTOSCALER_URL: "http://{{ include "orochi-cloud.autoscaler.fullname" . }}:{{ .Values.autoscaler.service.port }}"
+  PROVISIONER_URL: "http://{{ include "orochi-cloud.provisioner.fullname" . }}:{{ .Values.provisioner.service.port }}"
+
+  # Feature flags
+  FEATURE_HTAP_ENABLED: "true"
+  FEATURE_VECTOR_SEARCH_ENABLED: "true"
+  FEATURE_TIMESERIES_ENABLED: "true"
+  FEATURE_COLUMNAR_ENABLED: "true"
+
+  # Cluster configuration
+  CLUSTER_NAMESPACE: {{ include "orochi-cloud.namespace" . | quote }}
+  CLUSTER_DOMAIN: "cluster.local"
+
+  # Health check configuration
+  HEALTH_CHECK_TIMEOUT: "5s"
+  HEALTH_CHECK_INTERVAL: "10s"
+{{- end }}

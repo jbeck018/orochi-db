@@ -1,0 +1,22 @@
+{{- if .Values.dashboard.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "orochi-cloud.dashboard.fullname" . }}
+  namespace: {{ include "orochi-cloud.namespace" . }}
+  labels:
+    {{- include "orochi-cloud.dashboard.labels" . | nindent 4 }}
+  {{- with .Values.dashboard.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.dashboard.service.type }}
+  ports:
+    - port: {{ .Values.dashboard.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "orochi-cloud.dashboard.selectorLabels" . | nindent 4 }}
+{{- end }}

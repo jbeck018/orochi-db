@@ -1,0 +1,60 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: orochi-cloud-staging
+
+namespace: orochi-cloud-staging
+
+# Inherit from base
+resources:
+  - ../../base
+  - ingress.yaml
+
+# Staging-specific name prefix
+namePrefix: staging-
+
+# Staging-specific labels
+commonLabels:
+  environment: staging
+
+# Staging-specific annotations
+commonAnnotations:
+  orochi-cloud.io/environment: staging
+
+# Patches for staging environment
+patches:
+  # Set staging replicas
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+    target:
+      kind: Deployment
+      name: control-plane
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+    target:
+      kind: Deployment
+      name: dashboard
+
+# Staging images
+images:
+  - name: ghcr.io/orochi-db/control-plane
+    newTag: "1.0.0-rc1"
+  - name: ghcr.io/orochi-db/dashboard
+    newTag: "1.0.0-rc1"
+  - name: ghcr.io/orochi-db/autoscaler
+    newTag: "1.0.0-rc1"
+  - name: ghcr.io/orochi-db/provisioner
+    newTag: "1.0.0-rc1"
+
+# ConfigMap generator for staging-specific config
+configMapGenerator:
+  - name: staging-config
+    literals:
+      - LOG_LEVEL=info
+      - LOG_FORMAT=json
+      - RATE_LIMIT_REQUESTS_PER_MINUTE=2000
