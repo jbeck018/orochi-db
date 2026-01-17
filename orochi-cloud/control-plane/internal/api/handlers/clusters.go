@@ -77,6 +77,9 @@ func (h *ClusterHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Limit request body size to 1MB
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+
 	var req models.ClusterCreateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, models.APIError{
@@ -139,8 +142,9 @@ func (h *ClusterHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check ownership
-	if err := h.clusterService.CheckOwnership(r.Context(), clusterID, user.ID); err != nil {
+	// Get cluster with ownership check in a single query (avoids N+1)
+	cluster, err := h.clusterService.GetByIDWithOwnerCheck(r.Context(), clusterID, user.ID)
+	if err != nil {
 		if errors.Is(err, models.ErrClusterNotFound) {
 			writeJSON(w, http.StatusNotFound, models.APIError{
 				Code:    models.ErrCodeNotFound,
@@ -152,23 +156,6 @@ func (h *ClusterHandler) Get(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusForbidden, models.APIError{
 				Code:    models.ErrCodeForbidden,
 				Message: "Access denied",
-			})
-			return
-		}
-		h.logger.Error("failed to check ownership", "error", err)
-		writeJSON(w, http.StatusInternalServerError, models.APIError{
-			Code:    models.ErrCodeInternal,
-			Message: "Failed to get cluster",
-		})
-		return
-	}
-
-	cluster, err := h.clusterService.GetByID(r.Context(), clusterID)
-	if err != nil {
-		if errors.Is(err, models.ErrClusterNotFound) {
-			writeJSON(w, http.StatusNotFound, models.APIError{
-				Code:    models.ErrCodeNotFound,
-				Message: "Cluster not found",
 			})
 			return
 		}
@@ -206,29 +193,8 @@ func (h *ClusterHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check ownership
-	if err := h.clusterService.CheckOwnership(r.Context(), clusterID, user.ID); err != nil {
-		if errors.Is(err, models.ErrClusterNotFound) {
-			writeJSON(w, http.StatusNotFound, models.APIError{
-				Code:    models.ErrCodeNotFound,
-				Message: "Cluster not found",
-			})
-			return
-		}
-		if errors.Is(err, models.ErrForbidden) {
-			writeJSON(w, http.StatusForbidden, models.APIError{
-				Code:    models.ErrCodeForbidden,
-				Message: "Access denied",
-			})
-			return
-		}
-		h.logger.Error("failed to check ownership", "error", err)
-		writeJSON(w, http.StatusInternalServerError, models.APIError{
-			Code:    models.ErrCodeInternal,
-			Message: "Failed to update cluster",
-		})
-		return
-	}
+	// Limit request body size to 1MB
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
 	var req models.ClusterUpdateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -239,20 +205,32 @@ func (h *ClusterHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cluster, err := h.clusterService.Update(r.Context(), clusterID, &req)
+	// Update with ownership check in a single transaction (avoids N+1)
+	cluster, err := h.clusterService.UpdateWithOwnerCheck(r.Context(), clusterID, user.ID, &req)
 	if err != nil {
-		if errors.Is(err, models.ErrClusterOperationPending) {
+		switch {
+		case errors.Is(err, models.ErrClusterNotFound):
+			writeJSON(w, http.StatusNotFound, models.APIError{
+				Code:    models.ErrCodeNotFound,
+				Message: "Cluster not found",
+			})
+		case errors.Is(err, models.ErrForbidden):
+			writeJSON(w, http.StatusForbidden, models.APIError{
+				Code:    models.ErrCodeForbidden,
+				Message: "Access denied",
+			})
+		case errors.Is(err, models.ErrClusterOperationPending):
 			writeJSON(w, http.StatusConflict, models.APIError{
 				Code:    models.ErrCodeConflict,
 				Message: "Another operation is in progress",
 			})
-			return
+		default:
+			h.logger.Error("failed to update cluster", "error", err)
+			writeJSON(w, http.StatusInternalServerError, models.APIError{
+				Code:    models.ErrCodeInternal,
+				Message: "Failed to update cluster",
+			})
 		}
-		h.logger.Error("failed to update cluster", "error", err)
-		writeJSON(w, http.StatusInternalServerError, models.APIError{
-			Code:    models.ErrCodeInternal,
-			Message: "Failed to update cluster",
-		})
 		return
 	}
 
@@ -282,36 +260,26 @@ func (h *ClusterHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check ownership
-	if err := h.clusterService.CheckOwnership(r.Context(), clusterID, user.ID); err != nil {
-		if errors.Is(err, models.ErrClusterNotFound) {
+	// Delete with ownership check in a single transaction (avoids N+1)
+	if err := h.clusterService.DeleteWithOwnerCheck(r.Context(), clusterID, user.ID); err != nil {
+		switch {
+		case errors.Is(err, models.ErrClusterNotFound):
 			writeJSON(w, http.StatusNotFound, models.APIError{
 				Code:    models.ErrCodeNotFound,
 				Message: "Cluster not found",
 			})
-			return
-		}
-		if errors.Is(err, models.ErrForbidden) {
+		case errors.Is(err, models.ErrForbidden):
 			writeJSON(w, http.StatusForbidden, models.APIError{
 				Code:    models.ErrCodeForbidden,
 				Message: "Access denied",
 			})
-			return
+		default:
+			h.logger.Error("failed to delete cluster", "error", err)
+			writeJSON(w, http.StatusInternalServerError, models.APIError{
+				Code:    models.ErrCodeInternal,
+				Message: "Failed to delete cluster",
+			})
 		}
-		h.logger.Error("failed to check ownership", "error", err)
-		writeJSON(w, http.StatusInternalServerError, models.APIError{
-			Code:    models.ErrCodeInternal,
-			Message: "Failed to delete cluster",
-		})
-		return
-	}
-
-	if err := h.clusterService.Delete(r.Context(), clusterID); err != nil {
-		h.logger.Error("failed to delete cluster", "error", err)
-		writeJSON(w, http.StatusInternalServerError, models.APIError{
-			Code:    models.ErrCodeInternal,
-			Message: "Failed to delete cluster",
-		})
 		return
 	}
 
@@ -339,29 +307,8 @@ func (h *ClusterHandler) Scale(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check ownership
-	if err := h.clusterService.CheckOwnership(r.Context(), clusterID, user.ID); err != nil {
-		if errors.Is(err, models.ErrClusterNotFound) {
-			writeJSON(w, http.StatusNotFound, models.APIError{
-				Code:    models.ErrCodeNotFound,
-				Message: "Cluster not found",
-			})
-			return
-		}
-		if errors.Is(err, models.ErrForbidden) {
-			writeJSON(w, http.StatusForbidden, models.APIError{
-				Code:    models.ErrCodeForbidden,
-				Message: "Access denied",
-			})
-			return
-		}
-		h.logger.Error("failed to check ownership", "error", err)
-		writeJSON(w, http.StatusInternalServerError, models.APIError{
-			Code:    models.ErrCodeInternal,
-			Message: "Failed to scale cluster",
-		})
-		return
-	}
+	// Limit request body size to 1MB
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
 	var req models.ClusterScaleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -372,9 +319,20 @@ func (h *ClusterHandler) Scale(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cluster, err := h.clusterService.Scale(r.Context(), clusterID, &req)
+	// Scale with ownership check in a single transaction (avoids N+1)
+	cluster, err := h.clusterService.ScaleWithOwnerCheck(r.Context(), clusterID, user.ID, &req)
 	if err != nil {
 		switch {
+		case errors.Is(err, models.ErrClusterNotFound):
+			writeJSON(w, http.StatusNotFound, models.APIError{
+				Code:    models.ErrCodeNotFound,
+				Message: "Cluster not found",
+			})
+		case errors.Is(err, models.ErrForbidden):
+			writeJSON(w, http.StatusForbidden, models.APIError{
+				Code:    models.ErrCodeForbidden,
+				Message: "Access denied",
+			})
 		case errors.Is(err, models.ErrInvalidNodeCount),
 			errors.Is(err, models.ErrNodeCountTooHigh):
 			writeJSON(w, http.StatusBadRequest, models.APIError{

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -32,6 +33,9 @@ type Server struct {
 	handler       *Handler
 	logger        *zap.Logger
 	metricsServer *http.Server
+	metricsMu     sync.Mutex       // protects metricsServer access
+	metricsReady  chan struct{}    // signals when metrics server is ready
+	stopOnce      sync.Once        // ensures Stop() is only executed once
 }
 
 // NewServer creates a new gRPC server
@@ -94,6 +98,7 @@ func NewServer(cfg *config.Config, service *provisioner.Service, logger *zap.Log
 		service:      service,
 		handler:      handler,
 		logger:       logger,
+		metricsReady: make(chan struct{}),
 	}, nil
 }
 
@@ -111,6 +116,9 @@ func (s *Server) Start(ctx context.Context) error {
 	// Start metrics server if enabled
 	if s.cfg.Metrics.Enabled {
 		go s.startMetricsServer()
+	} else {
+		// Signal that metrics is not being used (no need to wait in Stop)
+		close(s.metricsReady)
 	}
 
 	// Start gRPC server
@@ -142,14 +150,32 @@ func (s *Server) Start(ctx context.Context) error {
 
 // Stop stops the gRPC server
 func (s *Server) Stop() {
-	s.healthServer.SetServingStatus("", healthpb.HealthCheckResponse_NOT_SERVING)
-	s.grpcServer.GracefulStop()
+	s.stopOnce.Do(func() {
+		s.healthServer.SetServingStatus("", healthpb.HealthCheckResponse_NOT_SERVING)
+		s.grpcServer.GracefulStop()
 
-	if s.metricsServer != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		s.metricsServer.Shutdown(ctx)
-	}
+		// Wait for metrics server to be ready (with timeout) before attempting shutdown
+		select {
+		case <-s.metricsReady:
+			// Metrics server is ready, proceed with shutdown
+		case <-time.After(5 * time.Second):
+			// Timeout waiting for metrics server to be ready
+			s.logger.Warn("timeout waiting for metrics server to be ready")
+			return
+		}
+
+		s.metricsMu.Lock()
+		metricsServer := s.metricsServer
+		s.metricsMu.Unlock()
+
+		if metricsServer != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := metricsServer.Shutdown(ctx); err != nil {
+				s.logger.Error("failed to shutdown metrics server", zap.Error(err))
+			}
+		}
+	})
 }
 
 // startMetricsServer starts the Prometheus metrics server
@@ -162,17 +188,30 @@ func (s *Server) startMetricsServer() {
 	})
 
 	addr := fmt.Sprintf(":%d", s.cfg.Metrics.Port)
-	s.metricsServer = &http.Server{
-		Addr:    addr,
-		Handler: mux,
+
+	// Create server with proper timeouts to prevent resource exhaustion
+	server := &http.Server{
+		Addr:         addr,
+		Handler:      mux,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
+
+	// Safely set the metricsServer field with mutex protection
+	s.metricsMu.Lock()
+	s.metricsServer = server
+	s.metricsMu.Unlock()
+
+	// Signal that metrics server is ready
+	close(s.metricsReady)
 
 	s.logger.Info("starting metrics server",
 		zap.String("address", addr),
 		zap.String("path", s.cfg.Metrics.Path),
 	)
 
-	if err := s.metricsServer.ListenAndServe(); err != http.ErrServerClosed {
+	if err := server.ListenAndServe(); err != http.ErrServerClosed {
 		s.logger.Error("metrics server failed", zap.Error(err))
 	}
 }

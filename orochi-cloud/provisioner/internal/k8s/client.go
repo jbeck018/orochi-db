@@ -4,7 +4,6 @@ package k8s
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -30,7 +29,6 @@ type Client struct {
 	ctrlClient client.Client
 	logger     *zap.Logger
 	scheme     *runtime.Scheme
-	mu         sync.RWMutex
 }
 
 // NewClient creates a new Kubernetes client
@@ -138,12 +136,21 @@ func (c *Client) WithRetry(ctx context.Context, operation string, fn func() erro
 	return nil
 }
 
-// WaitForCondition waits for a condition to be true with timeout
+// WaitForCondition waits for a condition to be true with timeout using exponential backoff
 func (c *Client) WaitForCondition(ctx context.Context, timeout time.Duration, condition func() (bool, error)) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	return wait.PollUntilContextCancel(ctx, time.Second, true, func(ctx context.Context) (bool, error) {
+	// Use exponential backoff: start at 100ms, double each time, cap at 10s
+	backoff := wait.Backoff{
+		Duration: 100 * time.Millisecond,
+		Factor:   2.0,
+		Jitter:   0.1,
+		Cap:      10 * time.Second,
+		Steps:    -1, // Unlimited steps (bounded by context timeout)
+	}
+
+	return wait.ExponentialBackoffWithContext(ctx, backoff, func(ctx context.Context) (bool, error) {
 		return condition()
 	})
 }
@@ -169,10 +176,8 @@ func (c *Client) GetManager(ctx context.Context) (ctrl.Manager, error) {
 }
 
 // CreateOrUpdate creates or updates a Kubernetes resource
+// Note: controller-runtime client is thread-safe, no mutex needed
 func (c *Client) CreateOrUpdate(ctx context.Context, obj client.Object) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	existing := obj.DeepCopyObject().(client.Object)
 	err := c.ctrlClient.Get(ctx, client.ObjectKeyFromObject(obj), existing)
 	if err != nil {
@@ -196,10 +201,8 @@ func (c *Client) CreateOrUpdate(ctx context.Context, obj client.Object) error {
 }
 
 // Delete deletes a Kubernetes resource
+// Note: controller-runtime client is thread-safe, no mutex needed
 func (c *Client) Delete(ctx context.Context, obj client.Object) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	if err := c.ctrlClient.Delete(ctx, obj); err != nil {
 		if client.IgnoreNotFound(err) != nil {
 			return fmt.Errorf("failed to delete resource: %w", err)
@@ -209,17 +212,13 @@ func (c *Client) Delete(ctx context.Context, obj client.Object) error {
 }
 
 // Get retrieves a Kubernetes resource
+// Note: controller-runtime client is thread-safe, no mutex needed
 func (c *Client) Get(ctx context.Context, key client.ObjectKey, obj client.Object) error {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
 	return c.ctrlClient.Get(ctx, key, obj)
 }
 
 // List lists Kubernetes resources
+// Note: controller-runtime client is thread-safe, no mutex needed
 func (c *Client) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
 	return c.ctrlClient.List(ctx, list, opts...)
 }

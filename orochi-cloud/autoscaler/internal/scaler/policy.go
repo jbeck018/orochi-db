@@ -4,6 +4,7 @@ package scaler
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"sync"
 	"time"
@@ -366,6 +367,11 @@ func (e *PolicyEngine) GetCooldowns() *CooldownTracker {
 
 // Evaluate evaluates the scaling policy for a cluster and returns a decision.
 func (e *PolicyEngine) Evaluate(ctx context.Context, clusterID, namespace string, currentMetrics *metrics.ClusterMetrics, currentReplicas int32) (*ScalingDecision, error) {
+	// Guard against nil metrics
+	if currentMetrics == nil {
+		return nil, fmt.Errorf("metrics cannot be nil for cluster %s/%s", namespace, clusterID)
+	}
+
 	policy, ok := e.GetPolicy(clusterID, namespace)
 	if !ok {
 		return nil, fmt.Errorf("no policy found for cluster %s/%s", namespace, clusterID)
@@ -414,17 +420,19 @@ func (e *PolicyEngine) Evaluate(ctx context.Context, clusterID, namespace string
 
 // evaluateRules evaluates custom scaling rules.
 func (e *PolicyEngine) evaluateRules(policy *Policy, currentMetrics *metrics.ClusterMetrics, currentReplicas int32) *ScalingDecision {
-	// Sort rules by priority
-	rules := make([]ScalingRule, len(policy.Rules))
-	copy(rules, policy.Rules)
-	sort.Slice(rules, func(i, j int) bool {
-		return rules[i].Priority > rules[j].Priority
+	// Create sorted indices to avoid copying rules (preserving state modifications)
+	indices := make([]int, len(policy.Rules))
+	for i := range indices {
+		indices[i] = i
+	}
+	sort.Slice(indices, func(i, j int) bool {
+		return policy.Rules[indices[i]].Priority > policy.Rules[indices[j]].Priority
 	})
 
 	now := time.Now()
 
-	for i := range rules {
-		rule := &rules[i]
+	for _, idx := range indices {
+		rule := &policy.Rules[idx] // Pointer to original rule to preserve state
 
 		// Check rule cooldown
 		if !e.cooldowns.CanTriggerRule(policy.ClusterID, policy.Namespace, rule.Name) {
@@ -500,9 +508,10 @@ func (e *PolicyEngine) evaluateHorizontal(policy *Policy, currentMetrics *metric
 	var maxUtilization float64
 
 	// CPU-based scaling
+	// Use math.Ceil to round up - ensures adequate capacity when scaling up
 	if currentMetrics.CPUUtilization > 0 && h.TargetCPUUtilization > 0 {
 		cpuRatio := currentMetrics.CPUUtilization / h.TargetCPUUtilization
-		cpuDesired := int32(float64(currentReplicas) * cpuRatio)
+		cpuDesired := int32(math.Ceil(float64(currentReplicas) * cpuRatio))
 		if cpuDesired > desiredReplicas {
 			desiredReplicas = cpuDesired
 			trigger = "cpu_utilization"
@@ -513,7 +522,7 @@ func (e *PolicyEngine) evaluateHorizontal(policy *Policy, currentMetrics *metric
 	// Memory-based scaling
 	if currentMetrics.MemoryUtilization > 0 && h.TargetMemoryUtilization > 0 {
 		memRatio := currentMetrics.MemoryUtilization / h.TargetMemoryUtilization
-		memDesired := int32(float64(currentReplicas) * memRatio)
+		memDesired := int32(math.Ceil(float64(currentReplicas) * memRatio))
 		if memDesired > desiredReplicas {
 			desiredReplicas = memDesired
 			trigger = "memory_utilization"
@@ -523,7 +532,8 @@ func (e *PolicyEngine) evaluateHorizontal(policy *Policy, currentMetrics *metric
 
 	// Connection-based scaling
 	if currentMetrics.ActiveConnections > 0 && h.TargetConnectionsPerPod > 0 {
-		connDesired := int32((currentMetrics.ActiveConnections + h.TargetConnectionsPerPod - 1) / h.TargetConnectionsPerPod)
+		// Use floating-point ceiling division to avoid integer overflow on large values
+		connDesired := int32(math.Ceil(float64(currentMetrics.ActiveConnections) / float64(h.TargetConnectionsPerPod)))
 		if connDesired > desiredReplicas {
 			desiredReplicas = connDesired
 			trigger = "active_connections"
@@ -534,7 +544,7 @@ func (e *PolicyEngine) evaluateHorizontal(policy *Policy, currentMetrics *metric
 	if currentMetrics.QueryLatencyP95Ms > 0 && h.TargetQueryLatencyMs > 0 {
 		if currentMetrics.QueryLatencyP95Ms > h.TargetQueryLatencyMs {
 			latencyRatio := currentMetrics.QueryLatencyP95Ms / h.TargetQueryLatencyMs
-			latencyDesired := int32(float64(currentReplicas) * latencyRatio)
+			latencyDesired := int32(math.Ceil(float64(currentReplicas) * latencyRatio))
 			if latencyDesired > desiredReplicas {
 				desiredReplicas = latencyDesired
 				trigger = "query_latency"
@@ -612,6 +622,11 @@ func (e *PolicyEngine) evaluateHorizontal(policy *Policy, currentMetrics *metric
 
 // getMetricValue retrieves a metric value by name.
 func (e *PolicyEngine) getMetricValue(m *metrics.ClusterMetrics, metricName string) float64 {
+	// Guard against nil metrics pointer
+	if m == nil {
+		return 0
+	}
+
 	switch metricName {
 	case "cpu_utilization":
 		return m.CPUUtilization
@@ -632,8 +647,11 @@ func (e *PolicyEngine) getMetricValue(m *metrics.ClusterMetrics, metricName stri
 	case "disk_utilization":
 		return m.DiskUtilization
 	default:
-		if v, ok := m.CustomMetrics[metricName]; ok {
-			return v
+		// Guard against nil CustomMetrics map
+		if m.CustomMetrics != nil {
+			if v, ok := m.CustomMetrics[metricName]; ok {
+				return v
+			}
 		}
 		return 0
 	}

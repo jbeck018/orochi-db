@@ -44,6 +44,7 @@ type JWTConfig struct {
 	Issuer          string
 	AccessTokenTTL  time.Duration
 	RefreshTokenTTL time.Duration
+	ClockSkewLeeway time.Duration // Tolerance for clock drift between servers
 }
 
 // GRPCConfig holds gRPC server configuration.
@@ -79,6 +80,7 @@ func Load() *Config {
 			Issuer:          getEnv("JWT_ISSUER", "orochi-cloud"),
 			AccessTokenTTL:  getEnvAsDuration("JWT_ACCESS_TOKEN_TTL", 15*time.Minute),
 			RefreshTokenTTL: getEnvAsDuration("JWT_REFRESH_TOKEN_TTL", 7*24*time.Hour),
+			ClockSkewLeeway: getEnvAsDuration("JWT_CLOCK_SKEW_LEEWAY", 30*time.Second),
 		},
 		GRPC: GRPCConfig{
 			Host: getEnv("GRPC_HOST", "0.0.0.0"),

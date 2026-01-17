@@ -3,13 +3,32 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"math/rand"
+	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/orochi-db/orochi-cloud/cli/internal/config"
+)
+
+const (
+	// maxResponseBodySize limits response body to 10MB to prevent memory exhaustion.
+	maxResponseBodySize = 10 * 1024 * 1024
+
+	// maxRetries is the maximum number of retry attempts for transient failures.
+	maxRetries = 3
+
+	// baseRetryDelay is the initial delay for exponential backoff.
+	baseRetryDelay = 500 * time.Millisecond
+
+	// maxRetryDelay caps the maximum delay between retries.
+	maxRetryDelay = 10 * time.Second
 )
 
 // Client is the Orochi Cloud API client.
@@ -110,12 +129,32 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("%s: %s", e.Code, e.Message)
 }
 
+// newHTTPTransport creates an HTTP transport with proper connection pooling settings.
+func newHTTPTransport() *http.Transport {
+	return &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   10,
+		MaxConnsPerHost:       100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
+	}
+}
+
 // NewClient creates a new API client.
 func NewClient() *Client {
 	return &Client{
 		baseURL: config.GetAPIEndpoint(),
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout:   30 * time.Second,
+			Transport: newHTTPTransport(),
 		},
 		token: config.GetAccessToken(),
 	}
@@ -126,46 +165,148 @@ func NewClientWithToken(token string) *Client {
 	return &Client{
 		baseURL: config.GetAPIEndpoint(),
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout:   30 * time.Second,
+			Transport: newHTTPTransport(),
 		},
 		token: token,
 	}
 }
 
-// doRequest performs an HTTP request.
+// isRetryableError determines if an error is transient and should be retried.
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Check for network-related errors
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return netErr.Timeout() || netErr.Temporary()
+	}
+
+	// Check for connection refused, reset, etc.
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		return true
+	}
+
+	return false
+}
+
+// isRetryableStatus determines if an HTTP status code is retryable.
+func isRetryableStatus(statusCode int) bool {
+	switch statusCode {
+	case http.StatusTooManyRequests,
+		http.StatusInternalServerError,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
+// calculateBackoff returns the delay for a retry attempt with jitter.
+func calculateBackoff(attempt int) time.Duration {
+	// Exponential backoff: baseDelay * 2^attempt
+	delay := baseRetryDelay * time.Duration(1<<uint(attempt))
+	if delay > maxRetryDelay {
+		delay = maxRetryDelay
+	}
+
+	// Add jitter (0-25% of delay)
+	jitter := time.Duration(rand.Int63n(int64(delay / 4)))
+	return delay + jitter
+}
+
+// doRequest performs an HTTP request with retry logic.
 func (c *Client) doRequest(method, path string, body interface{}) (*http.Response, error) {
-	var bodyReader io.Reader
+	return c.doRequestWithContext(context.Background(), method, path, body)
+}
+
+// doRequestWithContext performs an HTTP request with context support and retry logic.
+func (c *Client) doRequestWithContext(ctx context.Context, method, path string, body interface{}) (*http.Response, error) {
+	var bodyBytes []byte
 	if body != nil {
-		jsonBody, err := json.Marshal(body)
+		var err error
+		bodyBytes, err = json.Marshal(body)
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal request body: %w", err)
 		}
-		bodyReader = bytes.NewReader(jsonBody)
 	}
 
-	req, err := http.NewRequest(method, c.baseURL+path, bodyReader)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+	var lastErr error
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		// Check if context is already cancelled
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("request cancelled: %w", err)
+		}
+
+		// Create a new reader for each attempt (body may have been consumed)
+		var bodyReader io.Reader
+		if bodyBytes != nil {
+			bodyReader = bytes.NewReader(bodyBytes)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bodyReader)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json")
+		req.Header.Set("User-Agent", "orochi-cli/1.0.0")
+
+		if c.token != "" {
+			req.Header.Set("Authorization", "Bearer "+c.token)
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			lastErr = err
+			if isRetryableError(err) && attempt < maxRetries {
+				select {
+				case <-ctx.Done():
+					return nil, fmt.Errorf("request cancelled during retry: %w", ctx.Err())
+				case <-time.After(calculateBackoff(attempt)):
+					continue
+				}
+			}
+			return nil, fmt.Errorf("request failed: %w", err)
+		}
+
+		// Check if we should retry based on status code
+		if isRetryableStatus(resp.StatusCode) && attempt < maxRetries {
+			resp.Body.Close()
+			select {
+			case <-ctx.Done():
+				return nil, fmt.Errorf("request cancelled during retry: %w", ctx.Err())
+			case <-time.After(calculateBackoff(attempt)):
+				continue
+			}
+		}
+
+		return resp, nil
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "orochi-cli/1.0.0")
-
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
-
-	return c.httpClient.Do(req)
+	return nil, fmt.Errorf("max retries exceeded: %w", lastErr)
 }
 
 // parseResponse parses an HTTP response into the target type.
 func parseResponse[T any](resp *http.Response) (*T, error) {
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	// Use LimitReader to prevent reading excessively large response bodies
+	limitedReader := io.LimitReader(resp.Body, maxResponseBodySize)
+	body, err := io.ReadAll(limitedReader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	// Check if we hit the limit (body was truncated)
+	if int64(len(body)) == maxResponseBodySize {
+		return nil, fmt.Errorf("response body exceeds maximum size of %d bytes", maxResponseBodySize)
 	}
 
 	if resp.StatusCode >= 400 {
@@ -210,8 +351,11 @@ func (c *Client) Logout() error {
 	}
 	defer resp.Body.Close()
 
+	// Use LimitReader for body reading
+	limitedReader := io.LimitReader(resp.Body, maxResponseBodySize)
+
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(limitedReader)
 		var apiErr APIError
 		if err := json.Unmarshal(body, &apiErr); err != nil {
 			return &APIError{
@@ -257,7 +401,8 @@ func (c *Client) ListClusters() ([]Cluster, error) {
 
 // GetCluster returns a specific cluster by name.
 func (c *Client) GetCluster(name string) (*Cluster, error) {
-	resp, err := c.doRequest("GET", "/v1/clusters/"+name, nil)
+	escapedName := url.PathEscape(name)
+	resp, err := c.doRequest("GET", "/v1/clusters/"+escapedName, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -277,14 +422,18 @@ func (c *Client) CreateCluster(req *CreateClusterRequest) (*Cluster, error) {
 
 // DeleteCluster deletes a cluster by name.
 func (c *Client) DeleteCluster(name string) error {
-	resp, err := c.doRequest("DELETE", "/v1/clusters/"+name, nil)
+	escapedName := url.PathEscape(name)
+	resp, err := c.doRequest("DELETE", "/v1/clusters/"+escapedName, nil)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
+	// Use LimitReader for body reading
+	limitedReader := io.LimitReader(resp.Body, maxResponseBodySize)
+
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(limitedReader)
 		var apiErr APIError
 		if err := json.Unmarshal(body, &apiErr); err != nil {
 			return &APIError{
@@ -301,7 +450,8 @@ func (c *Client) DeleteCluster(name string) error {
 
 // ScaleCluster scales a cluster to a new replica count.
 func (c *Client) ScaleCluster(name string, replicas int) (*Cluster, error) {
-	resp, err := c.doRequest("PATCH", "/v1/clusters/"+name+"/scale", &ScaleClusterRequest{
+	escapedName := url.PathEscape(name)
+	resp, err := c.doRequest("PATCH", "/v1/clusters/"+escapedName+"/scale", &ScaleClusterRequest{
 		Replicas: replicas,
 	})
 	if err != nil {

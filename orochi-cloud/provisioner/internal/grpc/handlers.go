@@ -4,6 +4,7 @@ package grpc
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -87,8 +88,11 @@ func (h *Handler) DeleteCluster(ctx context.Context, req *DeleteClusterRequest) 
 		return nil, status.Error(codes.InvalidArgument, "cluster_id is required")
 	}
 
-	// Parse cluster ID (format: namespace-name)
-	namespace, name := h.parseClusterID(req.ClusterId)
+	// Parse cluster ID (format: namespace/name)
+	namespace, name, err := h.parseClusterID(req.ClusterId)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
 	if req.Namespace != "" {
 		namespace = req.Namespace
 	}
@@ -113,7 +117,10 @@ func (h *Handler) GetCluster(ctx context.Context, req *GetClusterRequest) (*GetC
 		return nil, status.Error(codes.InvalidArgument, "cluster_id is required")
 	}
 
-	namespace, name := h.parseClusterID(req.ClusterId)
+	namespace, name, err := h.parseClusterID(req.ClusterId)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
 	if req.Namespace != "" {
 		namespace = req.Namespace
 	}
@@ -152,7 +159,10 @@ func (h *Handler) CreateBackup(ctx context.Context, req *CreateBackupRequest) (*
 		return nil, status.Error(codes.InvalidArgument, "cluster_id is required")
 	}
 
-	namespace, clusterName := h.parseClusterID(req.ClusterId)
+	namespace, clusterName, err := h.parseClusterID(req.ClusterId)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
 	if req.Namespace != "" {
 		namespace = req.Namespace
 	}
@@ -181,7 +191,10 @@ func (h *Handler) ListBackups(ctx context.Context, req *ListBackupsRequest) (*Li
 		return nil, status.Error(codes.InvalidArgument, "cluster_id is required")
 	}
 
-	namespace, clusterName := h.parseClusterID(req.ClusterId)
+	namespace, clusterName, err := h.parseClusterID(req.ClusterId)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
 	if req.Namespace != "" {
 		namespace = req.Namespace
 	}
@@ -226,7 +239,10 @@ func (h *Handler) RestoreCluster(ctx context.Context, req *RestoreClusterRequest
 		return nil, status.Error(codes.InvalidArgument, "target_spec is required")
 	}
 
-	sourceNamespace, _ := h.parseClusterID(req.SourceClusterId)
+	sourceNamespace, _, err := h.parseClusterID(req.SourceClusterId)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
 	if req.SourceNamespace != "" {
 		sourceNamespace = req.SourceNamespace
 	}
@@ -253,7 +269,10 @@ func (h *Handler) GetClusterStatus(ctx context.Context, req *GetClusterStatusReq
 		return nil, status.Error(codes.InvalidArgument, "cluster_id is required")
 	}
 
-	namespace, name := h.parseClusterID(req.ClusterId)
+	namespace, name, err := h.parseClusterID(req.ClusterId)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
 	if req.Namespace != "" {
 		namespace = req.Namespace
 	}
@@ -289,14 +308,32 @@ func (h *Handler) HealthCheck(ctx context.Context, _ *emptypb.Empty) (*HealthChe
 
 // Helper functions for converting between types
 
-func (h *Handler) parseClusterID(clusterID string) (namespace, name string) {
-	// Expected format: namespace-name
-	for i := len(clusterID) - 1; i >= 0; i-- {
-		if clusterID[i] == '-' {
-			return clusterID[:i], clusterID[i+1:]
-		}
+// parseClusterID parses a cluster ID into namespace and name components.
+// Expected format: "namespace/name" (e.g., "production/db-cluster-primary")
+// The "/" separator is used to unambiguously separate namespace from name,
+// since both can contain hyphens.
+// Returns an error if the format is invalid.
+func (h *Handler) parseClusterID(clusterID string) (namespace, name string, err error) {
+	if clusterID == "" {
+		return "", "", fmt.Errorf("cluster ID cannot be empty")
 	}
-	return "default", clusterID
+
+	parts := strings.SplitN(clusterID, "/", 2)
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("invalid cluster ID format: expected 'namespace/name', got %q", clusterID)
+	}
+
+	namespace = strings.TrimSpace(parts[0])
+	name = strings.TrimSpace(parts[1])
+
+	if namespace == "" {
+		return "", "", fmt.Errorf("namespace cannot be empty in cluster ID %q", clusterID)
+	}
+	if name == "" {
+		return "", "", fmt.Errorf("name cannot be empty in cluster ID %q", clusterID)
+	}
+
+	return namespace, name, nil
 }
 
 func (h *Handler) convertClusterSpec(spec *ClusterSpec) *types.ClusterSpec {

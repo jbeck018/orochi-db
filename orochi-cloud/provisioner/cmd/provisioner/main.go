@@ -42,12 +42,15 @@ func main() {
 	}
 
 	// Initialize logger
-	logger, err := initLogger(cfg.Logging)
+	logger, closeLogFiles, err := initLogger(cfg.Logging)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
 		os.Exit(1)
 	}
-	defer logger.Sync()
+	defer func() {
+		logger.Sync()
+		closeLogFiles()
+	}()
 
 	logger.Info("starting Orochi Provisioner",
 		zap.String("version", version),
@@ -93,7 +96,9 @@ func main() {
 	logger.Info("provisioner shutdown complete")
 }
 
-func initLogger(cfg config.LoggingConfig) (*zap.Logger, error) {
+// initLogger initializes the logger and returns a cleanup function to close any opened log files.
+// The cleanup function should be called during shutdown to prevent file handle leaks.
+func initLogger(cfg config.LoggingConfig) (*zap.Logger, func(), error) {
 	var level zapcore.Level
 	if err := level.UnmarshalText([]byte(cfg.Level)); err != nil {
 		level = zapcore.InfoLevel
@@ -119,6 +124,9 @@ func initLogger(cfg config.LoggingConfig) (*zap.Logger, error) {
 		outputPaths = []string{"stdout"}
 	}
 
+	// Track opened files for cleanup
+	var openedFiles []*os.File
+
 	// Create writers for output paths
 	writers := make([]zapcore.WriteSyncer, 0, len(outputPaths))
 	for _, path := range outputPaths {
@@ -130,9 +138,21 @@ func initLogger(cfg config.LoggingConfig) (*zap.Logger, error) {
 		default:
 			file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 			if err != nil {
-				return nil, fmt.Errorf("failed to open log file %s: %w", path, err)
+				// Close any files we've already opened before returning error
+				for _, f := range openedFiles {
+					f.Close()
+				}
+				return nil, nil, fmt.Errorf("failed to open log file %s: %w", path, err)
 			}
+			openedFiles = append(openedFiles, file)
 			writers = append(writers, zapcore.AddSync(file))
+		}
+	}
+
+	// Create cleanup function to close all opened log files
+	closeLogFiles := func() {
+		for _, f := range openedFiles {
+			f.Close()
 		}
 	}
 
@@ -142,5 +162,5 @@ func initLogger(cfg config.LoggingConfig) (*zap.Logger, error) {
 		level,
 	)
 
-	return zap.New(core, zap.AddCaller(), zap.AddStacktrace(zapcore.ErrorLevel)), nil
+	return zap.New(core, zap.AddCaller(), zap.AddStacktrace(zapcore.ErrorLevel)), closeLogFiles, nil
 }

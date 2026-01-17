@@ -3,6 +3,9 @@ package api
 
 import (
 	"log/slog"
+	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -21,30 +24,81 @@ type RouterConfig struct {
 	UserService    *services.UserService
 	ClusterService *services.ClusterService
 	Logger         *slog.Logger
+
+	// AllowedOrigins specifies CORS allowed origins.
+	// If empty, defaults to environment variable ALLOWED_ORIGINS or localhost only.
+	AllowedOrigins []string
+
+	// RequestTimeout is the maximum duration for request processing.
+	// Default: 30 seconds
+	RequestTimeout time.Duration
+
+	// EnableHSTS enables HTTP Strict Transport Security header.
+	// Only enable when running behind HTTPS.
+	EnableHSTS bool
 }
 
 // NewRouter creates and configures the HTTP router.
 func NewRouter(cfg *RouterConfig) *chi.Mux {
 	r := chi.NewRouter()
 
-	// Global middleware
-	r.Use(chimiddleware.RealIP)
-	r.Use(middleware.RequestID)
-	r.Use(middleware.Logger(cfg.Logger))
-	r.Use(middleware.Recoverer(cfg.Logger))
-	r.Use(chimiddleware.Timeout(60 * time.Second))
+	// Set default timeout if not configured
+	requestTimeout := cfg.RequestTimeout
+	if requestTimeout == 0 {
+		requestTimeout = 30 * time.Second
+	}
 
-	// CORS configuration
+	// Determine allowed origins for CORS
+	allowedOrigins := cfg.AllowedOrigins
+	if len(allowedOrigins) == 0 {
+		// Check environment variable
+		if envOrigins := os.Getenv("ALLOWED_ORIGINS"); envOrigins != "" {
+			allowedOrigins = strings.Split(envOrigins, ",")
+			for i := range allowedOrigins {
+				allowedOrigins[i] = strings.TrimSpace(allowedOrigins[i])
+			}
+		} else {
+			// Default to localhost only for security
+			allowedOrigins = []string{
+				"http://localhost:3000",
+				"http://localhost:5173",
+				"http://127.0.0.1:3000",
+				"http://127.0.0.1:5173",
+			}
+		}
+	}
+
+	// Global middleware - order matters!
+	// 1. RealIP must be first to get correct client IP
+	r.Use(chimiddleware.RealIP)
+
+	// 2. Request ID for tracing
+	r.Use(middleware.RequestID)
+
+	// 3. Panic recovery (early to catch any middleware panics)
+	r.Use(middleware.Recoverer(cfg.Logger))
+
+	// 4. Security headers - applies to all responses
+	r.Use(middleware.SecurityHeaders)
+
+	// 5. CORS - must be before other response-writing middleware
+	// Note: AllowCredentials requires specific origins, not wildcards
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"}, // Configure appropriately for production
+		AllowedOrigins:   allowedOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Request-ID"},
-		ExposedHeaders:   []string{"X-Request-ID"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Request-ID", "X-CSRF-Token"},
+		ExposedHeaders:   []string{"X-Request-ID", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"},
 		AllowCredentials: true,
-		MaxAge:           300,
+		MaxAge:           300, // 5 minutes
 	}))
 
-	// Rate limiting
+	// 6. Request timeout - after CORS to ensure preflight responses work
+	r.Use(chimiddleware.Timeout(requestTimeout))
+
+	// 7. Logging - after timeout to capture accurate durations
+	r.Use(middleware.Logger(cfg.Logger))
+
+	// 8. Rate limiting
 	rateLimiter := middleware.NewRateLimiter(100, time.Minute)
 	r.Use(rateLimiter.Limit)
 
@@ -61,8 +115,29 @@ func NewRouter(cfg *RouterConfig) *chi.Mux {
 	r.Get("/health", healthHandler.Health)
 	r.Get("/ready", healthHandler.Ready)
 
+	// Custom 404 handler
+	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"code":"NOT_FOUND","message":"The requested resource was not found"}`))
+	})
+
+	// Custom 405 handler
+	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		w.Write([]byte(`{"code":"METHOD_NOT_ALLOWED","message":"The request method is not allowed for this resource"}`))
+	})
+
 	// API v1 routes
 	r.Route("/api/v1", func(r chi.Router) {
+		// API info endpoint (no auth required)
+		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"version":"v1","status":"available","documentation":"/api/v1/docs"}`))
+		})
+
 		// Auth routes (no auth required)
 		r.Route("/auth", func(r chi.Router) {
 			r.Post("/register", authHandler.Register)
