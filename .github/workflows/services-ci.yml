@@ -1,0 +1,421 @@
+# Orochi DB - Go Services CI Pipeline
+# Builds, tests, and validates all Go services using workspace
+
+name: Services CI
+
+on:
+  workflow_call:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'services/**'
+      - 'packages/go/**'
+      - 'tools/cli/**'
+      - 'go.work'
+      - 'go.work.sum'
+      - '.github/workflows/services-ci.yml'
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'services/**'
+      - 'packages/go/**'
+      - 'tools/cli/**'
+      - 'go.work'
+      - 'go.work.sum'
+      - '.github/workflows/services-ci.yml'
+
+concurrency:
+  group: services-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: '1.22'
+
+jobs:
+  # Lint all Go code
+  lint:
+    name: Lint (${{ matrix.component }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        component:
+          - services/control-plane
+          - services/provisioner
+          - tools/cli
+          - packages/go/shared
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: |
+            ${{ matrix.component }}/go.sum
+            packages/go/**/go.sum
+
+      - name: Check if component exists
+        id: check
+        run: |
+          if [ -d "${{ matrix.component }}" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Component ${{ matrix.component }} does not exist yet, skipping..."
+          fi
+
+      - name: Check go fmt
+        if: steps.check.outputs.exists == 'true'
+        working-directory: ${{ matrix.component }}
+        run: |
+          fmt_output=$(gofmt -l .)
+          if [ -n "$fmt_output" ]; then
+            echo "The following files are not formatted correctly:"
+            echo "$fmt_output"
+            echo ""
+            echo "Run 'gofmt -w .' to fix formatting"
+            exit 1
+          fi
+          echo "All files are properly formatted"
+
+      - name: Run go vet
+        if: steps.check.outputs.exists == 'true'
+        working-directory: ${{ matrix.component }}
+        run: go vet ./...
+
+      - name: Install golangci-lint
+        if: steps.check.outputs.exists == 'true'
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: latest
+          working-directory: ${{ matrix.component }}
+          args: --timeout=5m
+
+  # Test all Go code with coverage
+  test:
+    name: Test (${{ matrix.component }})
+    runs-on: ubuntu-latest
+    needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        component:
+          - services/control-plane
+          - services/provisioner
+          - tools/cli
+          - packages/go/shared
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: orochi_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: |
+            ${{ matrix.component }}/go.sum
+            packages/go/**/go.sum
+
+      - name: Check if component exists
+        id: check
+        run: |
+          if [ -d "${{ matrix.component }}" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download dependencies
+        if: steps.check.outputs.exists == 'true'
+        working-directory: ${{ matrix.component }}
+        run: go mod download
+
+      - name: Run tests with coverage
+        if: steps.check.outputs.exists == 'true'
+        working-directory: ${{ matrix.component }}
+        run: |
+          go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+          if [ -f coverage.out ]; then
+            go tool cover -func=coverage.out
+          fi
+        env:
+          DATABASE_URL: postgres://test:test@localhost:5432/orochi_test
+
+      - name: Upload coverage
+        if: steps.check.outputs.exists == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.component | replace('/', '-') }}
+          path: ${{ matrix.component }}/coverage.out
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # Build all services and CLI
+  build:
+    name: Build (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: control-plane
+            path: services/control-plane
+            binary: control-plane
+            entrypoint: cmd/server
+          - service: provisioner
+            path: services/provisioner
+            binary: provisioner
+            entrypoint: cmd/provisioner
+          - service: cli
+            path: tools/cli
+            binary: orochi
+            entrypoint: cmd/orochi
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: |
+            ${{ matrix.path }}/go.sum
+            packages/go/**/go.sum
+
+      - name: Check if component exists
+        id: check
+        run: |
+          if [ -d "${{ matrix.path }}" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download dependencies
+        if: steps.check.outputs.exists == 'true'
+        working-directory: ${{ matrix.path }}
+        run: go mod download
+
+      - name: Build ${{ matrix.service }}
+        if: steps.check.outputs.exists == 'true'
+        working-directory: ${{ matrix.path }}
+        run: |
+          mkdir -p bin
+          CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=${{ github.sha }}" -o bin/${{ matrix.binary }} ./${{ matrix.entrypoint }}
+          echo "Built ${{ matrix.binary }} successfully"
+          ls -la bin/
+
+      - name: Upload binary
+        if: steps.check.outputs.exists == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: service-${{ matrix.binary }}-linux-amd64
+          path: ${{ matrix.path }}/bin/${{ matrix.binary }}
+          retention-days: 7
+
+  # Multi-platform builds for CLI (on main branch only)
+  build-multi-platform:
+    name: Build Multi-Platform CLI
+    runs-on: ubuntu-latest
+    needs: [test, build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: tools/cli/go.sum
+
+      - name: Check if CLI exists
+        id: check
+        run: |
+          if [ -d "tools/cli" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download dependencies
+        if: steps.check.outputs.exists == 'true'
+        working-directory: tools/cli
+        run: go mod download
+
+      - name: Build for multiple platforms
+        if: steps.check.outputs.exists == 'true'
+        working-directory: tools/cli
+        run: |
+          mkdir -p bin
+          VERSION="${{ github.sha }}"
+
+          # Linux AMD64
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+            go build -ldflags="-s -w -X main.version=${VERSION}" -o bin/orochi-linux-amd64 ./cmd/orochi
+
+          # Linux ARM64
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 \
+            go build -ldflags="-s -w -X main.version=${VERSION}" -o bin/orochi-linux-arm64 ./cmd/orochi
+
+          # macOS AMD64
+          GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 \
+            go build -ldflags="-s -w -X main.version=${VERSION}" -o bin/orochi-darwin-amd64 ./cmd/orochi
+
+          # macOS ARM64 (Apple Silicon)
+          GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 \
+            go build -ldflags="-s -w -X main.version=${VERSION}" -o bin/orochi-darwin-arm64 ./cmd/orochi
+
+          # Windows AMD64
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+            go build -ldflags="-s -w -X main.version=${VERSION}" -o bin/orochi-windows-amd64.exe ./cmd/orochi
+
+          echo "Built binaries:"
+          ls -la bin/
+
+      - name: Upload multi-platform binaries
+        if: steps.check.outputs.exists == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: orochi-cli-all-platforms
+          path: tools/cli/bin/
+          retention-days: 30
+
+  # Security vulnerability scanning
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Scan services for vulnerabilities
+        run: |
+          echo "=== Security Vulnerability Scan ==="
+          FAILED=false
+
+          for dir in services/control-plane services/provisioner tools/cli packages/go/shared; do
+            if [ -d "$dir" ]; then
+              echo ""
+              echo "=== Scanning $dir ==="
+              cd "$dir"
+              govulncheck ./... || FAILED=true
+              cd - > /dev/null
+            fi
+          done
+
+          if [ "$FAILED" == "true" ]; then
+            echo ""
+            echo "WARNING: Vulnerabilities detected (non-blocking)"
+          fi
+
+  # Dependency review for PRs
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+
+  # Combined coverage report
+  coverage-report:
+    name: Coverage Report
+    runs-on: ubuntu-latest
+    needs: test
+    if: always() && github.event_name == 'pull_request'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          path: /tmp/coverage
+          merge-multiple: true
+
+      - name: Generate coverage summary
+        run: |
+          echo "## Coverage Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          for file in /tmp/coverage/*.out; do
+            if [ -f "$file" ]; then
+              component=$(basename "$file" .out | sed 's/coverage-//')
+              echo "### $component" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              go tool cover -func="$file" | tail -1 >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+
+  # CI Status
+  services-ci-status:
+    name: Services CI Status
+    runs-on: ubuntu-latest
+    needs: [lint, test, build, security-scan]
+    if: always()
+    steps:
+      - name: Check CI Status
+        run: |
+          echo "=== Services CI Status ==="
+          echo "Lint:     ${{ needs.lint.result }}"
+          echo "Test:     ${{ needs.test.result }}"
+          echo "Build:    ${{ needs.build.result }}"
+          echo "Security: ${{ needs.security-scan.result }}"
+
+          if [ "${{ needs.lint.result }}" != "success" ]; then
+            echo "Lint failed"; exit 1
+          fi
+          if [ "${{ needs.test.result }}" != "success" ]; then
+            echo "Tests failed"; exit 1
+          fi
+          if [ "${{ needs.build.result }}" != "success" ]; then
+            echo "Build failed"; exit 1
+          fi
+          # Security scan is informational
+          if [ "${{ needs.security-scan.result }}" == "failure" ]; then
+            echo "WARNING: Security scan reported issues"
+          fi
+
+          echo "Services CI passed!"

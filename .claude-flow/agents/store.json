@@ -25,6 +25,71 @@
       "createdAt": "2026-01-16T00:04:16.198Z",
       "model": "sonnet",
       "modelRoutedBy": "default"
+    },
+    "monorepo-restructurer": {
+      "agentId": "monorepo-restructurer",
+      "agentType": "repo-architect",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "model": "sonnet"
+      },
+      "createdAt": "2026-01-17T15:29:33.373Z",
+      "model": "sonnet",
+      "modelRoutedBy": "explicit"
+    },
+    "tanstack-implementer": {
+      "agentId": "tanstack-implementer",
+      "agentType": "frontend-developer",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "model": "sonnet"
+      },
+      "createdAt": "2026-01-17T15:29:33.900Z",
+      "model": "sonnet",
+      "modelRoutedBy": "explicit"
+    },
+    "orochi-features-dev": {
+      "agentId": "orochi-features-dev",
+      "agentType": "frontend-developer",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "model": "sonnet"
+      },
+      "createdAt": "2026-01-17T15:29:34.372Z",
+      "model": "sonnet",
+      "modelRoutedBy": "explicit"
+    },
+    "cicd-updater": {
+      "agentId": "cicd-updater",
+      "agentType": "cicd-engineer",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "model": "sonnet"
+      },
+      "createdAt": "2026-01-17T15:29:34.821Z",
+      "model": "sonnet",
+      "modelRoutedBy": "explicit"
+    },
+    "docs-updater": {
+      "agentId": "docs-updater",
+      "agentType": "docs-architect",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "model": "sonnet"
+      },
+      "createdAt": "2026-01-17T15:29:35.253Z",
+      "model": "sonnet",
+      "modelRoutedBy": "explicit"
     }
   },
   "version": "3.0.0"

@@ -1,10 +1,15 @@
 # Orochi DB - AI Agent Development Guide
 
-A comprehensive guide for AI agents working with this PostgreSQL HTAP extension.
+A comprehensive guide for AI agents working with Orochi DB, a PostgreSQL HTAP extension with cloud platform.
 
 ## Project Overview
 
-Orochi DB is a PostgreSQL extension providing HTAP (Hybrid Transactional/Analytical Processing) capabilities. It combines:
+Orochi DB is a dual-component system:
+
+1. **PostgreSQL Extension (C11)**: Core HTAP functionality built as a PostgreSQL extension
+2. **Cloud Platform (Go + React)**: Management and orchestration layer for running Orochi DB clusters
+
+### PostgreSQL Extension Features
 
 - **Automatic Sharding**: Hash-based horizontal distribution across nodes (inspired by Citus)
 - **Time-Series Optimization**: Automatic time-based partitioning with chunks (inspired by TimescaleDB)
@@ -20,20 +25,161 @@ Orochi DB is a PostgreSQL extension providing HTAP (Hybrid Transactional/Analyti
 - **JSON Processing**: JSON query processing, columnar JSON storage, JSON indexing
 - **Dynamic DDL**: Distributed schema changes and DDL workflow orchestration
 
+### Cloud Platform Features
+
+- **Control Plane**: REST/gRPC API for cluster lifecycle management
+- **Web Dashboard**: React 19 UI with TanStack Router
+- **CLI Tool**: Full-featured command-line interface
+- **Autoscaler**: Automatic scaling based on metrics
+- **Provisioner**: Cluster provisioning with CloudNativePG
+- **Infrastructure**: Kubernetes manifests and Helm charts
+
 **Version**: 1.0.0
 **Supported PostgreSQL**: 16, 17, 18
 **Minimum PostgreSQL**: 16+
-**Language**: C11
+**Extension Language**: C11
+**Cloud Services Language**: Go 1.22+
+**Dashboard**: React 19 + TypeScript
+
+---
+
+## Directory Structure (Monorepo)
+
+```
+/Users/jacob/projects/orochi-db/
+├── extensions/
+│   └── postgres/                  # PostgreSQL Extension (C11)
+│       ├── src/
+│       │   ├── orochi.h          # Main header - all types, enums, API declarations
+│       │   ├── core/             # Init, catalog management
+│       │   ├── storage/          # Columnar storage, compression
+│       │   ├── sharding/         # Distribution, physical sharding
+│       │   ├── timeseries/       # Hypertables, chunks
+│       │   ├── tiered/           # Hot/warm/cold/frozen tiers
+│       │   ├── vector/           # SIMD vector operations
+│       │   ├── planner/          # Distributed query planning
+│       │   ├── executor/         # Distributed execution, vectorized
+│       │   ├── jit/              # JIT compilation
+│       │   ├── consensus/        # Raft protocol
+│       │   ├── pipelines/        # Data pipelines, Kafka
+│       │   ├── cdc/              # Change data capture
+│       │   ├── workload/         # Resource pools
+│       │   ├── approx/           # HyperLogLog, T-Digest
+│       │   ├── auth/             # Authentication (JWT, WebAuthn)
+│       │   ├── json/             # JSON processing
+│       │   ├── ddl/              # Dynamic DDL
+│       │   └── utils/
+│       ├── sql/                  # Extension SQL definitions
+│       ├── test/                 # Unit and regression tests
+│       ├── benchmark/            # Performance benchmarks
+│       ├── docs/                 # Extension documentation
+│       ├── Makefile              # PGXS build system
+│       └── orochi.control
+│
+├── services/                      # Go Backend Services
+│   ├── control-plane/            # Cluster management API
+│   │   ├── cmd/server/           # Server entrypoint
+│   │   ├── internal/
+│   │   │   ├── api/              # HTTP handlers, middleware
+│   │   │   ├── services/         # Business logic
+│   │   │   ├── models/           # Data models
+│   │   │   ├── db/               # Database layer
+│   │   │   └── auth/             # JWT authentication
+│   │   ├── pkg/                  # Public packages
+│   │   └── go.mod
+│   ├── provisioner/              # Cluster provisioning service
+│   │   ├── cmd/provisioner/
+│   │   ├── internal/
+│   │   │   ├── grpc/             # gRPC server
+│   │   │   ├── k8s/              # Kubernetes client
+│   │   │   ├── provisioner/      # Service logic
+│   │   │   └── cloudnativepg/    # CNPG integration
+│   │   ├── templates/            # CloudNativePG templates
+│   │   └── go.mod
+│   ├── autoscaler/               # Automatic scaling service
+│   │   ├── cmd/autoscaler/
+│   │   ├── internal/
+│   │   │   ├── metrics/          # Metrics collection
+│   │   │   ├── grpc/             # gRPC server
+│   │   │   ├── k8s/              # Kubernetes client
+│   │   │   └── scaler/           # Scaling logic
+│   │   └── go.mod
+│   ├── Makefile                  # Services build
+│   └── README.md
+│
+├── apps/
+│   └── dashboard/                # Web UI (React 19 + TypeScript)
+│       ├── src/
+│       │   ├── routes/           # TanStack Router routes
+│       │   └── client.tsx
+│       ├── components/           # React components
+│       │   ├── ui/               # shadcn/ui components
+│       │   ├── auth/             # Auth forms
+│       │   ├── clusters/         # Cluster components
+│       │   └── layout/           # Layout components
+│       ├── hooks/                # Custom React hooks
+│       ├── lib/                  # Utilities
+│       ├── types/                # TypeScript types
+│       ├── package.json
+│       └── vite.config.ts
+│
+├── tools/
+│   └── cli/                      # CLI Tool (Go)
+│       ├── cmd/orochi/           # CLI entrypoint
+│       ├── internal/
+│       │   ├── cmd/              # Command implementations
+│       │   ├── api/              # API client
+│       │   └── output/           # Output formatting
+│       └── go.mod
+│
+├── packages/
+│   └── go/
+│       └── shared/               # Shared Go libraries
+│           ├── types/            # Common type definitions
+│           └── go.mod
+│
+├── infrastructure/               # Kubernetes infrastructure
+│   ├── manifests/                # K8s manifests
+│   ├── helm/                     # Helm charts
+│   └── kustomize/                # Kustomize overlays
+│
+├── go.work                       # Go workspace file
+├── package.json                  # npm workspaces
+├── Makefile                      # Root Makefile (delegates to subdirs)
+└── docs/                         # Project documentation
+```
 
 ---
 
 ## Build Instructions
 
-### Prerequisites
+### Quick Start (Monorepo)
+
+```bash
+# Build everything
+make build-all
+
+# Or build individual components
+make extension        # PostgreSQL extension
+make services         # All Go services
+make cli              # CLI tool
+make dashboard        # Dashboard
+
+# Run all tests
+make test
+
+# Format and lint
+make format
+make lint
+```
+
+### PostgreSQL Extension
+
+#### Prerequisites
 
 ```bash
 # Ubuntu/Debian - install all dependencies
-make install-deps
+cd extensions/postgres && make install-deps
 
 # Or manually:
 sudo apt-get install -y \
@@ -47,26 +193,23 @@ sudo apt-get install -y \
     cppcheck
 ```
 
-### Building
+#### Building
 
 ```bash
 # Standard build (optimized with -O3)
-make
+make extension
 
 # Debug build (with symbols, no optimization)
-make DEBUG=1
+cd extensions/postgres && make DEBUG=1
 
 # Install to PostgreSQL
-sudo make install
+make extension-install
 
 # Clean build artifacts
-make clean
-
-# Clean everything including test results
-make clean-all
+make extension-clean
 ```
 
-### PostgreSQL Configuration
+#### PostgreSQL Configuration
 
 Add to `postgresql.conf`:
 ```
@@ -78,21 +221,92 @@ Restart PostgreSQL, then create the extension:
 CREATE EXTENSION orochi;
 ```
 
+### Cloud Platform
+
+#### Prerequisites
+
+```bash
+# Go 1.22+
+go version
+
+# Node.js 20+ and npm
+node --version
+npm --version
+
+# Kubernetes cluster (for deployment)
+kubectl version
+
+# CloudNativePG operator (for cluster provisioning)
+kubectl apply -f https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.21/releases/cnpg-1.21.0.yaml
+```
+
+#### Building Services
+
+```bash
+# Build all services (uses go.work)
+make services
+
+# Build specific service
+make services-control-plane
+make services-provisioner
+make services-autoscaler
+
+# Run tests
+make services-test
+
+# Tidy Go modules
+make go-tidy
+```
+
+#### Building CLI
+
+```bash
+# Build CLI
+make cli
+
+# Install globally
+make cli-install
+
+# Test CLI
+make cli-test
+```
+
+#### Building Dashboard
+
+```bash
+# Build for production
+make dashboard
+
+# Run development server
+make dashboard-dev
+
+# Or manually:
+cd apps/dashboard
+npm install
+npm run dev
+```
+
 ---
 
 ## Testing Instructions
 
-### Unit Tests (Standalone - No PostgreSQL Required)
+### PostgreSQL Extension Tests
+
+#### Unit Tests (Standalone - No PostgreSQL Required)
 
 ```bash
-cd test/unit
+# Via root Makefile
+make extension-unit-test
+
+# Or directly
+cd extensions/postgres/test/unit
 make
 ./run_tests
 ```
 
 The unit tests use a lightweight framework (`test_framework.h`) that runs without PostgreSQL.
 
-**Test Files:**
+**Test Files (in `extensions/postgres/test/unit/`):**
 | File | Module |
 |------|--------|
 | `test_columnar.c` | Columnar storage and compression |
@@ -110,150 +324,138 @@ The unit tests use a lightweight framework (`test_framework.h`) that runs withou
 | `test_magic_link.c` | Magic link authentication |
 | `test_branch_access.c` | Branch access control |
 
-### Regression Tests (Requires PostgreSQL)
+#### Regression Tests (Requires PostgreSQL)
 
 ```bash
 # After installing the extension
-make installcheck
+make extension-test
+
+# Or directly
+cd extensions/postgres && make installcheck
 ```
 
-Test SQL files: `test/sql/`
-Expected output: `test/expected/`
+Test SQL files: `extensions/postgres/test/sql/`
+Expected output: `extensions/postgres/test/expected/`
 
-### Static Analysis
+#### Static Analysis
 
 ```bash
+make lint          # Run all linters
+make format        # Auto-format all code
+
+# Extension only
+cd extensions/postgres
 make lint          # Run cppcheck
 make check-format  # Check clang-format compliance
-make format        # Auto-format all source code
+make format        # Auto-format C code
 ```
 
-### Performance Benchmarks
+#### Performance Benchmarks
 
 ```bash
 # Build and run all benchmarks
-cd benchmark
+cd extensions/postgres/benchmark
 make
 ./run_all.sh
 
 # Run specific benchmark suite
-cd benchmark/tpch && ./tpch_bench
-cd benchmark/vectorized && ./vectorized_bench
+cd extensions/postgres/benchmark/tpch && ./tpch_bench
+cd extensions/postgres/benchmark/vectorized && ./vectorized_bench
 ```
 
-Benchmark suites:
-- `columnar/` - Columnar storage read/write performance
-- `distributed/` - Cross-node query latency
-- `timeseries/` - Time-series ingestion throughput
-- `tpch/` - TPC-H standard benchmark queries
-- `vectorized/` - SIMD vectorized operation throughput
+### Cloud Platform Tests
+
+#### Go Service Tests
+
+```bash
+# Test all services
+make services-test
+
+# Test specific service
+cd services/control-plane && go test ./...
+cd services/autoscaler && go test ./...
+cd services/provisioner && go test ./...
+
+# Test CLI
+make cli-test
+
+# Test with coverage
+cd services/control-plane && go test -coverprofile=coverage.out ./...
+go tool cover -html=coverage.out
+
+# Run integration tests
+cd services/control-plane && go test -tags=integration ./...
+```
+
+#### Dashboard Tests
+
+```bash
+cd apps/dashboard
+
+# Lint TypeScript
+npm run lint
+
+# Type check
+npm run type-check
+```
 
 ---
 
-## Directory Structure
+## Cross-Component Development
 
+### Working on Extension + Dashboard
+
+When developing features that span both the PostgreSQL extension and dashboard:
+
+```bash
+# Terminal 1: PostgreSQL with extension
+make extension-install && sudo systemctl restart postgresql
+psql -c "CREATE EXTENSION IF NOT EXISTS orochi"
+
+# Terminal 2: Control plane API
+cd services/control-plane
+go run ./cmd/server
+
+# Terminal 3: Dashboard
+make dashboard-dev
 ```
-/home/user/orochi-db/
-├── src/
-│   ├── orochi.h              # Main header - all types, enums, API declarations
-│   ├── core/
-│   │   ├── init.c            # _PG_init, GUCs, hook registration, background workers
-│   │   └── catalog.c/h       # Metadata tables management
-│   ├── storage/
-│   │   ├── columnar.c/h      # Columnar storage (stripes, column chunks)
-│   │   └── compression.c/h   # LZ4, ZSTD, Delta, Gorilla, RLE, Dictionary
-│   ├── sharding/
-│   │   ├── distribution.c/h  # Hash-based shard routing
-│   │   └── physical_sharding.c/h
-│   ├── timeseries/
-│   │   └── hypertable.c/h    # Time partitioning, chunks, continuous aggregates
-│   ├── tiered/
-│   │   └── tiered_storage.c/h # Hot/warm/cold/frozen tiers, S3 integration
-│   ├── vector/
-│   │   └── vector_ops.c/h    # Vector type, SIMD distance functions
-│   ├── planner/
-│   │   └── distributed_planner.c/h # Planner hook, shard pruning
-│   ├── executor/
-│   │   ├── distributed_executor.c/h # Executor hooks, parallel execution
-│   │   ├── vectorized.c/h    # Vectorized batch processing
-│   │   └── vectorized_scan.c
-│   ├── jit/
-│   │   ├── jit.h             # JIT API
-│   │   ├── jit_expr.h        # Expression tree API
-│   │   ├── jit_compile.c     # Expression compilation
-│   │   └── jit_expr.c        # Expression tree building
-│   ├── consensus/
-│   │   ├── raft.c/h          # Raft protocol implementation
-│   │   ├── raft_log.c        # Log management and persistence
-│   │   └── raft_integration.c/h
-│   ├── pipelines/
-│   │   ├── pipeline.c/h      # Real-time ingestion framework
-│   │   ├── kafka_source.c    # Kafka consumer
-│   │   └── s3_source.c       # S3 data source integration
-│   ├── cdc/
-│   │   └── cdc.c/h           # Change Data Capture
-│   ├── workload/
-│   │   └── workload.c/h      # Resource pools, admission control
-│   ├── approx/
-│   │   ├── hyperloglog.c/h   # Cardinality estimation
-│   │   ├── tdigest.c/h       # Percentile approximation
-│   │   └── sampling.c
-│   ├── auth/                  # Authentication system (NEW)
-│   │   ├── auth.c/h          # Main authentication system
-│   │   ├── auth_cache.c      # Auth caching layer
-│   │   ├── auth_hooks.c      # Hook integration
-│   │   ├── auth_webhooks.c   # Webhook handling
-│   │   ├── anonymous_auth.c  # Anonymous authentication support
-│   │   ├── jwt.c/h           # JWT token handling
-│   │   ├── jwt_claims.c      # JWT claims processing
-│   │   ├── magic_link.c      # Magic link authentication
-│   │   ├── webauthn.c/h      # WebAuthn/FIDO2 support
-│   │   ├── gotrue.c/h        # GoTrue service integration
-│   │   ├── endpoint_auth.c/h # HTTP endpoint authentication
-│   │   ├── branch_access.c/h # Branch-level access control
-│   │   └── role_mapping.c/h  # Role-based mapping
-│   ├── json/                  # JSON processing (NEW)
-│   │   ├── json_query.c/h    # JSON query processing
-│   │   ├── json_columnar.c/h # Columnar JSON storage
-│   │   └── json_index.c/h    # JSON indexing
-│   ├── ddl/                   # Dynamic DDL (NEW)
-│   │   ├── ddl_dynamic.c/h   # Dynamic DDL handling
-│   │   ├── ddl_workflow.c/h  # DDL workflow orchestration
-│   │   ├── ddl_task.c/h      # Task-based DDL execution
-│   │   └── ddl_stream.c/h    # Streaming DDL operations
-│   └── utils/
-│       └── utils.c
-├── sql/
-│   └── orochi--1.0.sql       # Extension SQL definitions
-├── test/
-│   ├── unit/
-│   │   ├── Makefile
-│   │   ├── test_framework.h  # Test macros
-│   │   ├── mocks/            # PostgreSQL API mocks
-│   │   └── test_*.c
-│   ├── sql/                  # Regression SQL
-│   └── expected/             # Expected output
-├── docs/
-│   ├── architecture.md
-│   └── user-guide.md
-├── benchmark/                 # Performance benchmarking (NEW)
-│   ├── common/               # Benchmark utilities
-│   ├── columnar/             # Columnar storage benchmarks
-│   ├── distributed/          # Distributed query benchmarks
-│   ├── timeseries/           # Time-series performance benchmarks
-│   ├── tpch/                 # TPC-H benchmark suite
-│   ├── vectorized/           # Vectorized execution benchmarks
-│   └── run_all.sh            # Benchmark runner script
-├── orochi-cloud/              # Cloud-specific functionality (NEW)
-│   └── dashboard/            # Web UI dashboard (React 19 + TanStack + Tailwind)
-└── Makefile                  # PGXS build system
+
+### Working on Extension + CLI
+
+```bash
+# Terminal 1: Build and install extension
+cd extensions/postgres && make DEBUG=1 && sudo make install
+
+# Terminal 2: Test with CLI
+cd tools/cli
+go run ./cmd/orochi cluster status my-cluster
+```
+
+### Local Development with Kubernetes
+
+```bash
+# Start minikube
+minikube start
+
+# Install CloudNativePG
+kubectl apply -f infrastructure/manifests/cnpg-operator.yaml
+
+# Deploy control plane
+kubectl apply -f infrastructure/manifests/control-plane.yaml
+
+# Port forward for local access
+kubectl port-forward svc/orochi-control-plane 8080:8080
+
+# Deploy dashboard
+kubectl apply -f infrastructure/manifests/dashboard.yaml
+kubectl port-forward svc/orochi-dashboard 3000:3000
 ```
 
 ---
 
 ## Architecture Overview
 
-### Data Flow
+### PostgreSQL Extension Data Flow
 
 ```
 INSERT → Distribution Column Hash → Shard/Chunk Selection → Storage
@@ -278,9 +480,43 @@ SELECT → Planner Hook → Shard/Chunk Pruning → Fragment Queries
          Execution       Expressions      Execution
 ```
 
+### Cloud Platform Component Interaction
+
+```
+┌──────────────┐
+│   Dashboard  │
+│  (React 19)  │
+└──────┬───────┘
+       │ HTTP/REST
+       ▼
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│    CLI       │────▶│ Control      │────▶│ PostgreSQL   │
+│  (Go)        │     │ Plane API    │     │ Metadata DB  │
+└──────────────┘     │  (Go)        │     └──────────────┘
+                     └──────┬───────┘
+                            │ K8s API
+                            ▼
+                     ┌──────────────┐     ┌──────────────┐
+                     │ Provisioner  │────▶│ CloudNativePG│
+                     │   Service    │     │   Operator   │
+                     └──────────────┘     └──────┬───────┘
+                                                 │
+                     ┌──────────────┐            │
+                     │ Autoscaler   │            │
+                     │   Service    │            │
+                     └──────┬───────┘            │
+                            │ Metrics            │
+                            ▼                    ▼
+                     ┌────────────────────────────────┐
+                     │      Orochi DB Clusters        │
+                     │  (PostgreSQL + Extension)      │
+                     └────────────────────────────────┘
+```
+
 ### Module Dependencies
 
 ```
+Extension (extensions/postgres/src/):
 core/init.c
     ├── planner/distributed_planner.c
     ├── executor/distributed_executor.c
@@ -295,13 +531,27 @@ sharding/distribution.c ←→ timeseries/hypertable.c
                     │
                     ▼
             tiered/tiered_storage.c
+
+Cloud Platform:
+apps/dashboard → services/control-plane → services/provisioner → CloudNativePG
+       │                    │                       │
+       │                    └───────────────────────┴─→ services/autoscaler
+       │
+       └─→ tools/cli → services/control-plane
+
+Go Workspace (go.work):
+├── services/control-plane
+├── services/provisioner
+├── services/autoscaler
+├── tools/cli
+└── packages/go/shared
 ```
 
 ---
 
 ## Coding Conventions
 
-### PostgreSQL Extension Patterns
+### PostgreSQL Extension (C11)
 
 **Memory Management** - Use PostgreSQL memory contexts:
 ```c
@@ -321,44 +571,7 @@ ereport(ERROR,
 elog(LOG, "Orochi initialized with %d shards", count);
 ```
 
-**GUC Variables** - Define in `init.c`:
-```c
-DefineCustomIntVariable("orochi.default_shard_count",
-                        "Default number of shards",
-                        NULL,
-                        &orochi_default_shard_count,
-                        32,    /* default */
-                        1,     /* min */
-                        1024,  /* max */
-                        PGC_USERSET,
-                        0,
-                        NULL, NULL, NULL);
-```
-
-**Hook Chaining** - Always preserve previous hooks:
-```c
-prev_planner_hook = planner_hook;
-planner_hook = orochi_planner_hook;
-
-// In _PG_fini:
-planner_hook = prev_planner_hook;
-```
-
-**SQL Functions** - Use PG_FUNCTION_ARGS:
-```c
-PG_FUNCTION_INFO_V1(orochi_my_function);
-Datum
-orochi_my_function(PG_FUNCTION_ARGS)
-{
-    int32 arg1 = PG_GETARG_INT32(0);
-    text *arg2 = PG_GETARG_TEXT_PP(1);
-    // ...
-    PG_RETURN_BOOL(true);
-}
-```
-
-### Code Style
-
+**Code Style**:
 - C11 standard (`-std=c11`)
 - 4-space indentation
 - Use `make format` before committing
@@ -366,218 +579,367 @@ orochi_my_function(PG_FUNCTION_ARGS)
 - Use `static` for file-local functions
 - Document functions in header files
 
-### Unit Test Pattern
+### Go Services
 
-```c
-#include "test_framework.h"
+**Project Structure** - Follow standard Go project layout:
+```
+service/
+├── cmd/
+│   └── service/
+│       └── main.go
+├── internal/
+│   ├── api/
+│   ├── service/
+│   └── db/
+├── pkg/
+│   └── client/
+├── api/
+│   └── openapi.yaml
+└── go.mod
+```
 
-TEST_SUITE(test_my_module)
-{
-    TEST_BEGIN("descriptive_test_name")
-        // Setup
-        MyStruct *obj = create_object();
+**Error Handling** - Use structured errors:
+```go
+import "errors"
 
-        // Action
-        int result = function_under_test(obj);
+var (
+    ErrClusterNotFound = errors.New("cluster not found")
+    ErrInvalidConfig   = errors.New("invalid configuration")
+)
 
-        // Assert
-        TEST_ASSERT_EQ(42, result);
-        TEST_ASSERT_NOT_NULL(obj->data);
-        TEST_ASSERT_STR_EQ("expected", obj->name);
-
-        // Cleanup
-        free_object(obj);
-    TEST_END()
-
-    TEST_BEGIN("another_test")
-        TEST_ASSERT_NEAR(3.14159, calculate_pi(), 0.0001);
-    TEST_END()
+func (s *Service) GetCluster(id string) (*Cluster, error) {
+    cluster, err := s.db.FindCluster(id)
+    if err != nil {
+        return nil, fmt.Errorf("failed to get cluster: %w", err)
+    }
+    return cluster, nil
 }
 ```
+
+**Code Style**:
+- Run `gofmt` and `goimports`
+- Use `golangci-lint run`
+- Follow [Effective Go](https://golang.org/doc/effective_go.html)
+- Use context for cancellation
+- Handle errors explicitly
+- Use structured logging (slog)
+
+### React Dashboard (TypeScript)
+
+**Component Structure**:
+```typescript
+// components/ClusterCard.tsx
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
+import { type Cluster } from "@/types/cluster"
+
+interface ClusterCardProps {
+  cluster: Cluster
+  onSelect?: (id: string) => void
+}
+
+export function ClusterCard({ cluster, onSelect }: ClusterCardProps) {
+  return (
+    <Card onClick={() => onSelect?.(cluster.id)}>
+      <CardHeader>
+        <CardTitle>{cluster.name}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {/* ... */}
+      </CardContent>
+    </Card>
+  )
+}
+```
+
+**TanStack Router Usage**:
+```typescript
+// routes/clusters.$clusterId.tsx
+import { createFileRoute } from '@tanstack/react-router'
+import { ClusterDetail } from '@/components/ClusterDetail'
+
+export const Route = createFileRoute('/clusters/$clusterId')({
+  component: ClusterDetailPage,
+  loader: async ({ params }) => {
+    const cluster = await fetchCluster(params.clusterId)
+    return { cluster }
+  }
+})
+
+function ClusterDetailPage() {
+  const { cluster } = Route.useLoaderData()
+  return <ClusterDetail cluster={cluster} />
+}
+```
+
+**Code Style**:
+- Use TypeScript strict mode
+- Follow ESLint rules
+- Use Tailwind CSS for styling
+- Prefer shadcn/ui components
+- Use TanStack Query for data fetching
+- Use TanStack Router for routing
 
 ---
 
 ## Important Entry Points
 
-### Extension Lifecycle
+### PostgreSQL Extension
 
 | Function | File | Purpose |
 |----------|------|---------|
-| `_PG_init()` | `src/core/init.c` | Extension load - GUCs, hooks, shared memory |
-| `_PG_fini()` | `src/core/init.c` | Extension unload - restore hooks |
-| `orochi_shmem_startup()` | `src/core/init.c` | Initialize shared memory structures |
+| `_PG_init()` | `extensions/postgres/src/core/init.c` | Extension load - GUCs, hooks, shared memory |
+| `_PG_fini()` | `extensions/postgres/src/core/init.c` | Extension unload - restore hooks |
+| `orochi_shmem_startup()` | `extensions/postgres/src/core/init.c` | Initialize shared memory structures |
 
-### Hooks
+### Go Services
 
-| Hook | File | Purpose |
-|------|------|---------|
-| `orochi_planner_hook` | `distributed_planner.c` | Query planning for distributed tables |
-| `orochi_executor_start_hook` | `distributed_executor.c` | Initialize execution state |
-| `orochi_executor_run_hook` | `distributed_executor.c` | Execute distributed fragments |
-| `orochi_executor_finish_hook` | `distributed_executor.c` | Finalize execution |
-| `orochi_executor_end_hook` | `distributed_executor.c` | Cleanup execution state |
+| Service | Entrypoint | Purpose |
+|---------|------------|---------|
+| Control Plane | `services/control-plane/cmd/server/main.go` | Cluster management API |
+| CLI | `tools/cli/cmd/orochi/main.go` | Command-line interface |
+| Autoscaler | `services/autoscaler/cmd/autoscaler/main.go` | Automatic scaling service |
+| Provisioner | `services/provisioner/cmd/provisioner/main.go` | Cluster provisioning service |
 
-### Background Workers
+### Dashboard
 
-| Worker | Function | Purpose |
-|--------|----------|---------|
-| Tiering | `orochi_tiering_worker_main` | Move data between storage tiers |
-| Compression | `orochi_compression_worker_main` | Compress cold chunks |
-| Stats | `orochi_stats_worker_main` | Gather cluster statistics |
-| Rebalancer | `orochi_rebalancer_worker_main` | Rebalance shards across nodes |
-| Raft | `orochi_raft_worker_main` | Consensus protocol |
-| Pipeline | `pipeline_worker_main` | Data pipeline processing |
-| CDC | `cdc_worker_main` | Change data capture streaming |
-
-### Core APIs
-
-| Function | Purpose |
-|----------|---------|
-| `orochi_create_distributed_table()` | Shard a table across nodes |
-| `orochi_create_hypertable()` | Enable time-series partitioning |
-| `orochi_convert_to_columnar()` | Convert to columnar storage |
-| `orochi_move_to_tier()` | Move data between tiers |
-| `orochi_create_pipeline()` | Create data ingestion pipeline |
-| `orochi_create_cdc_subscription()` | Set up CDC streaming |
-| `orochi_create_resource_pool()` | Create workload resource pool |
-| `orochi_authenticate()` | Authenticate a session (JWT/WebAuthn/Magic Link) |
-| `orochi_verify_jwt()` | Verify and decode JWT token |
-| `orochi_json_query()` | Execute JSON path query |
-| `orochi_ddl_apply()` | Apply distributed DDL change |
-
----
-
-## Key Data Structures
-
-| Structure | Header | Purpose |
-|-----------|--------|---------|
-| `OrochiTableInfo` | `orochi.h` | Distributed/hypertable metadata |
-| `OrochiShardInfo` | `orochi.h` | Shard placement information |
-| `OrochiChunkInfo` | `orochi.h` | Time-series chunk boundaries |
-| `OrochiStripeInfo` | `orochi.h` | Columnar stripe metadata |
-| `OrochiColumnChunk` | `orochi.h` | Column data within stripe |
-| `VectorBatch` | `vectorized.h` | Vectorized execution batch |
-| `RaftNode` | `raft.h` | Raft consensus state |
-| `RaftLog` | `raft.h` | Raft log entries |
-| `Pipeline` | `pipeline.h` | Pipeline configuration |
-| `CDCSubscription` | `cdc.h` | CDC subscription config |
-| `ResourcePool` | `workload.h` | Workload resource limits |
-| `JitContext` | `jit.h` | JIT compilation context |
-| `JitExprNode` | `jit.h` | JIT expression tree node |
-| `OrochiAuthContext` | `auth.h` | Authentication session context |
-| `OrochiJWTClaims` | `jwt.h` | JWT token claims |
-| `OrochiWebAuthnCredential` | `webauthn.h` | WebAuthn credential |
-| `OrochiJSONQuery` | `json_query.h` | JSON query context |
-| `OrochiDDLWorkflow` | `ddl_workflow.h` | DDL workflow state |
-
----
-
-## Compression Types
-
-| Type | Enum | Best For |
-|------|------|----------|
-| None | `OROCHI_COMPRESS_NONE` | Already compressed data |
-| LZ4 | `OROCHI_COMPRESS_LZ4` | Fast general compression |
-| ZSTD | `OROCHI_COMPRESS_ZSTD` | High ratio for cold data |
-| Delta | `OROCHI_COMPRESS_DELTA` | Monotonic integers/timestamps |
-| Gorilla | `OROCHI_COMPRESS_GORILLA` | Floating-point time-series |
-| Dictionary | `OROCHI_COMPRESS_DICTIONARY` | Low-cardinality strings |
-| RLE | `OROCHI_COMPRESS_RLE` | Boolean/repeated values |
-
----
-
-## Storage Tiers
-
-| Tier | Enum | Default Age | Storage |
-|------|------|-------------|---------|
-| Hot | `OROCHI_TIER_HOT` | 0-1 day | Local SSD |
-| Warm | `OROCHI_TIER_WARM` | 1-7 days | Local, compressed |
-| Cold | `OROCHI_TIER_COLD` | 7-30 days | S3 |
-| Frozen | `OROCHI_TIER_FROZEN` | 30+ days | S3 Glacier |
+| File | Purpose |
+|------|---------|
+| `apps/dashboard/src/client.tsx` | Application entrypoint |
+| `apps/dashboard/src/routes/` | TanStack Router routes |
 
 ---
 
 ## Common Tasks
 
-### Adding a New Feature
+### Adding a PostgreSQL Extension Feature
 
-1. **Declare in header** (`src/module/module.h`)
-2. **Implement** (`src/module/module.c`)
-3. **Add to Makefile OBJS** if new `.c` file
-4. **Add SQL interface** in `sql/orochi--1.0.sql` if user-facing
-5. **Write unit tests** in `test/unit/test_module.c`
-6. **Update runner** in `test/unit/run_tests.c`
+1. **Declare in header** (`extensions/postgres/src/module/module.h`)
+2. **Implement** (`extensions/postgres/src/module/module.c`)
+3. **Add to Makefile OBJS** if new `.c` file (`extensions/postgres/Makefile`)
+4. **Add SQL interface** in `extensions/postgres/sql/orochi--1.0.sql` if user-facing
+5. **Write unit tests** in `extensions/postgres/test/unit/test_module.c`
+6. **Update runner** in `extensions/postgres/test/unit/run_tests.c`
 
-### Adding a GUC Parameter
-
+Example:
 ```c
-// In src/core/init.c, orochi_define_gucs():
+// extensions/postgres/src/my_module/my_module.h
+extern Datum orochi_my_function(PG_FUNCTION_ARGS);
 
-// Declare extern in orochi.h
-int orochi_new_param;
-
-DefineCustomIntVariable("orochi.new_param",
-                        "Description",
-                        "Long description",
-                        &orochi_new_param,
-                        default_value,
-                        min_value,
-                        max_value,
-                        PGC_USERSET,  // or PGC_SIGHUP, PGC_POSTMASTER
-                        0,
-                        NULL, NULL, NULL);
-```
-
-### Adding a SQL Function
-
-```c
-// 1. Declare in header
-extern Datum orochi_my_func(PG_FUNCTION_ARGS);
-
-// 2. Implement
-PG_FUNCTION_INFO_V1(orochi_my_func);
+// extensions/postgres/src/my_module/my_module.c
+PG_FUNCTION_INFO_V1(orochi_my_function);
 Datum
-orochi_my_func(PG_FUNCTION_ARGS)
+orochi_my_function(PG_FUNCTION_ARGS)
 {
     int32 arg = PG_GETARG_INT32(0);
     // implementation
     PG_RETURN_INT32(result);
 }
 
-// 3. Register in sql/orochi--1.0.sql
-CREATE FUNCTION my_func(arg integer)
+// extensions/postgres/sql/orochi--1.0.sql
+CREATE FUNCTION my_function(arg integer)
 RETURNS integer
-AS 'MODULE_PATHNAME', 'orochi_my_func'
+AS 'MODULE_PATHNAME', 'orochi_my_function'
 LANGUAGE C STRICT;
 ```
 
-### Adding Unit Tests
+### Adding a Go Service Endpoint
 
-```c
-// test/unit/test_new_module.c
-#include "test_framework.h"
+```go
+// services/control-plane/internal/api/handlers/cluster_handler.go
+func (h *Handler) GetCluster(w http.ResponseWriter, r *http.Request) {
+    id := chi.URLParam(r, "id")
 
-TEST_SUITE(test_new_module)
-{
-    TEST_BEGIN("test_basic_functionality")
-        // test code
-        TEST_ASSERT(condition);
-    TEST_END()
+    cluster, err := h.service.GetCluster(r.Context(), id)
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+
+    json.NewEncoder(w).Encode(cluster)
 }
 
-// Add to test/unit/run_tests.c:
-extern void test_new_module(void);
-// In main():
-RUN_TEST_SUITE(test_new_module);
-
-// Add to test/unit/Makefile if new file
+// Register in router
+r.Get("/api/v1/clusters/{id}", h.GetCluster)
 ```
 
-### Debugging
+### Adding a Dashboard Route
+
+```typescript
+// apps/dashboard/src/routes/clusters.create.tsx
+import { createFileRoute } from '@tanstack/react-router'
+import { ClusterCreateForm } from '@/components/ClusterCreateForm'
+
+export const Route = createFileRoute('/clusters/create')({
+  component: CreateClusterPage,
+})
+
+function CreateClusterPage() {
+  const navigate = Route.useNavigate()
+
+  const handleCreate = async (data: ClusterConfig) => {
+    const cluster = await createCluster(data)
+    navigate({ to: '/clusters/$clusterId', params: { clusterId: cluster.id } })
+  }
+
+  return <ClusterCreateForm onSubmit={handleCreate} />
+}
+```
+
+### Cross-Component Feature Development
+
+When adding a feature that spans extension and cloud platform:
+
+1. **Define the extension API** (SQL functions, GUCs)
+2. **Implement extension logic** (C code)
+3. **Add control plane API** (Go handlers)
+4. **Update CLI commands** (Go CLI)
+5. **Create dashboard UI** (React components)
+6. **Write integration tests** (across all layers)
+
+Example: Adding cluster backup feature
+
+```bash
+# 1. Extension: Add backup API
+# extensions/postgres/src/backup/backup.c - implement orochi_create_backup()
+# extensions/postgres/sql/orochi--1.0.sql - CREATE FUNCTION create_backup()
+
+# 2. Control plane: Add backup endpoint
+# services/control-plane/internal/api/handlers/backup_handler.go
+# POST /api/v1/clusters/{id}/backups
+
+# 3. CLI: Add backup command
+# tools/cli/internal/cmd/backup.go
+# orochi cluster backup create <cluster-id>
+
+# 4. Dashboard: Add backup UI
+# apps/dashboard/src/routes/clusters.$clusterId.backups.tsx
+# apps/dashboard/components/clusters/BackupList.tsx
+```
+
+---
+
+## Quick Reference
+
+### Root Makefile Commands
+
+```bash
+# Build commands
+make build-all           # Build everything
+make extension           # Build PostgreSQL extension
+make services            # Build all Go services
+make cli                 # Build CLI tool
+make dashboard           # Build dashboard
+
+# Test commands
+make test                # Run all tests
+make extension-test      # Run extension regression tests
+make extension-unit-test # Run extension unit tests
+make services-test       # Run Go service tests
+make cli-test            # Run CLI tests
+
+# Clean commands
+make clean               # Clean all build artifacts
+make extension-clean     # Clean extension artifacts
+make services-clean      # Clean service binaries
+make cli-clean           # Clean CLI binary
+make dashboard-clean     # Clean dashboard artifacts
+
+# Code quality
+make lint                # Lint all code
+make format              # Format all code
+
+# Go workspace
+make go-sync             # Sync go.work
+make go-tidy             # Tidy all Go modules
+
+# Development
+make dashboard-dev       # Run dashboard dev server
+```
+
+### PostgreSQL Extension
+
+```bash
+# Build and install
+make extension && sudo make extension-install
+
+# Run unit tests
+make extension-unit-test
+
+# Run regression tests (after install)
+make extension-test
+
+# Format code
+cd extensions/postgres && make format
+
+# Static analysis
+cd extensions/postgres && make lint
+
+# Run benchmarks
+cd extensions/postgres/benchmark && make && ./run_all.sh
+```
+
+### Go Services
+
+```bash
+# Build all services (using go.work)
+make services
+
+# Build specific service
+make services-control-plane
+make services-provisioner
+make services-autoscaler
+
+# Run tests
+make services-test
+
+# Run service locally
+cd services/control-plane && go run ./cmd/server
+cd services/provisioner && go run ./cmd/provisioner
+cd services/autoscaler && go run ./cmd/autoscaler
+```
+
+### CLI Tool
+
+```bash
+# Build CLI
+make cli
+
+# Install CLI
+make cli-install
+
+# Run CLI tests
+make cli-test
+
+# Run CLI directly
+cd tools/cli && go run ./cmd/orochi --help
+```
+
+### Dashboard
+
+```bash
+# Install dependencies and run dev server
+make dashboard-dev
+
+# Build for production
+make dashboard
+
+# Or manually
+cd apps/dashboard
+npm install
+npm run dev          # Development
+npm run build        # Production build
+npm run type-check   # Type check
+```
+
+---
+
+## Debugging
+
+### PostgreSQL Extension
 
 ```bash
 # Build with debug symbols
-make DEBUG=1
+cd extensions/postgres && make DEBUG=1
 
 # Attach GDB to PostgreSQL backend
 gdb -p <postgres_backend_pid>
@@ -586,60 +948,89 @@ gdb -p <postgres_backend_pid>
 tail -f /var/log/postgresql/postgresql-*.log
 
 # Memory debugging
-MALLOC_CHECK_=3 ./test/unit/run_tests
+cd extensions/postgres/test/unit
+MALLOC_CHECK_=3 ./run_tests
 ```
 
----
-
-## Quick Reference
+### Go Services
 
 ```bash
-# Build and install
-make && sudo make install
+# Run with delve debugger
+cd services/control-plane
+dlv debug ./cmd/server
 
-# Run unit tests
-cd test/unit && make && ./run_tests
+# Enable verbose logging
+export LOG_LEVEL=debug
+go run ./cmd/server
 
-# Run regression tests (after install)
-make installcheck
+# Profile CPU usage
+go run ./cmd/server -cpuprofile=cpu.prof
+go tool pprof cpu.prof
+```
 
-# Format code
-make format
+### Dashboard
 
-# Static analysis
-make lint
+```bash
+# Run with source maps
+cd apps/dashboard && npm run dev
 
-# Create release tarball
-make dist
+# Use React DevTools in browser
+# Install: https://react.dev/learn/react-developer-tools
+
+# Check network requests
+# Browser DevTools → Network tab
 ```
 
 ---
 
-## Test Framework Macros
+## Environment Variables
 
-| Macro | Usage |
-|-------|-------|
-| `TEST_BEGIN(name)` | Start a test case |
-| `TEST_END()` | End a test case |
-| `TEST_ASSERT(cond)` | Assert condition is true |
-| `TEST_ASSERT_EQ(exp, act)` | Assert integer equality |
-| `TEST_ASSERT_NEQ(exp, act)` | Assert integer inequality |
-| `TEST_ASSERT_NEAR(exp, act, eps)` | Assert float equality within epsilon |
-| `TEST_ASSERT_GT(val, thresh)` | Assert greater than |
-| `TEST_ASSERT_LT(val, thresh)` | Assert less than |
-| `TEST_ASSERT_NOT_NULL(ptr)` | Assert pointer not null |
-| `TEST_ASSERT_NULL(ptr)` | Assert pointer is null |
-| `TEST_ASSERT_STR_EQ(exp, act)` | Assert string equality |
-| `TEST_ASSERT_MEM_EQ(exp, act, sz)` | Assert memory equality |
-| `TEST_SKIP(reason)` | Skip test with reason |
-| `RUN_TEST_SUITE(func)` | Run a test suite function |
+### Control Plane
+
+```bash
+POSTGRES_URL=postgres://user:pass@localhost:5432/orochi_cloud
+KUBERNETES_CONFIG=/path/to/kubeconfig
+LOG_LEVEL=info
+PORT=8080
+```
+
+### Dashboard
+
+```bash
+VITE_API_URL=http://localhost:8080/api/v1
+VITE_WS_URL=ws://localhost:8080/ws
+```
+
+### CLI
+
+```bash
+OROCHI_API_URL=https://api.orochi.cloud
+OROCHI_AUTH_TOKEN=<jwt-token>
+```
 
 ---
 
 ## File Organization Rules
 
-- Source code: `src/`
-- Tests: `test/unit/` or `test/sql/`
-- Documentation: `docs/`
-- SQL definitions: `sql/`
+- **Extension source**: `extensions/postgres/src/`
+- **Extension tests**: `extensions/postgres/test/unit/` or `extensions/postgres/test/sql/`
+- **Extension SQL**: `extensions/postgres/sql/`
+- **Extension docs**: `extensions/postgres/docs/`
+- **Go services**: `services/<service>/`
+- **CLI tool**: `tools/cli/`
+- **Shared Go code**: `packages/go/shared/`
+- **Dashboard**: `apps/dashboard/`
+- **Infrastructure**: `infrastructure/`
+- **Project documentation**: `docs/`
+- **Root config files**: `go.work`, `package.json`, `Makefile`
 - Never save working files to root folder
+
+---
+
+## Additional Resources
+
+- [PostgreSQL Extension Documentation](https://www.postgresql.org/docs/current/extend.html)
+- [Go Project Layout](https://github.com/golang-standards/project-layout)
+- [TanStack Router Docs](https://tanstack.com/router)
+- [shadcn/ui Components](https://ui.shadcn.com/)
+- [CloudNativePG](https://cloudnative-pg.io/)

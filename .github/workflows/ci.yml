@@ -1,0 +1,206 @@
+# Orochi DB - Main CI Pipeline
+# Orchestrates all component CI workflows with path-based filtering
+# This is the primary entry point for all CI operations
+
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - 'release/**'
+      - 'feature/**'
+  pull_request:
+    branches:
+      - main
+      - develop
+
+# Cancel in-progress runs on the same branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: '1.22'
+  NODE_VERSION: '22'
+  PG_VERSION: '16'
+
+jobs:
+  # Detect which components have changed
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      extension: ${{ steps.filter.outputs.extension }}
+      services: ${{ steps.filter.outputs.services }}
+      dashboard: ${{ steps.filter.outputs.dashboard }}
+      cli: ${{ steps.filter.outputs.cli }}
+      docs: ${{ steps.filter.outputs.docs }}
+      workflows: ${{ steps.filter.outputs.workflows }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Filter paths
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            extension:
+              - 'extensions/postgres/**'
+              - 'Makefile'
+              - 'src/**'
+              - 'test/**'
+              - 'sql/**'
+            services:
+              - 'services/**'
+              - 'packages/go/**'
+              - 'go.work'
+              - 'go.work.sum'
+            dashboard:
+              - 'apps/dashboard/**'
+            cli:
+              - 'tools/cli/**'
+              - 'packages/go/**'
+            docs:
+              - 'docs/**'
+              - '*.md'
+            workflows:
+              - '.github/workflows/**'
+
+  # Extension CI - C/PostgreSQL
+  extension:
+    name: Extension CI
+    needs: changes
+    if: ${{ needs.changes.outputs.extension == 'true' || needs.changes.outputs.workflows == 'true' }}
+    uses: ./.github/workflows/extension-ci.yml
+    secrets: inherit
+
+  # Services CI - Go backend services
+  services:
+    name: Services CI
+    needs: changes
+    if: ${{ needs.changes.outputs.services == 'true' || needs.changes.outputs.workflows == 'true' }}
+    uses: ./.github/workflows/services-ci.yml
+    secrets: inherit
+
+  # Dashboard CI - React frontend
+  dashboard:
+    name: Dashboard CI
+    needs: changes
+    if: ${{ needs.changes.outputs.dashboard == 'true' || needs.changes.outputs.workflows == 'true' }}
+    uses: ./.github/workflows/dashboard-ci.yml
+    secrets: inherit
+
+  # Integration tests - run when multiple components change
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [changes, extension, services, dashboard]
+    if: |
+      always() &&
+      (needs.changes.outputs.services == 'true' || needs.changes.outputs.extension == 'true') &&
+      needs.extension.result != 'failure' &&
+      needs.services.result != 'failure'
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: orochi_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: |
+            services/**/go.sum
+            packages/go/**/go.sum
+            tools/cli/go.sum
+
+      - name: Download service artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: service-*
+          path: /tmp/artifacts
+        continue-on-error: true
+
+      - name: Run integration tests
+        run: |
+          echo "Running integration tests..."
+          # Integration tests would go here
+          # For now, verify database connectivity
+          PGPASSWORD=test psql -h localhost -U test -d orochi_test -c "SELECT 1;"
+        env:
+          DATABASE_URL: postgres://test:test@localhost:5432/orochi_test
+
+  # CI Status aggregation
+  ci-status:
+    name: CI Status
+    runs-on: ubuntu-latest
+    needs: [changes, extension, services, dashboard, integration]
+    if: always()
+    steps:
+      - name: Check CI Status
+        run: |
+          echo "=== CI Status Report ==="
+          echo ""
+          echo "Changes detected:"
+          echo "  Extension: ${{ needs.changes.outputs.extension }}"
+          echo "  Services:  ${{ needs.changes.outputs.services }}"
+          echo "  Dashboard: ${{ needs.changes.outputs.dashboard }}"
+          echo "  CLI:       ${{ needs.changes.outputs.cli }}"
+          echo ""
+          echo "Job results:"
+          echo "  Extension:   ${{ needs.extension.result }}"
+          echo "  Services:    ${{ needs.services.result }}"
+          echo "  Dashboard:   ${{ needs.dashboard.result }}"
+          echo "  Integration: ${{ needs.integration.result }}"
+          echo ""
+
+          # Check for failures (skipped is OK)
+          FAILED=false
+
+          if [ "${{ needs.extension.result }}" == "failure" ]; then
+            echo "ERROR: Extension CI failed"
+            FAILED=true
+          fi
+
+          if [ "${{ needs.services.result }}" == "failure" ]; then
+            echo "ERROR: Services CI failed"
+            FAILED=true
+          fi
+
+          if [ "${{ needs.dashboard.result }}" == "failure" ]; then
+            echo "ERROR: Dashboard CI failed"
+            FAILED=true
+          fi
+
+          if [ "${{ needs.integration.result }}" == "failure" ]; then
+            echo "ERROR: Integration tests failed"
+            FAILED=true
+          fi
+
+          if [ "$FAILED" == "true" ]; then
+            echo ""
+            echo "CI FAILED - See individual job logs for details"
+            exit 1
+          fi
+
+          echo ""
+          echo "CI PASSED - All checks completed successfully"

@@ -1,0 +1,22 @@
+{
+  "initialized": true,
+  "topology": "hierarchical",
+  "workers": [
+    "orochi-worker-1768662639789-g1i5",
+    "orochi-worker-1768662639789-mwas",
+    "orochi-worker-1768662639789-0s7a",
+    "orochi-worker-1768662639789-smm3"
+  ],
+  "consensus": {
+    "pending": [],
+    "history": []
+  },
+  "sharedMemory": {},
+  "createdAt": "2026-01-17T15:10:32.646Z",
+  "updatedAt": "2026-01-17T15:10:39.789Z",
+  "queen": {
+    "agentId": "orochi-coordinator",
+    "electedAt": "2026-01-17T15:10:32.646Z",
+    "term": 1
+  }
+}

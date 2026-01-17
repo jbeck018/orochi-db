@@ -1,0 +1,66 @@
+{
+  "entries": {
+    "monorepo-migration-plan": {
+      "key": "monorepo-migration-plan",
+      "value": {
+        "structure": {
+          "extensions/postgres": "C extension code (src/, sql/, test/, benchmark/, docs/, Makefile)",
+          "services/control-plane": "Go control plane service",
+          "services/provisioner": "Go provisioner service",
+          "packages/go/shared": "Shared Go packages",
+          "apps/dashboard": "React dashboard application"
+        },
+        "preservePaths": [
+          "orochi-cloud/cli",
+          "orochi-cloud/README.md"
+        ]
+      },
+      "metadata": {},
+      "storedAt": "2026-01-17T15:29:50.381Z",
+      "accessCount": 0,
+      "lastAccessed": "2026-01-17T15:29:50.381Z"
+    },
+    "dashboard-tanstack-requirements": {
+      "key": "dashboard-tanstack-requirements",
+      "value": {
+        "packages": [
+          "@tanstack/react-query",
+          "@tanstack/react-query-devtools"
+        ],
+        "patterns": [
+          "useQuery for data fetching",
+          "useMutation for writes",
+          "queryClient for cache management",
+          "Optimistic updates for UX"
+        ],
+        "replaceTargets": [
+          "manual fetch calls",
+          "useEffect data loading",
+          "local state for server data"
+        ]
+      },
+      "metadata": {},
+      "storedAt": "2026-01-17T15:29:50.811Z",
+      "accessCount": 0,
+      "lastAccessed": "2026-01-17T15:29:50.811Z"
+    },
+    "orochi-dashboard-features": {
+      "key": "orochi-dashboard-features",
+      "value": {
+        "features": [
+          "Sharding visualization (shard distribution map, rebalancing status)",
+          "Time-series metrics (chunk timeline, compression ratios, ingestion rates)",
+          "Columnar storage UI (stripe info, column statistics, compression types)",
+          "Cluster topology (node health, raft status, tier distribution)",
+          "Pipeline monitoring (Kafka/S3 sources, throughput)",
+          "CDC subscriptions (active streams, lag metrics)"
+        ]
+      },
+      "metadata": {},
+      "storedAt": "2026-01-17T15:29:51.278Z",
+      "accessCount": 0,
+      "lastAccessed": "2026-01-17T15:29:51.278Z"
+    }
+  },
+  "version": "3.0.0"
+}

@@ -1,137 +1,163 @@
-# Orochi DB - Modern HTAP PostgreSQL Extension
-# Makefile for building the extension
+# Orochi DB - Monorepo Makefile
+# This Makefile delegates to subdirectory Makefiles for building different components
 
-EXTENSION = orochi
-EXTVERSION = 1.0
+.PHONY: all extension services cli dashboard clean test lint format help
 
-MODULE_big = orochi
-OBJS = \
-	src/core/init.o \
-	src/core/catalog.o \
-	src/storage/columnar.o \
-	src/storage/compression.o \
-	src/sharding/distribution.o \
-	src/sharding/physical_sharding.o \
-	src/timeseries/hypertable.o \
-	src/tiered/tiered_storage.o \
-	src/vector/vector_ops.o \
-	src/planner/distributed_planner.o \
-	src/executor/distributed_executor.o \
-	src/executor/vectorized.o \
-	src/executor/vectorized_scan.o \
-	src/jit/jit_compile.o \
-	src/jit/jit_expr.o \
-	src/consensus/raft.o \
-	src/consensus/raft_log.o \
-	src/approx/hyperloglog.o \
-	src/approx/tdigest.o \
-	src/approx/sampling.o \
-	src/pipelines/pipeline.o \
-	src/pipelines/kafka_source.o \
-	src/json/json_index.o \
-	src/json/json_columnar.o \
-	src/json/json_query.o \
-	src/ddl/ddl_workflow.o \
-	src/ddl/ddl_stream.o \
-	src/ddl/ddl_task.o \
-	src/ddl/ddl_dynamic.o \
-	src/utils/utils.o
+# Default target - show help
+all: help
 
-DATA = sql/orochi--1.0.sql sql/ddl.sql
-PGFILEDESC = "Orochi DB - Modern HTAP PostgreSQL Extension"
+#
+# PostgreSQL Extension
+#
+extension:
+	$(MAKE) -C extensions/postgres
 
-# Compiler flags
-PG_CPPFLAGS = -I$(srcdir)/src
-PG_CFLAGS = -std=c11
+extension-install:
+	$(MAKE) -C extensions/postgres install
 
-# Enable SIMD optimizations if available
-UNAME_M := $(shell uname -m)
-ifeq ($(UNAME_M),x86_64)
-    PG_CFLAGS += -mavx2 -mfma
-endif
-ifeq ($(UNAME_M),aarch64)
-    PG_CFLAGS += -march=armv8-a+simd
-endif
+extension-clean:
+	$(MAKE) -C extensions/postgres clean
 
-# Debug mode
-ifdef DEBUG
-    PG_CFLAGS += -g -O0 -DOROCHI_DEBUG
-else
-    PG_CFLAGS += -O3
-endif
+extension-test:
+	$(MAKE) -C extensions/postgres installcheck
 
-# Warnings
-PG_CFLAGS += -Wall -Wextra -Wno-unused-parameter
+extension-unit-test:
+	cd extensions/postgres/test/unit && make && ./run_tests
 
-# Link against compression libraries, OpenSSL (for S3 signing), and Kafka
-SHLIB_LINK = -llz4 -lzstd -lcurl -lssl -lcrypto -lrdkafka
+#
+# Go Services
+#
+services:
+	$(MAKE) -C services
 
-# Regression tests
-REGRESS = basic distributed hypertable columnar vector tiering json
+services-control-plane:
+	cd services/control-plane && go build -o bin/control-plane ./cmd/server
 
-# Documentation
-DOCS = README.md docs/architecture.md docs/user-guide.md
+services-provisioner:
+	cd services/provisioner && go build -o bin/provisioner ./cmd/provisioner
 
-# Use PGXS
-PG_CONFIG ?= pg_config
-PGXS := $(shell $(PG_CONFIG) --pgxs)
-include $(PGXS)
+services-autoscaler:
+	cd services/autoscaler && go build -o bin/autoscaler ./cmd/autoscaler
 
-# PostgreSQL version requirements
-PG_VERSION := $(shell $(PG_CONFIG) --version | sed 's/PostgreSQL //' | cut -d. -f1)
-MIN_PG_VERSION := 16
-MAX_PG_VERSION := 18
+services-clean:
+	rm -rf services/control-plane/bin services/provisioner/bin services/autoscaler/bin
 
-# Additional targets
-.PHONY: format check-format lint test docs clean-all check-version
+services-test:
+	cd services/control-plane && go test ./...
+	cd services/provisioner && go test ./...
+	cd services/autoscaler && go test ./...
 
-# Check PostgreSQL version compatibility
-check-version:
-	@echo "Checking PostgreSQL version..."
-	@if [ $(PG_VERSION) -lt $(MIN_PG_VERSION) ] || [ $(PG_VERSION) -gt $(MAX_PG_VERSION) ]; then \
-		echo "Error: Orochi DB requires PostgreSQL $(MIN_PG_VERSION)-$(MAX_PG_VERSION), found $(PG_VERSION)"; \
-		exit 1; \
-	fi
-	@echo "PostgreSQL $(PG_VERSION) supported"
+#
+# CLI Tool
+#
+cli:
+	cd tools/cli && go build -o bin/orochi ./cmd/orochi
 
-# Format source code
-format:
-	find src -name '*.c' -o -name '*.h' | xargs clang-format -i
+cli-install: cli
+	cp tools/cli/bin/orochi /usr/local/bin/orochi
 
-# Check formatting
-check-format:
-	find src -name '*.c' -o -name '*.h' | xargs clang-format --dry-run --Werror
+cli-clean:
+	rm -rf tools/cli/bin
 
-# Run static analysis
+cli-test:
+	cd tools/cli && go test ./...
+
+#
+# Dashboard
+#
+dashboard:
+	cd apps/dashboard && npm install && npm run build
+
+dashboard-dev:
+	cd apps/dashboard && npm install && npm run dev
+
+dashboard-clean:
+	rm -rf apps/dashboard/dist apps/dashboard/node_modules
+
+#
+# All Components
+#
+build-all: extension services cli dashboard
+
+clean: extension-clean services-clean cli-clean dashboard-clean
+	rm -rf go.work.sum
+
+test: extension-unit-test services-test cli-test
+
+#
+# Code Quality
+#
 lint:
-	cppcheck --enable=all --suppress=missingIncludeSystem src/
+	$(MAKE) -C extensions/postgres lint
+	cd services/control-plane && go vet ./...
+	cd services/provisioner && go vet ./...
+	cd services/autoscaler && go vet ./...
+	cd tools/cli && go vet ./...
 
-# Run tests
-test: install
-	$(MAKE) installcheck
+format:
+	$(MAKE) -C extensions/postgres format
+	cd services/control-plane && go fmt ./...
+	cd services/provisioner && go fmt ./...
+	cd services/autoscaler && go fmt ./...
+	cd tools/cli && go fmt ./...
 
-# Generate documentation
-docs:
-	@echo "Documentation is in docs/ directory"
+#
+# Go Workspace
+#
+go-sync:
+	go work sync
 
-# Clean everything including generated files
-clean-all: clean
-	rm -rf results/ regression.diffs regression.out
+go-tidy:
+	cd services/control-plane && go mod tidy
+	cd services/provisioner && go mod tidy
+	cd services/autoscaler && go mod tidy
+	cd tools/cli && go mod tidy
+	cd packages/go/shared && go mod tidy
 
-# Install development dependencies (Ubuntu/Debian)
-# Supports PostgreSQL 16, 17, and 18
-install-deps:
-	sudo apt-get install -y \
-		postgresql-server-dev-all \
-		liblz4-dev \
-		libzstd-dev \
-		libcurl4-openssl-dev \
-		libssl-dev \
-		librdkafka-dev \
-		clang-format \
-		cppcheck
+#
+# Development
+#
+dev: dashboard-dev
 
-# Create release tarball
-dist:
-	git archive --format=tar.gz --prefix=orochi-$(EXTVERSION)/ \
-		-o orochi-$(EXTVERSION).tar.gz HEAD
+#
+# Help
+#
+help:
+	@echo "Orochi DB - Monorepo Build System"
+	@echo ""
+	@echo "PostgreSQL Extension:"
+	@echo "  make extension           - Build the PostgreSQL extension"
+	@echo "  make extension-install   - Install extension to PostgreSQL"
+	@echo "  make extension-test      - Run extension regression tests"
+	@echo "  make extension-unit-test - Run extension unit tests"
+	@echo "  make extension-clean     - Clean extension build artifacts"
+	@echo ""
+	@echo "Go Services:"
+	@echo "  make services            - Build all Go services"
+	@echo "  make services-control-plane - Build control plane service"
+	@echo "  make services-provisioner   - Build provisioner service"
+	@echo "  make services-autoscaler    - Build autoscaler service"
+	@echo "  make services-test          - Run service tests"
+	@echo "  make services-clean         - Clean service binaries"
+	@echo ""
+	@echo "CLI Tool:"
+	@echo "  make cli          - Build CLI tool"
+	@echo "  make cli-install  - Install CLI to /usr/local/bin"
+	@echo "  make cli-test     - Run CLI tests"
+	@echo "  make cli-clean    - Clean CLI binary"
+	@echo ""
+	@echo "Dashboard:"
+	@echo "  make dashboard      - Build dashboard for production"
+	@echo "  make dashboard-dev  - Run dashboard in development mode"
+	@echo "  make dashboard-clean - Clean dashboard build artifacts"
+	@echo ""
+	@echo "All Components:"
+	@echo "  make build-all  - Build all components"
+	@echo "  make clean      - Clean all build artifacts"
+	@echo "  make test       - Run all tests"
+	@echo "  make lint       - Run linters on all code"
+	@echo "  make format     - Format all code"
+	@echo ""
+	@echo "Go Workspace:"
+	@echo "  make go-sync    - Sync go.work file"
+	@echo "  make go-tidy    - Run go mod tidy on all modules"

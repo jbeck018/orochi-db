@@ -1,0 +1,23 @@
+{
+  "name": "orochi-db",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Orochi DB - Modern HTAP PostgreSQL Extension",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=apps/dashboard",
+    "build": "npm run build --workspace=apps/dashboard",
+    "lint": "npm run lint --workspace=apps/dashboard",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/orochi-db/orochi-db.git"
+  },
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

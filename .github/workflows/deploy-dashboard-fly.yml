@@ -1,0 +1,275 @@
+# Orochi DB - Dashboard Deployment to Fly.io
+# Deploys the React dashboard to Fly.io for production/staging environments
+
+name: Deploy Dashboard to Fly.io
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'apps/dashboard/**'
+      - '.github/workflows/deploy-dashboard-fly.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+# Prevent concurrent deployments to same environment
+concurrency:
+  group: deploy-dashboard-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  # Build the application
+  build:
+    name: Build Dashboard
+    runs-on: ubuntu-latest
+    outputs:
+      should_deploy: ${{ steps.check.outputs.exists }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if dashboard exists
+        id: check
+        run: |
+          if [ -d "apps/dashboard" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Dashboard does not exist at apps/dashboard, skipping deployment"
+          fi
+
+      - name: Setup Node.js
+        if: steps.check.outputs.exists == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: apps/dashboard/package-lock.json
+
+      - name: Install dependencies
+        if: steps.check.outputs.exists == 'true'
+        working-directory: apps/dashboard
+        run: npm ci
+
+      - name: Run linting
+        if: steps.check.outputs.exists == 'true'
+        working-directory: apps/dashboard
+        run: npm run lint
+        continue-on-error: true
+
+      - name: Type checking
+        if: steps.check.outputs.exists == 'true'
+        working-directory: apps/dashboard
+        run: npm run type-check
+
+      - name: Build application
+        if: steps.check.outputs.exists == 'true'
+        working-directory: apps/dashboard
+        run: npm run build
+        env:
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+
+      - name: Verify build output
+        if: steps.check.outputs.exists == 'true'
+        working-directory: apps/dashboard
+        run: |
+          test -d dist && echo "Build output exists" || exit 1
+          test -f dist/server/server.js && echo "Server entrypoint found" || echo "Warning: Server entrypoint not found"
+          du -sh dist && echo "Build size calculated"
+
+      - name: Upload build artifacts
+        if: steps.check.outputs.exists == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-deploy-build
+          path: apps/dashboard/dist
+          retention-days: 1
+
+  # Deploy to Fly.io
+  deploy:
+    name: Deploy to Fly.io
+    runs-on: ubuntu-latest
+    needs: build
+    if: needs.build.outputs.should_deploy == 'true'
+    environment:
+      name: ${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'production' || 'staging') }}
+      url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dashboard-deploy-build
+          path: apps/dashboard/dist
+
+      - name: Install Fly CLI
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Determine environment
+        id: env
+        run: |
+          if [ "${{ github.event.inputs.environment }}" != "" ]; then
+            ENV="${{ github.event.inputs.environment }}"
+          elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            ENV="production"
+          else
+            ENV="staging"
+          fi
+          echo "environment=$ENV" >> $GITHUB_OUTPUT
+          echo "Deploying to: $ENV"
+
+      - name: Deploy to Fly.io
+        id: deploy
+        working-directory: apps/dashboard
+        run: |
+          # Deploy with environment-specific config if available
+          if [ -f "fly.${{ steps.env.outputs.environment }}.toml" ]; then
+            flyctl deploy --config "fly.${{ steps.env.outputs.environment }}.toml"
+          else
+            flyctl deploy
+          fi
+
+          # Get deployment URL
+          APP_NAME=$(grep '^app = ' fly.toml | sed 's/app = "\(.*\)"/\1/' || echo "orochi-dashboard")
+          echo "url=https://${APP_NAME}.fly.dev" >> $GITHUB_OUTPUT
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Deployment summary
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment:** ${{ steps.env.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **URL:** ${{ steps.deploy.outputs.url }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+
+  # Verify deployment
+  verify:
+    name: Verify Deployment
+    runs-on: ubuntu-latest
+    needs: deploy
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Fly CLI
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Get app URL
+        id: url
+        working-directory: apps/dashboard
+        run: |
+          APP_NAME=$(grep '^app = ' fly.toml | sed 's/app = "\(.*\)"/\1/' || echo "orochi-dashboard")
+          echo "url=https://${APP_NAME}.fly.dev" >> $GITHUB_OUTPUT
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Wait for deployment to be ready
+        run: |
+          echo "Waiting for app to be ready at ${{ steps.url.outputs.url }}..."
+          for i in {1..30}; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${{ steps.url.outputs.url }}" || echo "000")
+            if [ "$HTTP_CODE" == "200" ] || [ "$HTTP_CODE" == "304" ]; then
+              echo "App is healthy (HTTP $HTTP_CODE)"
+              exit 0
+            fi
+            echo "  Attempt $i/30 - HTTP $HTTP_CODE"
+            sleep 2
+          done
+          echo "App failed to become healthy within 60 seconds"
+          exit 1
+
+      - name: Run smoke tests
+        run: |
+          URL="${{ steps.url.outputs.url }}"
+
+          echo "Running smoke tests..."
+
+          # Check main page loads
+          curl -sf "$URL" > /dev/null && echo "Main page: OK" || echo "Main page: FAILED"
+
+          # Check health endpoint if available
+          curl -sf "$URL/health" > /dev/null 2>&1 && echo "Health endpoint: OK" || echo "Health endpoint: N/A"
+
+          # Check static assets
+          curl -sf "$URL/favicon.ico" > /dev/null 2>&1 && echo "Favicon: OK" || echo "Favicon: N/A"
+
+          echo "Smoke tests completed"
+
+  # Rollback on failure
+  rollback:
+    name: Rollback on Failure
+    runs-on: ubuntu-latest
+    needs: [deploy, verify]
+    if: failure()
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Fly CLI
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Rollback deployment
+        working-directory: apps/dashboard
+        run: |
+          echo "Rolling back deployment..."
+          flyctl releases rollback --yes || echo "Rollback failed or no previous release"
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Notify rollback
+        run: |
+          echo "## Rollback Executed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Deployment was rolled back due to verification failure." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
+
+  # Notify on completion
+  notify:
+    name: Notify
+    runs-on: ubuntu-latest
+    needs: [deploy, verify]
+    if: always()
+    steps:
+      - name: Create deployment status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const deployResult = '${{ needs.deploy.result }}';
+            const verifyResult = '${{ needs.verify.result }}';
+            const success = deployResult === 'success' && verifyResult === 'success';
+
+            // Only comment on PRs
+            if (context.eventName === 'pull_request') {
+              const body = success
+                ? `Dashboard deployed successfully!\n\nURL: https://orochi-dashboard.fly.dev\nCommit: ${context.sha.substring(0, 7)}`
+                : `Dashboard deployment failed.\n\nSee: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: body
+              });
+            }
+        continue-on-error: true

@@ -1,0 +1,442 @@
+# Orochi DB - Release Workflow
+# Handles semantic versioning, changelog generation, and multi-artifact releases
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 1.2.3)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Is this a prerelease?'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  GO_VERSION: '1.22'
+  NODE_VERSION: '22'
+  PG_VERSION: '16'
+
+jobs:
+  # Validate and prepare release
+  prepare:
+    name: Prepare Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            TAG="v${VERSION}"
+            PRERELEASE="${{ github.event.inputs.prerelease }}"
+          else
+            TAG="${{ github.ref_name }}"
+            VERSION="${TAG#v}"
+            # Check if prerelease based on version pattern
+            if [[ "$VERSION" == *"-"* ]]; then
+              PRERELEASE="true"
+            else
+              PRERELEASE="false"
+            fi
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "prerelease=$PRERELEASE" >> $GITHUB_OUTPUT
+
+          echo "Version: $VERSION"
+          echo "Tag: $TAG"
+          echo "Prerelease: $PRERELEASE"
+
+      - name: Validate version format
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "Invalid version format: $VERSION"
+            echo "Expected format: MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH-prerelease"
+            exit 1
+          fi
+
+  # Build PostgreSQL extension
+  build-extension:
+    name: Build Extension (PostgreSQL ${{ matrix.pg_version }})
+    runs-on: ubuntu-latest
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        pg_version: ['16', '17', '18']
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Add PostgreSQL APT repository
+        run: |
+          sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+          sudo apt-get update
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            postgresql-${{ matrix.pg_version }} \
+            postgresql-server-dev-${{ matrix.pg_version }} \
+            liblz4-dev \
+            libzstd-dev \
+            libcurl4-openssl-dev \
+            libssl-dev \
+            librdkafka-dev \
+            build-essential
+
+      - name: Build extension
+        run: |
+          make clean || true
+          make PG_CONFIG=/usr/lib/postgresql/${{ matrix.pg_version }}/bin/pg_config
+
+      - name: Create distribution package
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          PG_VERSION="${{ matrix.pg_version }}"
+
+          mkdir -p dist
+          cp *.so dist/ 2>/dev/null || true
+          cp sql/*.sql dist/ 2>/dev/null || true
+          cp orochi.control dist/ 2>/dev/null || true
+          cp README.md dist/ 2>/dev/null || true
+          cp LICENSE dist/ 2>/dev/null || true
+
+          cd dist
+          tar -czvf "../orochi-${VERSION}-pg${PG_VERSION}-linux-amd64.tar.gz" .
+          cd ..
+
+      - name: Upload extension artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: extension-pg${{ matrix.pg_version }}
+          path: orochi-*.tar.gz
+          retention-days: 7
+
+  # Build Go services and CLI
+  build-services:
+    name: Build Services
+    runs-on: ubuntu-latest
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: control-plane
+            path: services/control-plane
+            binary: control-plane
+            entrypoint: cmd/server
+          - service: provisioner
+            path: services/provisioner
+            binary: provisioner
+            entrypoint: cmd/provisioner
+          - service: cli
+            path: tools/cli
+            binary: orochi
+            entrypoint: cmd/orochi
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: ${{ matrix.path }}/go.sum
+
+      - name: Check if component exists
+        id: check
+        run: |
+          if [ -d "${{ matrix.path }}" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build for multiple platforms
+        if: steps.check.outputs.exists == 'true'
+        working-directory: ${{ matrix.path }}
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          mkdir -p bin
+
+          # Linux AMD64
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+            go build -ldflags="-s -w -X main.version=${VERSION}" \
+            -o bin/${{ matrix.binary }}-linux-amd64 ./${{ matrix.entrypoint }}
+
+          # Linux ARM64
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 \
+            go build -ldflags="-s -w -X main.version=${VERSION}" \
+            -o bin/${{ matrix.binary }}-linux-arm64 ./${{ matrix.entrypoint }}
+
+          # macOS AMD64
+          GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 \
+            go build -ldflags="-s -w -X main.version=${VERSION}" \
+            -o bin/${{ matrix.binary }}-darwin-amd64 ./${{ matrix.entrypoint }}
+
+          # macOS ARM64
+          GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 \
+            go build -ldflags="-s -w -X main.version=${VERSION}" \
+            -o bin/${{ matrix.binary }}-darwin-arm64 ./${{ matrix.entrypoint }}
+
+          # Windows AMD64
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+            go build -ldflags="-s -w -X main.version=${VERSION}" \
+            -o bin/${{ matrix.binary }}-windows-amd64.exe ./${{ matrix.entrypoint }}
+
+          ls -la bin/
+
+      - name: Upload service artifacts
+        if: steps.check.outputs.exists == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.binary }}-binaries
+          path: ${{ matrix.path }}/bin/
+          retention-days: 7
+
+  # Build Dashboard
+  build-dashboard:
+    name: Build Dashboard
+    runs-on: ubuntu-latest
+    needs: prepare
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check if dashboard exists
+        id: check
+        run: |
+          if [ -d "apps/dashboard" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Node.js
+        if: steps.check.outputs.exists == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: apps/dashboard/package-lock.json
+
+      - name: Install and build
+        if: steps.check.outputs.exists == 'true'
+        working-directory: apps/dashboard
+        run: |
+          npm ci
+          npm run build
+
+      - name: Create dashboard archive
+        if: steps.check.outputs.exists == 'true'
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          cd apps/dashboard
+          tar -czvf "../../orochi-dashboard-${VERSION}.tar.gz" dist/
+
+      - name: Upload dashboard artifact
+        if: steps.check.outputs.exists == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-build
+          path: orochi-dashboard-*.tar.gz
+          retention-days: 7
+
+  # Generate changelog
+  changelog:
+    name: Generate Changelog
+    runs-on: ubuntu-latest
+    needs: prepare
+    outputs:
+      changelog: ${{ steps.changelog.outputs.changelog }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          TAG="${{ needs.prepare.outputs.tag }}"
+
+          # Find previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+          echo "## What's Changed in ${TAG}" > CHANGELOG.md
+          echo "" >> CHANGELOG.md
+
+          if [ -n "$PREV_TAG" ]; then
+            echo "### Commits since ${PREV_TAG}" >> CHANGELOG.md
+            echo "" >> CHANGELOG.md
+
+            # Group commits by type
+            echo "#### Features" >> CHANGELOG.md
+            git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --grep="^feat" >> CHANGELOG.md || true
+            echo "" >> CHANGELOG.md
+
+            echo "#### Bug Fixes" >> CHANGELOG.md
+            git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --grep="^fix" >> CHANGELOG.md || true
+            echo "" >> CHANGELOG.md
+
+            echo "#### Other Changes" >> CHANGELOG.md
+            git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --grep="^feat" --grep="^fix" --invert-grep >> CHANGELOG.md || true
+            echo "" >> CHANGELOG.md
+
+            echo "### Contributors" >> CHANGELOG.md
+            git log ${PREV_TAG}..HEAD --pretty=format:"- @%an" | sort | uniq >> CHANGELOG.md || true
+          else
+            echo "Initial release" >> CHANGELOG.md
+          fi
+
+          echo "" >> CHANGELOG.md
+          echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${TAG}" >> CHANGELOG.md
+
+          # Output changelog for release body
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          cat CHANGELOG.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Upload changelog
+        uses: actions/upload-artifact@v4
+        with:
+          name: changelog
+          path: CHANGELOG.md
+          retention-days: 7
+
+  # Create GitHub Release
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [prepare, build-extension, build-services, build-dashboard, changelog]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Organize release assets
+        run: |
+          mkdir -p release-assets
+
+          # Extension packages
+          find artifacts -name "orochi-*.tar.gz" -exec cp {} release-assets/ \;
+
+          # Service binaries
+          for dir in artifacts/*-binaries; do
+            if [ -d "$dir" ]; then
+              for file in "$dir"/*; do
+                if [ -f "$file" ]; then
+                  cp "$file" release-assets/
+                fi
+              done
+            fi
+          done
+
+          # Dashboard
+          find artifacts -name "orochi-dashboard-*.tar.gz" -exec cp {} release-assets/ \; 2>/dev/null || true
+
+          ls -la release-assets/
+
+      - name: Create checksums
+        run: |
+          cd release-assets
+          sha256sum * > checksums.txt
+          cat checksums.txt
+
+      - name: Create tag (if workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          TAG="${{ needs.prepare.outputs.tag }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: Orochi DB ${{ needs.prepare.outputs.version }}
+          body: ${{ needs.changelog.outputs.changelog }}
+          draft: false
+          prerelease: ${{ needs.prepare.outputs.prerelease == 'true' }}
+          files: |
+            release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Release summary
+        run: |
+          echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ needs.prepare.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag:** ${{ needs.prepare.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Prerelease:** ${{ needs.prepare.outputs.prerelease }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          ls -la release-assets/ >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+  # Deploy release (optional, triggered by release)
+  deploy:
+    name: Deploy Release
+    runs-on: ubuntu-latest
+    needs: [prepare, release]
+    if: needs.prepare.outputs.prerelease == 'false'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Trigger deployment workflows
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Trigger dashboard deployment
+            try {
+              await github.rest.actions.createWorkflowDispatch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'deploy-dashboard-fly.yml',
+                ref: '${{ needs.prepare.outputs.tag }}',
+                inputs: {
+                  environment: 'production'
+                }
+              });
+              console.log('Dashboard deployment triggered');
+            } catch (e) {
+              console.log('Dashboard deployment trigger failed:', e.message);
+            }
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

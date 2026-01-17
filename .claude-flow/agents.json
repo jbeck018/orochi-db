@@ -1,0 +1,56 @@
+{
+  "agents": {
+    "orochi-worker-1768662639789-g1i5": {
+      "agentId": "orochi-worker-1768662639789-g1i5",
+      "agentType": "specialist",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "role": "specialist",
+        "hiveRole": "specialist"
+      },
+      "createdAt": "2026-01-17T15:10:39.789Z",
+      "domain": "hive-mind"
+    },
+    "orochi-worker-1768662639789-mwas": {
+      "agentId": "orochi-worker-1768662639789-mwas",
+      "agentType": "specialist",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "role": "specialist",
+        "hiveRole": "specialist"
+      },
+      "createdAt": "2026-01-17T15:10:39.789Z",
+      "domain": "hive-mind"
+    },
+    "orochi-worker-1768662639789-0s7a": {
+      "agentId": "orochi-worker-1768662639789-0s7a",
+      "agentType": "specialist",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "role": "specialist",
+        "hiveRole": "specialist"
+      },
+      "createdAt": "2026-01-17T15:10:39.789Z",
+      "domain": "hive-mind"
+    },
+    "orochi-worker-1768662639789-smm3": {
+      "agentId": "orochi-worker-1768662639789-smm3",
+      "agentType": "specialist",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "role": "specialist",
+        "hiveRole": "specialist"
+      },
+      "createdAt": "2026-01-17T15:10:39.789Z",
+      "domain": "hive-mind"
+    }
+  }
+}

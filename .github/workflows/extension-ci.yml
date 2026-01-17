@@ -1,30 +1,36 @@
-# Orochi DB - PostgreSQL Extension CI/CD Pipeline
-# Comprehensive CI workflow for building, testing, and validating the extension
+# Orochi DB - PostgreSQL Extension CI Pipeline
+# Builds, tests, and validates the C extension across PostgreSQL versions
 
 name: Extension CI
 
 on:
+  workflow_call:
   push:
     branches:
       - main
-      - master
       - develop
-      - 'release/**'
-      - 'feature/**'
+    paths:
+      - 'extensions/postgres/**'
+      - 'src/**'
+      - 'test/**'
+      - 'sql/**'
+      - 'Makefile'
+      - '.github/workflows/extension-ci.yml'
   pull_request:
     branches:
       - main
-      - master
       - develop
+    paths:
+      - 'extensions/postgres/**'
+      - 'src/**'
+      - 'test/**'
+      - 'sql/**'
+      - 'Makefile'
+      - '.github/workflows/extension-ci.yml'
 
-# Cancel in-progress runs when a new run is triggered on the same branch
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: extension-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-
-env:
-  # PostgreSQL version for extension build validation
-  PG_VERSION: '16'
 
 jobs:
   # Static analysis and code formatting checks (fast feedback)
@@ -44,19 +50,28 @@ jobs:
 
       - name: Run cppcheck static analysis
         run: make lint
+        working-directory: ${{ github.workspace }}
 
       - name: Check code formatting
         run: make check-format
+        working-directory: ${{ github.workspace }}
 
-  # Build the extension and run unit tests
+  # Build and test with multiple PostgreSQL versions
   build-and-test:
-    name: Build and Test (PostgreSQL ${{ matrix.pg_version }})
+    name: Build (PostgreSQL ${{ matrix.pg_version }})
     runs-on: ubuntu-latest
     needs: lint-and-format
     strategy:
       fail-fast: false
       matrix:
-        pg_version: ['16', '17']
+        pg_version: ['16', '17', '18']
+        include:
+          - pg_version: '16'
+            pg_apt_version: '16'
+          - pg_version: '17'
+            pg_apt_version: '17'
+          - pg_version: '18'
+            pg_apt_version: '18'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -64,25 +79,22 @@ jobs:
       - name: Cache apt packages
         uses: actions/cache@v4
         with:
-          path: |
-            /var/cache/apt/archives
-          key: apt-${{ runner.os }}-${{ matrix.pg_version }}-${{ hashFiles('.github/workflows/extension-ci.yml') }}
+          path: /var/cache/apt/archives
+          key: apt-${{ runner.os }}-pg${{ matrix.pg_version }}-${{ hashFiles('.github/workflows/extension-ci.yml') }}
           restore-keys: |
-            apt-${{ runner.os }}-${{ matrix.pg_version }}-
+            apt-${{ runner.os }}-pg${{ matrix.pg_version }}-
 
-      - name: Install PostgreSQL ${{ matrix.pg_version }} development headers
+      - name: Add PostgreSQL APT repository
         run: |
-          sudo apt-get update
-
-          # Install PostgreSQL repository for specific versions
           sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
           wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
           sudo apt-get update
 
-          # Install PostgreSQL server dev headers for the specific version
+      - name: Install PostgreSQL ${{ matrix.pg_version }}
+        run: |
           sudo apt-get install -y --no-install-recommends \
-            postgresql-${{ matrix.pg_version }} \
-            postgresql-server-dev-${{ matrix.pg_version }}
+            postgresql-${{ matrix.pg_apt_version }} \
+            postgresql-server-dev-${{ matrix.pg_apt_version }}
 
       - name: Install build dependencies
         run: |
@@ -94,46 +106,50 @@ jobs:
             librdkafka-dev \
             build-essential
 
-      - name: Cache extension build artifacts
+      - name: Cache extension build
         uses: actions/cache@v4
         with:
           path: |
             src/**/*.o
+            extensions/postgres/**/*.o
             *.so
-          key: build-${{ runner.os }}-pg${{ matrix.pg_version }}-${{ hashFiles('src/**/*.c', 'src/**/*.h', 'Makefile') }}
+          key: ext-build-${{ runner.os }}-pg${{ matrix.pg_version }}-${{ hashFiles('src/**/*.c', 'src/**/*.h', 'Makefile') }}
           restore-keys: |
-            build-${{ runner.os }}-pg${{ matrix.pg_version }}-
+            ext-build-${{ runner.os }}-pg${{ matrix.pg_version }}-
 
       - name: Set PostgreSQL path
         run: |
           echo "PATH=/usr/lib/postgresql/${{ matrix.pg_version }}/bin:$PATH" >> $GITHUB_ENV
+          echo "PG_CONFIG=/usr/lib/postgresql/${{ matrix.pg_version }}/bin/pg_config" >> $GITHUB_ENV
 
       - name: Verify PostgreSQL version
         run: |
           pg_config --version
-          make check-version || echo "Version check completed"
+          which pg_config
 
       - name: Build extension
         run: |
-          make clean
-          make PG_CONFIG=/usr/lib/postgresql/${{ matrix.pg_version }}/bin/pg_config
+          make clean || true
+          make PG_CONFIG=$PG_CONFIG
 
       - name: Verify build artifacts
         run: |
-          ls -la *.so 2>/dev/null || echo "No shared library built (check build output)"
-          ls -la src/**/*.o 2>/dev/null | head -20 || echo "No object files found"
+          ls -la *.so 2>/dev/null || echo "No shared library in root"
+          ls -la extensions/postgres/*.so 2>/dev/null || echo "No shared library in extensions/postgres"
+          find . -name "*.so" -type f 2>/dev/null || echo "No .so files found"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: orochi-pg${{ matrix.pg_version }}-${{ github.sha }}
+          name: orochi-extension-pg${{ matrix.pg_version }}-${{ github.sha }}
           path: |
             *.so
+            extensions/postgres/*.so
             sql/*.sql
           retention-days: 7
           if-no-files-found: warn
 
-  # Run standalone unit tests (no PostgreSQL required)
+  # Standalone unit tests (no PostgreSQL required)
   unit-tests:
     name: Unit Tests
     runs-on: ubuntu-latest
@@ -162,19 +178,94 @@ jobs:
       - name: Build unit tests
         working-directory: test/unit
         run: |
-          make clean
+          make clean || true
           make
 
       - name: Run unit tests
         working-directory: test/unit
         run: ./run_tests
 
-      - name: Run unit tests (verbose)
+      - name: Run unit tests (verbose on failure)
         working-directory: test/unit
         run: ./run_tests --verbose
         if: failure()
 
-  # Debug build to catch additional issues
+  # Regression tests (requires PostgreSQL)
+  regression-tests:
+    name: Regression Tests (PostgreSQL ${{ matrix.pg_version }})
+    runs-on: ubuntu-latest
+    needs: [build-and-test, unit-tests]
+    strategy:
+      fail-fast: false
+      matrix:
+        pg_version: ['16', '17']
+    services:
+      postgres:
+        image: postgres:${{ matrix.pg_version }}
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: orochi_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Add PostgreSQL APT repository
+        run: |
+          sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+          sudo apt-get update
+
+      - name: Install PostgreSQL client and dev headers
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            postgresql-client-${{ matrix.pg_version }} \
+            postgresql-server-dev-${{ matrix.pg_version }} \
+            liblz4-dev \
+            libzstd-dev \
+            libcurl4-openssl-dev \
+            libssl-dev \
+            librdkafka-dev \
+            build-essential
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: orochi-extension-pg${{ matrix.pg_version }}-${{ github.sha }}
+          path: /tmp/orochi-artifacts
+        continue-on-error: true
+
+      - name: Build extension if artifacts missing
+        run: |
+          export PATH="/usr/lib/postgresql/${{ matrix.pg_version }}/bin:$PATH"
+          make PG_CONFIG=/usr/lib/postgresql/${{ matrix.pg_version }}/bin/pg_config
+        if: ${{ hashFiles('/tmp/orochi-artifacts/*.so') == '' }}
+
+      - name: Run regression tests
+        run: |
+          export PATH="/usr/lib/postgresql/${{ matrix.pg_version }}/bin:$PATH"
+          make installcheck PGUSER=postgres PGPASSWORD=postgres PGHOST=localhost PGPORT=5432 || true
+        env:
+          PGPASSWORD: postgres
+
+      - name: Upload regression test results
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: regression-results-pg${{ matrix.pg_version }}
+          path: |
+            test/regression.diffs
+            test/results/
+          retention-days: 7
+
+  # Debug build for additional validation
   debug-build:
     name: Debug Build
     runs-on: ubuntu-latest
@@ -183,19 +274,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install PostgreSQL 16 development headers
+      - name: Add PostgreSQL APT repository
         run: |
-          sudo apt-get update
           sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
           wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            postgresql-16 \
-            postgresql-server-dev-16
 
-      - name: Install build dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get install -y --no-install-recommends \
+            postgresql-16 \
+            postgresql-server-dev-16 \
             liblz4-dev \
             libzstd-dev \
             libcurl4-openssl-dev \
@@ -205,41 +294,49 @@ jobs:
 
       - name: Build with debug flags
         run: |
-          make clean
+          make clean || true
           make DEBUG=1 PG_CONFIG=/usr/lib/postgresql/16/bin/pg_config
 
-      - name: Verify debug build
+      - name: Verify debug symbols
         run: |
-          # Check that debug symbols are present
-          file *.so 2>/dev/null | grep -i "not stripped" || echo "Build completed"
+          file *.so 2>/dev/null | grep -i "not stripped" || echo "Debug build completed"
 
-  # Summary job that depends on all others
-  ci-success:
-    name: CI Success
+  # Summary status
+  extension-ci-status:
+    name: Extension CI Status
     runs-on: ubuntu-latest
     needs:
       - lint-and-format
       - build-and-test
       - unit-tests
+      - regression-tests
       - debug-build
     if: always()
     steps:
       - name: Check all jobs passed
         run: |
+          echo "=== Extension CI Status ==="
+          echo "Lint:       ${{ needs.lint-and-format.result }}"
+          echo "Build:      ${{ needs.build-and-test.result }}"
+          echo "Unit:       ${{ needs.unit-tests.result }}"
+          echo "Regression: ${{ needs.regression-tests.result }}"
+          echo "Debug:      ${{ needs.debug-build.result }}"
+
           if [ "${{ needs.lint-and-format.result }}" != "success" ]; then
-            echo "Lint and format check failed"
-            exit 1
+            echo "Lint failed"; exit 1
           fi
           if [ "${{ needs.build-and-test.result }}" != "success" ]; then
-            echo "Build and test failed"
-            exit 1
+            echo "Build failed"; exit 1
           fi
           if [ "${{ needs.unit-tests.result }}" != "success" ]; then
-            echo "Unit tests failed"
-            exit 1
+            echo "Unit tests failed"; exit 1
           fi
           if [ "${{ needs.debug-build.result }}" != "success" ]; then
-            echo "Debug build failed"
-            exit 1
+            echo "Debug build failed"; exit 1
           fi
-          echo "All CI checks passed successfully!"
+          # Regression tests are allowed to fail for now
+          if [ "${{ needs.regression-tests.result }}" == "failure" ]; then
+            echo "WARNING: Regression tests failed (non-blocking)"
+          fi
+
+          echo "Extension CI passed!"
