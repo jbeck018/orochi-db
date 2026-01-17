@@ -64,13 +64,14 @@ function ForgotPasswordPage(): React.JSX.Element {
           <CardContent className="space-y-4">
             <p className="text-center text-sm text-muted-foreground">
               Didn&apos;t receive the email? Check your spam folder or{" "}
-              <button
+              <Button
                 type="button"
+                variant="link"
+                className="h-auto p-0 text-sm"
                 onClick={() => setIsSubmitted(false)}
-                className="text-primary hover:underline"
               >
                 try again
-              </button>
+              </Button>
               .
             </p>
             <Link to="/login">
