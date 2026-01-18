@@ -20,6 +20,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 
+	pb "github.com/orochi-db/orochi-db/services/provisioner/api/proto"
 	"github.com/orochi-db/orochi-db/services/provisioner/internal/provisioner"
 	"github.com/orochi-db/orochi-db/services/provisioner/pkg/config"
 )
@@ -105,7 +106,7 @@ func NewServer(cfg *config.Config, service *provisioner.Service, logger *zap.Log
 // Start starts the gRPC server
 func (s *Server) Start(ctx context.Context) error {
 	// Register services
-	RegisterProvisionerServer(s.grpcServer, s.handler)
+	pb.RegisterProvisionerServiceServer(s.grpcServer, s.handler)
 	healthpb.RegisterHealthServer(s.grpcServer, s.healthServer)
 	reflection.Register(s.grpcServer)
 
@@ -339,13 +340,6 @@ func unaryMetricsInterceptor() grpc.UnaryServerInterceptor {
 
 		return resp, err
 	}
-}
-
-// Placeholder for generated code - this would normally be generated from proto
-// RegisterProvisionerServer registers the provisioner service
-func RegisterProvisionerServer(s *grpc.Server, srv *Handler) {
-	// This is a placeholder - actual registration would use generated code
-	// s.RegisterService(&_ProvisionerService_serviceDesc, srv)
 }
 
 // Note: grpc_middleware v2 is available but interceptors are created inline

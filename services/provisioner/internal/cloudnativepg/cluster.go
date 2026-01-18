@@ -219,7 +219,8 @@ func (m *ClusterManager) buildClusterSpec(spec *types.ClusterSpec) *unstructured
 
 	imageName := spec.ImageName
 	if imageName == "" {
-		imageName = fmt.Sprintf("ghcr.io/orochi-db/orochi-pg:%s", postgresVersion)
+		// Use custom Orochi PostgreSQL image with extension pre-installed
+		imageName = fmt.Sprintf("registry.digitalocean.com/orochi-registry/orochi-pg:%s", postgresVersion)
 	}
 
 	storageClass := spec.Storage.StorageClass
@@ -250,15 +251,14 @@ func (m *ClusterManager) buildClusterSpec(spec *types.ClusterSpec) *unstructured
 				},
 				"resources": m.buildResourceRequirements(spec.Resources),
 				"postgresql": map[string]interface{}{
-					"parameters":             m.buildPostgresParameters(spec),
+					"parameters":              m.buildPostgresParameters(spec),
 					"shared_preload_libraries": []interface{}{"orochi"},
 				},
-				// Bootstrap configuration - creates extension automatically on cluster creation
+				// Bootstrap configuration
 				"bootstrap": map[string]interface{}{
 					"initdb": map[string]interface{}{
 						"postInitSQL": []interface{}{
 							"CREATE EXTENSION IF NOT EXISTS orochi",
-							"SELECT orochi.initialize()",
 						},
 					},
 				},
@@ -410,8 +410,8 @@ func (m *ClusterManager) buildResourceRequirements(res types.ResourceRequirement
 // buildPostgresParameters builds PostgreSQL configuration parameters
 func (m *ClusterManager) buildPostgresParameters(spec *types.ClusterSpec) map[string]interface{} {
 	params := map[string]interface{}{
-		// Enable Orochi extension
-		"shared_preload_libraries": "orochi",
+		// Note: shared_preload_libraries is set at the postgresql level in buildClusterSpec,
+		// not in parameters (CloudNativePG manages this separately)
 
 		// Performance defaults
 		"max_connections":      "200",

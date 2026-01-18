@@ -487,7 +487,7 @@ func (s *Service) buildClusterInfo(ctx context.Context, cluster interface{}, spe
 	}
 
 	return &types.ClusterInfo{
-		ClusterID: fmt.Sprintf("%s-%s", spec.Namespace, spec.Name),
+		ClusterID: fmt.Sprintf("%s/%s", spec.Namespace, spec.Name),
 		Name:      spec.Name,
 		Namespace: spec.Namespace,
 		Spec:      *spec,
@@ -523,7 +523,7 @@ func (s *Service) buildClusterInfoFromCNPG(ctx context.Context, cluster interfac
 			}
 
 			return &types.ClusterInfo{
-				ClusterID: fmt.Sprintf("%s-%s", namespace, name),
+				ClusterID: fmt.Sprintf("%s/%s", namespace, name),
 				Name:      name,
 				Namespace: namespace,
 				Status:    *status,
@@ -545,7 +545,7 @@ func (s *Service) buildClusterInfoFromCNPG(ctx context.Context, cluster interfac
 	}
 
 	return &types.ClusterInfo{
-		ClusterID: fmt.Sprintf("%s-%s", namespace, name),
+		ClusterID: fmt.Sprintf("%s/%s", namespace, name),
 		Name:      name,
 		Namespace: namespace,
 		Status:    *status,

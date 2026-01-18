@@ -16,7 +16,7 @@ import (
 func TestBuildPostgresParameters_TieringEnabled(t *testing.T) {
 	logger := zap.NewNop()
 	cfg := &config.CloudNativePGConfig{
-		DefaultPostgresVersion: "16",
+		DefaultPostgresVersion: "18",
 		DefaultStorageClass:    "standard",
 	}
 	manager := NewClusterManager(nil, cfg, logger)
@@ -67,7 +67,7 @@ func TestBuildPostgresParameters_TieringEnabled(t *testing.T) {
 func TestBuildPostgresParameters_TieringDisabled(t *testing.T) {
 	logger := zap.NewNop()
 	cfg := &config.CloudNativePGConfig{
-		DefaultPostgresVersion: "16",
+		DefaultPostgresVersion: "18",
 		DefaultStorageClass:    "standard",
 	}
 	manager := NewClusterManager(nil, cfg, logger)
@@ -106,7 +106,7 @@ func TestBuildPostgresParameters_TieringDisabled(t *testing.T) {
 func TestBuildPostgresParameters_NoOrochiConfig(t *testing.T) {
 	logger := zap.NewNop()
 	cfg := &config.CloudNativePGConfig{
-		DefaultPostgresVersion: "16",
+		DefaultPostgresVersion: "18",
 		DefaultStorageClass:    "standard",
 	}
 	manager := NewClusterManager(nil, cfg, logger)
@@ -133,7 +133,7 @@ func TestBuildPostgresParameters_NoOrochiConfig(t *testing.T) {
 func TestBuildPostgresParameters_MinimalTiering(t *testing.T) {
 	logger := zap.NewNop()
 	cfg := &config.CloudNativePGConfig{
-		DefaultPostgresVersion: "16",
+		DefaultPostgresVersion: "18",
 		DefaultStorageClass:    "standard",
 	}
 	manager := NewClusterManager(nil, cfg, logger)
@@ -175,7 +175,7 @@ func TestBuildPostgresParameters_MinimalTiering(t *testing.T) {
 func TestBuildPostgresParameters_CustomParametersOverride(t *testing.T) {
 	logger := zap.NewNop()
 	cfg := &config.CloudNativePGConfig{
-		DefaultPostgresVersion: "16",
+		DefaultPostgresVersion: "18",
 		DefaultStorageClass:    "standard",
 	}
 	manager := NewClusterManager(nil, cfg, logger)
@@ -223,7 +223,7 @@ func TestBuildPostgresParameters_CustomParametersOverride(t *testing.T) {
 func TestBuildClusterSpec_BootstrapSQL(t *testing.T) {
 	logger := zap.NewNop()
 	cfg := &config.CloudNativePGConfig{
-		DefaultPostgresVersion: "16",
+		DefaultPostgresVersion: "18",
 		DefaultStorageClass:    "standard",
 	}
 	manager := NewClusterManager(nil, cfg, logger)
@@ -272,7 +272,7 @@ func TestBuildClusterSpec_BootstrapSQL(t *testing.T) {
 func TestBuildClusterSpec_S3EnvironmentVariables(t *testing.T) {
 	logger := zap.NewNop()
 	cfg := &config.CloudNativePGConfig{
-		DefaultPostgresVersion: "16",
+		DefaultPostgresVersion: "18",
 		DefaultStorageClass:    "standard",
 	}
 	manager := NewClusterManager(nil, cfg, logger)
@@ -346,7 +346,7 @@ func TestBuildClusterSpec_S3EnvironmentVariables(t *testing.T) {
 func TestBuildClusterSpec_NoS3EnvVarsWhenTieringDisabled(t *testing.T) {
 	logger := zap.NewNop()
 	cfg := &config.CloudNativePGConfig{
-		DefaultPostgresVersion: "16",
+		DefaultPostgresVersion: "18",
 		DefaultStorageClass:    "standard",
 	}
 	manager := NewClusterManager(nil, cfg, logger)
@@ -380,7 +380,7 @@ func TestBuildClusterSpec_NoS3EnvVarsWhenTieringDisabled(t *testing.T) {
 func TestBuildClusterSpec_NoS3EnvVarsWhenNoAccessKeySecret(t *testing.T) {
 	logger := zap.NewNop()
 	cfg := &config.CloudNativePGConfig{
-		DefaultPostgresVersion: "16",
+		DefaultPostgresVersion: "18",
 		DefaultStorageClass:    "standard",
 	}
 	manager := NewClusterManager(nil, cfg, logger)
@@ -425,7 +425,7 @@ func TestBuildClusterSpec_NoS3EnvVarsWhenNoAccessKeySecret(t *testing.T) {
 func TestBuildClusterSpec_CompleteConfiguration(t *testing.T) {
 	logger := zap.NewNop()
 	cfg := &config.CloudNativePGConfig{
-		DefaultPostgresVersion: "16",
+		DefaultPostgresVersion: "18",
 		DefaultStorageClass:    "standard",
 	}
 	manager := NewClusterManager(nil, cfg, logger)
@@ -514,7 +514,7 @@ func TestBuildClusterSpec_CompleteConfiguration(t *testing.T) {
 func TestBuildClusterSpec_SharedPreloadLibraries(t *testing.T) {
 	logger := zap.NewNop()
 	cfg := &config.CloudNativePGConfig{
-		DefaultPostgresVersion: "16",
+		DefaultPostgresVersion: "18",
 		DefaultStorageClass:    "standard",
 	}
 	manager := NewClusterManager(nil, cfg, logger)

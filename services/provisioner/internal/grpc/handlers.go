@@ -12,12 +12,14 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	pb "github.com/orochi-db/orochi-db/services/provisioner/api/proto"
 	"github.com/orochi-db/orochi-db/services/provisioner/internal/provisioner"
 	"github.com/orochi-db/orochi-db/services/provisioner/pkg/types"
 )
 
 // Handler implements the gRPC provisioner service
 type Handler struct {
+	pb.UnimplementedProvisionerServiceServer
 	service *provisioner.Service
 	logger  *zap.Logger
 	version string
@@ -33,7 +35,7 @@ func NewHandler(service *provisioner.Service, logger *zap.Logger) *Handler {
 }
 
 // CreateCluster creates a new PostgreSQL cluster
-func (h *Handler) CreateCluster(ctx context.Context, req *CreateClusterRequest) (*CreateClusterResponse, error) {
+func (h *Handler) CreateCluster(ctx context.Context, req *pb.CreateClusterRequest) (*pb.CreateClusterResponse, error) {
 	if req.Spec == nil {
 		return nil, status.Error(codes.InvalidArgument, "cluster spec is required")
 	}
@@ -49,7 +51,7 @@ func (h *Handler) CreateCluster(ctx context.Context, req *CreateClusterRequest) 
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	return &CreateClusterResponse{
+	return &pb.CreateClusterResponse{
 		ClusterId: clusterInfo.ClusterID,
 		Name:      clusterInfo.Name,
 		Namespace: clusterInfo.Namespace,
@@ -59,7 +61,7 @@ func (h *Handler) CreateCluster(ctx context.Context, req *CreateClusterRequest) 
 }
 
 // UpdateCluster updates an existing cluster
-func (h *Handler) UpdateCluster(ctx context.Context, req *UpdateClusterRequest) (*UpdateClusterResponse, error) {
+func (h *Handler) UpdateCluster(ctx context.Context, req *pb.UpdateClusterRequest) (*pb.UpdateClusterResponse, error) {
 	if req.Spec == nil {
 		return nil, status.Error(codes.InvalidArgument, "cluster spec is required")
 	}
@@ -75,7 +77,7 @@ func (h *Handler) UpdateCluster(ctx context.Context, req *UpdateClusterRequest) 
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	return &UpdateClusterResponse{
+	return &pb.UpdateClusterResponse{
 		ClusterId: clusterInfo.ClusterID,
 		Phase:     h.convertPhaseToProto(clusterInfo.Status.Phase),
 		Message:   "Cluster updated successfully",
@@ -83,7 +85,7 @@ func (h *Handler) UpdateCluster(ctx context.Context, req *UpdateClusterRequest) 
 }
 
 // DeleteCluster deletes a cluster
-func (h *Handler) DeleteCluster(ctx context.Context, req *DeleteClusterRequest) (*DeleteClusterResponse, error) {
+func (h *Handler) DeleteCluster(ctx context.Context, req *pb.DeleteClusterRequest) (*pb.DeleteClusterResponse, error) {
 	if req.ClusterId == "" {
 		return nil, status.Error(codes.InvalidArgument, "cluster_id is required")
 	}
@@ -105,14 +107,14 @@ func (h *Handler) DeleteCluster(ctx context.Context, req *DeleteClusterRequest) 
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	return &DeleteClusterResponse{
+	return &pb.DeleteClusterResponse{
 		Success: true,
 		Message: "Cluster deleted successfully",
 	}, nil
 }
 
 // GetCluster retrieves a cluster
-func (h *Handler) GetCluster(ctx context.Context, req *GetClusterRequest) (*GetClusterResponse, error) {
+func (h *Handler) GetCluster(ctx context.Context, req *pb.GetClusterRequest) (*pb.GetClusterResponse, error) {
 	if req.ClusterId == "" {
 		return nil, status.Error(codes.InvalidArgument, "cluster_id is required")
 	}
@@ -130,31 +132,31 @@ func (h *Handler) GetCluster(ctx context.Context, req *GetClusterRequest) (*GetC
 		return nil, status.Error(codes.NotFound, err.Error())
 	}
 
-	return &GetClusterResponse{
+	return &pb.GetClusterResponse{
 		Cluster: h.convertClusterInfoToProto(clusterInfo),
 	}, nil
 }
 
 // ListClusters lists clusters
-func (h *Handler) ListClusters(ctx context.Context, req *ListClustersRequest) (*ListClustersResponse, error) {
+func (h *Handler) ListClusters(ctx context.Context, req *pb.ListClustersRequest) (*pb.ListClustersResponse, error) {
 	clusters, err := h.service.ListClusters(ctx, req.Namespace, req.LabelSelector, req.Limit)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	protoClusters := make([]*ClusterInfo, 0, len(clusters))
+	protoClusters := make([]*pb.ClusterInfo, 0, len(clusters))
 	for _, cluster := range clusters {
 		protoClusters = append(protoClusters, h.convertClusterInfoToProto(cluster))
 	}
 
-	return &ListClustersResponse{
+	return &pb.ListClustersResponse{
 		Clusters:   protoClusters,
 		TotalCount: int32(len(protoClusters)),
 	}, nil
 }
 
 // CreateBackup creates a backup
-func (h *Handler) CreateBackup(ctx context.Context, req *CreateBackupRequest) (*CreateBackupResponse, error) {
+func (h *Handler) CreateBackup(ctx context.Context, req *pb.CreateBackupRequest) (*pb.CreateBackupResponse, error) {
 	if req.ClusterId == "" {
 		return nil, status.Error(codes.InvalidArgument, "cluster_id is required")
 	}
@@ -168,7 +170,7 @@ func (h *Handler) CreateBackup(ctx context.Context, req *CreateBackupRequest) (*
 	}
 
 	method := types.BackupMethodBarmanObjectStore
-	if req.Method == BackupMethod_BACKUP_VOLUME_SNAPSHOT {
+	if req.Method == pb.BackupMethod_BACKUP_VOLUME_SNAPSHOT {
 		method = types.BackupMethodVolumeSnapshot
 	}
 
@@ -177,7 +179,7 @@ func (h *Handler) CreateBackup(ctx context.Context, req *CreateBackupRequest) (*
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	return &CreateBackupResponse{
+	return &pb.CreateBackupResponse{
 		BackupId: backupInfo.BackupID,
 		Name:     backupInfo.Name,
 		Phase:    h.convertBackupPhaseToProto(backupInfo.Phase),
@@ -186,7 +188,7 @@ func (h *Handler) CreateBackup(ctx context.Context, req *CreateBackupRequest) (*
 }
 
 // ListBackups lists backups for a cluster
-func (h *Handler) ListBackups(ctx context.Context, req *ListBackupsRequest) (*ListBackupsResponse, error) {
+func (h *Handler) ListBackups(ctx context.Context, req *pb.ListBackupsRequest) (*pb.ListBackupsResponse, error) {
 	if req.ClusterId == "" {
 		return nil, status.Error(codes.InvalidArgument, "cluster_id is required")
 	}
@@ -204,18 +206,18 @@ func (h *Handler) ListBackups(ctx context.Context, req *ListBackupsRequest) (*Li
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	protoBackups := make([]*BackupInfo, 0, len(backups))
+	protoBackups := make([]*pb.BackupInfo, 0, len(backups))
 	for _, backup := range backups {
 		protoBackups = append(protoBackups, h.convertBackupInfoToProto(backup))
 	}
 
-	return &ListBackupsResponse{
+	return &pb.ListBackupsResponse{
 		Backups: protoBackups,
 	}, nil
 }
 
 // DeleteBackup deletes a backup
-func (h *Handler) DeleteBackup(ctx context.Context, req *DeleteBackupRequest) (*DeleteBackupResponse, error) {
+func (h *Handler) DeleteBackup(ctx context.Context, req *pb.DeleteBackupRequest) (*pb.DeleteBackupResponse, error) {
 	if req.BackupId == "" {
 		return nil, status.Error(codes.InvalidArgument, "backup_id is required")
 	}
@@ -224,14 +226,14 @@ func (h *Handler) DeleteBackup(ctx context.Context, req *DeleteBackupRequest) (*
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	return &DeleteBackupResponse{
+	return &pb.DeleteBackupResponse{
 		Success: true,
 		Message: "Backup deleted successfully",
 	}, nil
 }
 
 // RestoreCluster restores a cluster from a backup
-func (h *Handler) RestoreCluster(ctx context.Context, req *RestoreClusterRequest) (*RestoreClusterResponse, error) {
+func (h *Handler) RestoreCluster(ctx context.Context, req *pb.RestoreClusterRequest) (*pb.RestoreClusterResponse, error) {
 	if req.SourceClusterId == "" {
 		return nil, status.Error(codes.InvalidArgument, "source_cluster_id is required")
 	}
@@ -255,7 +257,7 @@ func (h *Handler) RestoreCluster(ctx context.Context, req *RestoreClusterRequest
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	return &RestoreClusterResponse{
+	return &pb.RestoreClusterResponse{
 		ClusterId: clusterInfo.ClusterID,
 		Name:      clusterInfo.Name,
 		Phase:     h.convertPhaseToProto(clusterInfo.Status.Phase),
@@ -264,7 +266,7 @@ func (h *Handler) RestoreCluster(ctx context.Context, req *RestoreClusterRequest
 }
 
 // GetClusterStatus returns the status of a cluster
-func (h *Handler) GetClusterStatus(ctx context.Context, req *GetClusterStatusRequest) (*GetClusterStatusResponse, error) {
+func (h *Handler) GetClusterStatus(ctx context.Context, req *pb.GetClusterStatusRequest) (*pb.GetClusterStatusResponse, error) {
 	if req.ClusterId == "" {
 		return nil, status.Error(codes.InvalidArgument, "cluster_id is required")
 	}
@@ -282,13 +284,13 @@ func (h *Handler) GetClusterStatus(ctx context.Context, req *GetClusterStatusReq
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	return &GetClusterStatusResponse{
+	return &pb.GetClusterStatusResponse{
 		Status: h.convertClusterStatusToProto(clusterStatus),
 	}, nil
 }
 
 // HealthCheck performs a health check
-func (h *Handler) HealthCheck(ctx context.Context, _ *emptypb.Empty) (*HealthCheckResponse, error) {
+func (h *Handler) HealthCheck(ctx context.Context, _ *emptypb.Empty) (*pb.HealthCheckResponse, error) {
 	err := h.service.HealthCheck(ctx)
 	healthy := err == nil
 
@@ -299,7 +301,7 @@ func (h *Handler) HealthCheck(ctx context.Context, _ *emptypb.Empty) (*HealthChe
 		details["kubernetes"] = fmt.Sprintf("error: %v", err)
 	}
 
-	return &HealthCheckResponse{
+	return &pb.HealthCheckResponse{
 		Healthy: healthy,
 		Version: h.version,
 		Details: details,
@@ -336,7 +338,7 @@ func (h *Handler) parseClusterID(clusterID string) (namespace, name string, err 
 	return namespace, name, nil
 }
 
-func (h *Handler) convertClusterSpec(spec *ClusterSpec) *types.ClusterSpec {
+func (h *Handler) convertClusterSpec(spec *pb.ClusterSpec) *types.ClusterSpec {
 	if spec == nil {
 		return nil
 	}
@@ -434,61 +436,61 @@ func (h *Handler) convertClusterSpec(spec *ClusterSpec) *types.ClusterSpec {
 	return result
 }
 
-func (h *Handler) convertCompressionType(ct CompressionType) string {
+func (h *Handler) convertCompressionType(ct pb.CompressionType) string {
 	switch ct {
-	case CompressionType_COMPRESSION_LZ4:
+	case pb.CompressionType_COMPRESSION_LZ4:
 		return "lz4"
-	case CompressionType_COMPRESSION_ZSTD:
+	case pb.CompressionType_COMPRESSION_ZSTD:
 		return "zstd"
-	case CompressionType_COMPRESSION_DELTA:
+	case pb.CompressionType_COMPRESSION_DELTA:
 		return "delta"
-	case CompressionType_COMPRESSION_GORILLA:
+	case pb.CompressionType_COMPRESSION_GORILLA:
 		return "gorilla"
-	case CompressionType_COMPRESSION_DICTIONARY:
+	case pb.CompressionType_COMPRESSION_DICTIONARY:
 		return "dictionary"
-	case CompressionType_COMPRESSION_RLE:
+	case pb.CompressionType_COMPRESSION_RLE:
 		return "rle"
 	default:
 		return "none"
 	}
 }
 
-func (h *Handler) convertPhaseToProto(phase types.ClusterPhase) ClusterPhase {
+func (h *Handler) convertPhaseToProto(phase types.ClusterPhase) pb.ClusterPhase {
 	switch phase {
 	case types.ClusterPhaseSettingUp:
-		return ClusterPhase_PHASE_SETTING_UP
+		return pb.ClusterPhase_PHASE_SETTING_UP
 	case types.ClusterPhaseHealthy:
-		return ClusterPhase_PHASE_HEALTHY
+		return pb.ClusterPhase_PHASE_HEALTHY
 	case types.ClusterPhaseUnhealthy:
-		return ClusterPhase_PHASE_UNHEALTHY
+		return pb.ClusterPhase_PHASE_UNHEALTHY
 	case types.ClusterPhaseUpgrading:
-		return ClusterPhase_PHASE_UPGRADING
+		return pb.ClusterPhase_PHASE_UPGRADING
 	case types.ClusterPhaseFailingOver:
-		return ClusterPhase_PHASE_FAILING_OVER
+		return pb.ClusterPhase_PHASE_FAILING_OVER
 	case types.ClusterPhaseDeleting:
-		return ClusterPhase_PHASE_DELETING
+		return pb.ClusterPhase_PHASE_DELETING
 	default:
-		return ClusterPhase_PHASE_UNKNOWN
+		return pb.ClusterPhase_PHASE_UNKNOWN
 	}
 }
 
-func (h *Handler) convertBackupPhaseToProto(phase types.BackupPhase) BackupPhase {
+func (h *Handler) convertBackupPhaseToProto(phase types.BackupPhase) pb.BackupPhase {
 	switch phase {
 	case types.BackupPhasePending:
-		return BackupPhase_BACKUP_PENDING
+		return pb.BackupPhase_BACKUP_PENDING
 	case types.BackupPhaseRunning:
-		return BackupPhase_BACKUP_RUNNING
+		return pb.BackupPhase_BACKUP_RUNNING
 	case types.BackupPhaseCompleted:
-		return BackupPhase_BACKUP_COMPLETED
+		return pb.BackupPhase_BACKUP_COMPLETED
 	case types.BackupPhaseFailed:
-		return BackupPhase_BACKUP_FAILED
+		return pb.BackupPhase_BACKUP_FAILED
 	default:
-		return BackupPhase_BACKUP_PENDING
+		return pb.BackupPhase_BACKUP_PENDING
 	}
 }
 
-func (h *Handler) convertClusterInfoToProto(info *types.ClusterInfo) *ClusterInfo {
-	return &ClusterInfo{
+func (h *Handler) convertClusterInfoToProto(info *types.ClusterInfo) *pb.ClusterInfo {
+	return &pb.ClusterInfo{
 		ClusterId: info.ClusterID,
 		Name:      info.Name,
 		Namespace: info.Namespace,
@@ -498,8 +500,8 @@ func (h *Handler) convertClusterInfoToProto(info *types.ClusterInfo) *ClusterInf
 	}
 }
 
-func (h *Handler) convertClusterStatusToProto(status *types.ClusterStatus) *ClusterStatus {
-	protoStatus := &ClusterStatus{
+func (h *Handler) convertClusterStatusToProto(status *types.ClusterStatus) *pb.ClusterStatus {
+	protoStatus := &pb.ClusterStatus{
 		Phase:                    h.convertPhaseToProto(status.Phase),
 		ReadyInstances:           status.ReadyInstances,
 		TotalInstances:           status.TotalInstances,
@@ -511,7 +513,7 @@ func (h *Handler) convertClusterStatusToProto(status *types.ClusterStatus) *Clus
 	}
 
 	for _, inst := range status.Instances {
-		protoStatus.Instances = append(protoStatus.Instances, &InstanceStatus{
+		protoStatus.Instances = append(protoStatus.Instances, &pb.InstanceStatus{
 			Name:      inst.Name,
 			Role:      inst.Role,
 			Ready:     inst.Ready,
@@ -523,13 +525,13 @@ func (h *Handler) convertClusterStatusToProto(status *types.ClusterStatus) *Clus
 	return protoStatus
 }
 
-func (h *Handler) convertBackupInfoToProto(info *types.BackupInfo) *BackupInfo {
-	method := BackupMethod_BACKUP_BARMAN_OBJECT_STORE
+func (h *Handler) convertBackupInfoToProto(info *types.BackupInfo) *pb.BackupInfo {
+	method := pb.BackupMethod_BACKUP_BARMAN_OBJECT_STORE
 	if info.Method == types.BackupMethodVolumeSnapshot {
-		method = BackupMethod_BACKUP_VOLUME_SNAPSHOT
+		method = pb.BackupMethod_BACKUP_VOLUME_SNAPSHOT
 	}
 
-	return &BackupInfo{
+	return &pb.BackupInfo{
 		BackupId:    info.BackupID,
 		Name:        info.Name,
 		ClusterName: info.ClusterName,
@@ -545,7 +547,7 @@ func (h *Handler) convertBackupInfoToProto(info *types.BackupInfo) *BackupInfo {
 	}
 }
 
-func (h *Handler) convertRestoreOptions(opts *RestoreOptions) *types.RestoreOptions {
+func (h *Handler) convertRestoreOptions(opts *pb.RestoreOptions) *types.RestoreOptions {
 	if opts == nil {
 		return nil
 	}
@@ -558,311 +560,3 @@ func (h *Handler) convertRestoreOptions(opts *RestoreOptions) *types.RestoreOpti
 		RecoveryTargetInclusive: opts.RecoveryTargetInclusive,
 	}
 }
-
-// Proto message types (these would normally be generated from the .proto file)
-// Keeping them here as placeholders for the actual generated types
-
-type CreateClusterRequest struct {
-	Spec           *ClusterSpec
-	WaitForReady   bool
-	TimeoutSeconds int32
-}
-
-type CreateClusterResponse struct {
-	ClusterId string
-	Name      string
-	Namespace string
-	Phase     ClusterPhase
-	Message   string
-}
-
-type UpdateClusterRequest struct {
-	ClusterId     string
-	Spec          *ClusterSpec
-	RollingUpdate bool
-}
-
-type UpdateClusterResponse struct {
-	ClusterId string
-	Phase     ClusterPhase
-	Message   string
-}
-
-type DeleteClusterRequest struct {
-	ClusterId     string
-	Namespace     string
-	DeleteBackups bool
-	DeletePvcs    bool
-}
-
-type DeleteClusterResponse struct {
-	Success bool
-	Message string
-}
-
-type GetClusterRequest struct {
-	ClusterId string
-	Namespace string
-}
-
-type GetClusterResponse struct {
-	Cluster *ClusterInfo
-}
-
-type ListClustersRequest struct {
-	Namespace     string
-	LabelSelector map[string]string
-	Limit         int32
-	ContinueToken string
-}
-
-type ListClustersResponse struct {
-	Clusters      []*ClusterInfo
-	ContinueToken string
-	TotalCount    int32
-}
-
-type CreateBackupRequest struct {
-	ClusterId  string
-	Namespace  string
-	BackupName string
-	Method     BackupMethod
-	TargetTime string
-}
-
-type CreateBackupResponse struct {
-	BackupId string
-	Name     string
-	Phase    BackupPhase
-	Message  string
-}
-
-type ListBackupsRequest struct {
-	ClusterId string
-	Namespace string
-}
-
-type ListBackupsResponse struct {
-	Backups []*BackupInfo
-}
-
-type DeleteBackupRequest struct {
-	BackupId  string
-	Namespace string
-}
-
-type DeleteBackupResponse struct {
-	Success bool
-	Message string
-}
-
-type RestoreClusterRequest struct {
-	SourceClusterId  string
-	SourceNamespace  string
-	TargetSpec       *ClusterSpec
-	Options          *RestoreOptions
-}
-
-type RestoreClusterResponse struct {
-	ClusterId string
-	Name      string
-	Phase     ClusterPhase
-	Message   string
-}
-
-type GetClusterStatusRequest struct {
-	ClusterId string
-	Namespace string
-}
-
-type GetClusterStatusResponse struct {
-	Status     *ClusterStatus
-	Conditions []*ClusterCondition
-}
-
-type HealthCheckResponse struct {
-	Healthy bool
-	Version string
-	Details map[string]string
-}
-
-type ClusterSpec struct {
-	Name            string
-	Namespace       string
-	Instances       int32
-	PostgresVersion string
-	ImageName       string
-	Resources       *ResourceRequirements
-	Storage         *StorageSpec
-	OrochiConfig    *OrochiConfig
-	BackupConfig    *BackupConfiguration
-	Monitoring      *MonitoringConfig
-	Pooler          *ConnectionPoolerSpec
-	Affinity        *AffinityConfig
-	Labels          map[string]string
-	Annotations     map[string]string
-}
-
-type ResourceRequirements struct {
-	CpuRequest    string
-	CpuLimit      string
-	MemoryRequest string
-	MemoryLimit   string
-	Hugepages_2Mi string
-	Hugepages_1Gi string
-}
-
-type StorageSpec struct {
-	Size               string
-	StorageClass       string
-	ResizeInUseVolumes bool
-	WalSize            string
-	WalStorageClass    string
-}
-
-type OrochiConfig struct {
-	Enabled            bool
-	DefaultShardCount  int32
-	ChunkInterval      string
-	EnableColumnar     bool
-	DefaultCompression CompressionType
-	Tiering            *TieringConfig
-	CustomParameters   map[string]string
-}
-
-type TieringConfig struct {
-	Enabled      bool
-	HotDuration  string
-	WarmDuration string
-	ColdDuration string
-	S3Config     *S3Config
-}
-
-type S3Config struct {
-	Endpoint        string
-	Bucket          string
-	Region          string
-	AccessKeySecret string
-}
-
-type BackupConfiguration struct{}
-type MonitoringConfig struct {
-	EnablePodMonitor     bool
-	EnablePrometheusRule bool
-	CustomQueries        map[string]string
-	ScrapeInterval       string
-}
-type ConnectionPoolerSpec struct{}
-type AffinityConfig struct {
-	EnablePodAntiAffinity bool
-	TopologyKey           string
-	NodeSelector          map[string]string
-	Tolerations           []*Toleration
-}
-type Toleration struct {
-	Key               string
-	Operator          string
-	Value             string
-	Effect            string
-	TolerationSeconds int64
-}
-type RestoreOptions struct {
-	BackupId                string
-	RecoveryTargetTime      string
-	RecoveryTargetLsn       string
-	RecoveryTargetName      string
-	RecoveryTargetInclusive bool
-}
-
-type ClusterInfo struct {
-	ClusterId string
-	Name      string
-	Namespace string
-	Spec      *ClusterSpec
-	Status    *ClusterStatus
-	CreatedAt *timestamppb.Timestamp
-	UpdatedAt *timestamppb.Timestamp
-}
-
-type ClusterStatus struct {
-	Phase                    ClusterPhase
-	ReadyInstances           int32
-	TotalInstances           int32
-	CurrentPrimary           string
-	CurrentPrimaryTimestamp  string
-	FirstRecoverabilityPoint string
-	LastSuccessfulBackup     string
-	Instances                []*InstanceStatus
-	Conditions               []string
-}
-
-type InstanceStatus struct {
-	Name      string
-	Role      string
-	Ready     bool
-	PodIp     string
-	StartTime *timestamppb.Timestamp
-}
-
-type BackupInfo struct {
-	BackupId    string
-	Name        string
-	ClusterName string
-	Method      BackupMethod
-	Phase       BackupPhase
-	StartedAt   *timestamppb.Timestamp
-	CompletedAt *timestamppb.Timestamp
-	BeginWal    string
-	EndWal      string
-	BeginLsn    string
-	EndLsn      string
-	BackupSize  int64
-}
-
-type ClusterCondition struct {
-	Type               string
-	Status             string
-	LastTransitionTime *timestamppb.Timestamp
-	Reason             string
-	Message            string
-}
-
-type ClusterPhase int32
-
-const (
-	ClusterPhase_PHASE_UNKNOWN      ClusterPhase = 0
-	ClusterPhase_PHASE_SETTING_UP   ClusterPhase = 1
-	ClusterPhase_PHASE_HEALTHY      ClusterPhase = 2
-	ClusterPhase_PHASE_UNHEALTHY    ClusterPhase = 3
-	ClusterPhase_PHASE_UPGRADING    ClusterPhase = 4
-	ClusterPhase_PHASE_FAILING_OVER ClusterPhase = 5
-	ClusterPhase_PHASE_DELETING     ClusterPhase = 6
-)
-
-type BackupPhase int32
-
-const (
-	BackupPhase_BACKUP_PENDING   BackupPhase = 0
-	BackupPhase_BACKUP_RUNNING   BackupPhase = 1
-	BackupPhase_BACKUP_COMPLETED BackupPhase = 2
-	BackupPhase_BACKUP_FAILED    BackupPhase = 3
-)
-
-type BackupMethod int32
-
-const (
-	BackupMethod_BACKUP_BARMAN_OBJECT_STORE BackupMethod = 0
-	BackupMethod_BACKUP_VOLUME_SNAPSHOT     BackupMethod = 1
-)
-
-type CompressionType int32
-
-const (
-	CompressionType_COMPRESSION_NONE       CompressionType = 0
-	CompressionType_COMPRESSION_LZ4        CompressionType = 1
-	CompressionType_COMPRESSION_ZSTD       CompressionType = 2
-	CompressionType_COMPRESSION_DELTA      CompressionType = 3
-	CompressionType_COMPRESSION_GORILLA    CompressionType = 4
-	CompressionType_COMPRESSION_DICTIONARY CompressionType = 5
-	CompressionType_COMPRESSION_RLE        CompressionType = 6
-)

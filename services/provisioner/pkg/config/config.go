@@ -153,7 +153,7 @@ func DefaultConfig() *Config {
 		},
 		CloudNativePG: CloudNativePGConfig{
 			OperatorNamespace:      "cnpg-system",
-			DefaultPostgresVersion: "16",
+			DefaultPostgresVersion: "18",
 			ClusterReadyTimeout:    10 * time.Minute,
 			DefaultStorageClass:    "standard",
 			DefaultBackupRetention: "30d",
