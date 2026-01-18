@@ -37,6 +37,20 @@
 #include "utils/rel.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
+#include "catalog/pg_am.h"
+
+/* PostgreSQL 18 removed some AM OID macros - define them if needed */
+#if PG_VERSION_NUM >= 180000
+#ifndef GIN_AM_OID
+#define GIN_AM_OID 2742
+#endif
+#ifndef BTREE_AM_OID
+#define BTREE_AM_OID 403
+#endif
+#ifndef HASH_AM_OID
+#define HASH_AM_OID 405
+#endif
+#endif
 
 #include "../orochi.h"
 #include "json_index.h"

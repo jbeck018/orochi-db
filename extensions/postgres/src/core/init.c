@@ -22,6 +22,8 @@
 #include "storage/lwlock.h"
 #include "storage/shmem.h"
 #include "utils/guc.h"
+#include "utils/builtins.h"
+#include "lib/stringinfo.h"
 #include "postmaster/bgworker.h"
 #include "access/xact.h"
 
@@ -36,6 +38,9 @@
 
 /* Use PG_MODULE_MAGIC_EXT on PG18+ for name/version reporting */
 OROCHI_MODULE_MAGIC;
+
+/* SQL-callable function declarations */
+PG_FUNCTION_INFO_V1(orochi_initialize_sql);
 
 /* GUC variables */
 int     orochi_default_shard_count = 32;
@@ -498,4 +503,47 @@ orochi_register_background_workers(void)
     RegisterBackgroundWorker(&worker);
 
     elog(LOG, "Orochi background workers registered");
+}
+
+/*
+ * orochi_initialize_sql
+ *    SQL-callable function to initialize the extension after CREATE EXTENSION.
+ *    Called by the provisioner during cluster bootstrap.
+ *
+ *    This function:
+ *    - Verifies the extension is properly loaded
+ *    - Logs initialization status
+ *    - Returns a status message
+ */
+Datum
+orochi_initialize_sql(PG_FUNCTION_ARGS)
+{
+    StringInfoData msg;
+    bool           shmem_available;
+
+    initStringInfo(&msg);
+
+    /* Check if we have shared memory (loaded via shared_preload_libraries) */
+    shmem_available = process_shared_preload_libraries_in_progress ||
+                      (orochi_shmem_size > 0);
+
+    if (shmem_available)
+    {
+        appendStringInfo(&msg, "Orochi DB v%s initialized with full shared memory support",
+                         OROCHI_VERSION_STRING);
+        elog(LOG, "Orochi DB v%s initialized via orochi.initialize() - full mode",
+             OROCHI_VERSION_STRING);
+    }
+    else
+    {
+        appendStringInfo(&msg, "Orochi DB v%s initialized (limited mode - add 'orochi' to "
+                         "shared_preload_libraries in postgresql.conf for background workers "
+                         "and shared memory features)",
+                         OROCHI_VERSION_STRING);
+        elog(WARNING, "Orochi DB v%s initialized via orochi.initialize() - limited mode "
+             "(not in shared_preload_libraries)",
+             OROCHI_VERSION_STRING);
+    }
+
+    PG_RETURN_TEXT_P(cstring_to_text(msg.data));
 }

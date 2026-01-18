@@ -24,12 +24,17 @@
 
 #include "postgres.h"
 #include "fmgr.h"
+#include "varatt.h"
 #include "lib/stringinfo.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "utils/typcache.h"
 #include "utils/datum.h"
+#if PG_VERSION_NUM >= 180000
+#include "common/hashfn.h"
+#else
 #include "utils/hashutils.h"
+#endif
 #include "catalog/pg_type.h"
 
 #include <math.h>

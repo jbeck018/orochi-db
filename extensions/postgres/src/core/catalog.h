@@ -176,6 +176,11 @@ extern OrochiChunkInfo *orochi_catalog_get_chunk(int64 chunk_id);
 extern List *orochi_catalog_get_hypertable_chunks(Oid hypertable_oid);
 
 /*
+ * Get chunk count for a hypertable
+ */
+extern int orochi_catalog_get_chunk_count(Oid hypertable_oid);
+
+/*
  * Get chunks in time range
  */
 extern List *orochi_catalog_get_chunks_in_range(Oid hypertable_oid,

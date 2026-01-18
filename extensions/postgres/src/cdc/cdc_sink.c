@@ -896,8 +896,9 @@ cdc_file_sink_init(CDCFileSinkConfig *config)
     ctx->file = fopen(ctx->current_file_path, config->append_mode ? "a" : "w");
     if (ctx->file == NULL)
     {
+        int saved_errno = errno;
         elog(ERROR, "Failed to open CDC file sink: %s (error: %s)",
-             ctx->current_file_path, strerror(errno));
+             ctx->current_file_path, strerror(saved_errno));
         MemoryContextSwitchTo(oldcontext);
         MemoryContextDelete(file_context);
         return NULL;

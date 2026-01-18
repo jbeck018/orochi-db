@@ -780,6 +780,12 @@ CREATE FUNCTION orochi_version() RETURNS text AS $$
     SELECT '1.0.0'::text;
 $$ LANGUAGE sql IMMUTABLE;
 
+-- Initialize the extension (called by provisioner during cluster bootstrap)
+-- This function verifies the extension is properly loaded and returns status
+CREATE FUNCTION initialize() RETURNS text
+    AS 'MODULE_PATHNAME', 'orochi_initialize_sql'
+    LANGUAGE C;
+
 CREATE FUNCTION approximate_row_count(relation regclass)
 RETURNS bigint AS $$
     SELECT reltuples::bigint FROM pg_class WHERE oid = relation;

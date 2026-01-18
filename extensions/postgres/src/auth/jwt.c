@@ -611,6 +611,378 @@ verify_hmac_signature(const char *data, Size data_len,
 }
 
 /*
+ * Get EVP_MD for RSA algorithm
+ */
+static const EVP_MD *
+get_rsa_digest_algorithm(OrochiJwtAlgorithm alg)
+{
+    switch (alg)
+    {
+        case OROCHI_JWT_RS256:
+            return EVP_sha256();
+        case OROCHI_JWT_RS384:
+            return EVP_sha384();
+        case OROCHI_JWT_RS512:
+            return EVP_sha512();
+        default:
+            return NULL;
+    }
+}
+
+/*
+ * Get EVP_MD for ECDSA algorithm
+ */
+static const EVP_MD *
+get_ecdsa_digest_algorithm(OrochiJwtAlgorithm alg)
+{
+    switch (alg)
+    {
+        case OROCHI_JWT_ES256:
+            return EVP_sha256();
+        case OROCHI_JWT_ES384:
+            return EVP_sha384();
+        case OROCHI_JWT_ES512:
+            return EVP_sha512();
+        default:
+            return NULL;
+    }
+}
+
+/*
+ * Verify RSA signature (RS256, RS384, RS512)
+ *
+ * The public_key_pem should be a PEM-encoded RSA public key
+ * The signature is in PKCS#1 v1.5 format
+ */
+static bool
+verify_rsa_signature(const char *data, Size data_len,
+                     const unsigned char *signature, Size sig_len,
+                     const char *public_key_pem,
+                     OrochiJwtAlgorithm alg)
+{
+    const EVP_MD *md;
+    EVP_PKEY *pkey = NULL;
+    EVP_MD_CTX *md_ctx = NULL;
+    BIO *bio = NULL;
+    bool result = false;
+    int verify_result;
+
+    md = get_rsa_digest_algorithm(alg);
+    if (md == NULL)
+    {
+        elog(WARNING, "Unsupported RSA algorithm");
+        return false;
+    }
+
+    /* Parse PEM public key */
+    bio = BIO_new_mem_buf(public_key_pem, -1);
+    if (bio == NULL)
+    {
+        elog(WARNING, "Failed to create BIO for public key");
+        return false;
+    }
+
+    pkey = PEM_read_bio_PUBKEY(bio, NULL, NULL, NULL);
+    BIO_free(bio);
+
+    if (pkey == NULL)
+    {
+        /* Try reading as RSA public key format */
+        bio = BIO_new_mem_buf(public_key_pem, -1);
+        if (bio != NULL)
+        {
+            RSA *rsa = PEM_read_bio_RSAPublicKey(bio, NULL, NULL, NULL);
+            BIO_free(bio);
+            if (rsa != NULL)
+            {
+                pkey = EVP_PKEY_new();
+                if (pkey != NULL)
+                    EVP_PKEY_assign_RSA(pkey, rsa);
+                else
+                    RSA_free(rsa);
+            }
+        }
+    }
+
+    if (pkey == NULL)
+    {
+        unsigned long err = ERR_get_error();
+        char err_buf[256];
+        ERR_error_string_n(err, err_buf, sizeof(err_buf));
+        elog(WARNING, "Failed to parse RSA public key: %s", err_buf);
+        return false;
+    }
+
+    /* Verify the key is RSA */
+    if (EVP_PKEY_base_id(pkey) != EVP_PKEY_RSA)
+    {
+        elog(WARNING, "Key is not an RSA key");
+        EVP_PKEY_free(pkey);
+        return false;
+    }
+
+    /* Create verification context */
+    md_ctx = EVP_MD_CTX_new();
+    if (md_ctx == NULL)
+    {
+        elog(WARNING, "Failed to create EVP_MD_CTX");
+        EVP_PKEY_free(pkey);
+        return false;
+    }
+
+    /* Initialize verification */
+    if (EVP_DigestVerifyInit(md_ctx, NULL, md, NULL, pkey) != 1)
+    {
+        elog(WARNING, "EVP_DigestVerifyInit failed");
+        goto cleanup;
+    }
+
+    /* Add data to verification */
+    if (EVP_DigestVerifyUpdate(md_ctx, data, data_len) != 1)
+    {
+        elog(WARNING, "EVP_DigestVerifyUpdate failed");
+        goto cleanup;
+    }
+
+    /* Verify signature */
+    verify_result = EVP_DigestVerifyFinal(md_ctx, signature, sig_len);
+    if (verify_result == 1)
+    {
+        result = true;
+    }
+    else if (verify_result == 0)
+    {
+        /* Signature verification failed (signature doesn't match) */
+        elog(DEBUG1, "RSA signature verification failed: signature mismatch");
+    }
+    else
+    {
+        /* Error during verification */
+        unsigned long err = ERR_get_error();
+        char err_buf[256];
+        ERR_error_string_n(err, err_buf, sizeof(err_buf));
+        elog(WARNING, "RSA verification error: %s", err_buf);
+    }
+
+cleanup:
+    EVP_MD_CTX_free(md_ctx);
+    EVP_PKEY_free(pkey);
+
+    return result;
+}
+
+/*
+ * Convert JWT ECDSA signature (concatenated r||s) to DER format
+ *
+ * JWT uses a raw signature format where r and s are concatenated
+ * OpenSSL expects DER-encoded ECDSA-Sig-Value
+ */
+static unsigned char *
+ecdsa_sig_to_der(const unsigned char *jwt_sig, Size jwt_sig_len,
+                 int coord_size, Size *der_len)
+{
+    ECDSA_SIG *sig = NULL;
+    BIGNUM *r = NULL, *s = NULL;
+    unsigned char *der_sig = NULL;
+    int der_sig_len;
+
+    /* JWT ECDSA signature is r||s, each coord_size bytes */
+    if (jwt_sig_len != (Size)(coord_size * 2))
+    {
+        elog(WARNING, "Invalid ECDSA signature length: %zu (expected %d)",
+             jwt_sig_len, coord_size * 2);
+        return NULL;
+    }
+
+    /* Extract r and s from concatenated format */
+    r = BN_bin2bn(jwt_sig, coord_size, NULL);
+    s = BN_bin2bn(jwt_sig + coord_size, coord_size, NULL);
+
+    if (r == NULL || s == NULL)
+    {
+        elog(WARNING, "Failed to create BIGNUMs from signature");
+        BN_free(r);
+        BN_free(s);
+        return NULL;
+    }
+
+    /* Create ECDSA_SIG and set r, s */
+    sig = ECDSA_SIG_new();
+    if (sig == NULL)
+    {
+        BN_free(r);
+        BN_free(s);
+        return NULL;
+    }
+
+    /* ECDSA_SIG_set0 takes ownership of r and s */
+    if (ECDSA_SIG_set0(sig, r, s) != 1)
+    {
+        BN_free(r);
+        BN_free(s);
+        ECDSA_SIG_free(sig);
+        return NULL;
+    }
+
+    /* Convert to DER format */
+    der_sig_len = i2d_ECDSA_SIG(sig, NULL);
+    if (der_sig_len <= 0)
+    {
+        ECDSA_SIG_free(sig);
+        return NULL;
+    }
+
+    der_sig = palloc(der_sig_len);
+    unsigned char *der_ptr = der_sig;
+    der_sig_len = i2d_ECDSA_SIG(sig, &der_ptr);
+
+    ECDSA_SIG_free(sig);
+
+    if (der_sig_len <= 0)
+    {
+        pfree(der_sig);
+        return NULL;
+    }
+
+    *der_len = (Size)der_sig_len;
+    return der_sig;
+}
+
+/*
+ * Verify ECDSA signature (ES256, ES384, ES512)
+ *
+ * The public_key_pem should be a PEM-encoded EC public key
+ * The signature is in JWT format (r||s concatenated)
+ */
+static bool
+verify_ecdsa_signature(const char *data, Size data_len,
+                       const unsigned char *signature, Size sig_len,
+                       const char *public_key_pem,
+                       OrochiJwtAlgorithm alg)
+{
+    const EVP_MD *md;
+    EVP_PKEY *pkey = NULL;
+    EVP_MD_CTX *md_ctx = NULL;
+    BIO *bio = NULL;
+    bool result = false;
+    int verify_result;
+    unsigned char *der_sig = NULL;
+    Size der_sig_len;
+    int coord_size;
+
+    md = get_ecdsa_digest_algorithm(alg);
+    if (md == NULL)
+    {
+        elog(WARNING, "Unsupported ECDSA algorithm");
+        return false;
+    }
+
+    /* Determine coordinate size based on algorithm */
+    switch (alg)
+    {
+        case OROCHI_JWT_ES256:
+            coord_size = 32;  /* P-256 uses 32-byte coordinates */
+            break;
+        case OROCHI_JWT_ES384:
+            coord_size = 48;  /* P-384 uses 48-byte coordinates */
+            break;
+        case OROCHI_JWT_ES512:
+            coord_size = 66;  /* P-521 uses 66-byte coordinates */
+            break;
+        default:
+            return false;
+    }
+
+    /* Convert JWT signature format to DER */
+    der_sig = ecdsa_sig_to_der(signature, sig_len, coord_size, &der_sig_len);
+    if (der_sig == NULL)
+    {
+        elog(WARNING, "Failed to convert ECDSA signature to DER format");
+        return false;
+    }
+
+    /* Parse PEM public key */
+    bio = BIO_new_mem_buf(public_key_pem, -1);
+    if (bio == NULL)
+    {
+        elog(WARNING, "Failed to create BIO for public key");
+        pfree(der_sig);
+        return false;
+    }
+
+    pkey = PEM_read_bio_PUBKEY(bio, NULL, NULL, NULL);
+    BIO_free(bio);
+
+    if (pkey == NULL)
+    {
+        unsigned long err = ERR_get_error();
+        char err_buf[256];
+        ERR_error_string_n(err, err_buf, sizeof(err_buf));
+        elog(WARNING, "Failed to parse EC public key: %s", err_buf);
+        pfree(der_sig);
+        return false;
+    }
+
+    /* Verify the key is EC */
+    if (EVP_PKEY_base_id(pkey) != EVP_PKEY_EC)
+    {
+        elog(WARNING, "Key is not an EC key");
+        EVP_PKEY_free(pkey);
+        pfree(der_sig);
+        return false;
+    }
+
+    /* Create verification context */
+    md_ctx = EVP_MD_CTX_new();
+    if (md_ctx == NULL)
+    {
+        elog(WARNING, "Failed to create EVP_MD_CTX");
+        EVP_PKEY_free(pkey);
+        pfree(der_sig);
+        return false;
+    }
+
+    /* Initialize verification */
+    if (EVP_DigestVerifyInit(md_ctx, NULL, md, NULL, pkey) != 1)
+    {
+        elog(WARNING, "EVP_DigestVerifyInit failed");
+        goto cleanup;
+    }
+
+    /* Add data to verification */
+    if (EVP_DigestVerifyUpdate(md_ctx, data, data_len) != 1)
+    {
+        elog(WARNING, "EVP_DigestVerifyUpdate failed");
+        goto cleanup;
+    }
+
+    /* Verify signature using DER-encoded signature */
+    verify_result = EVP_DigestVerifyFinal(md_ctx, der_sig, der_sig_len);
+    if (verify_result == 1)
+    {
+        result = true;
+    }
+    else if (verify_result == 0)
+    {
+        elog(DEBUG1, "ECDSA signature verification failed: signature mismatch");
+    }
+    else
+    {
+        unsigned long err = ERR_get_error();
+        char err_buf[256];
+        ERR_error_string_n(err, err_buf, sizeof(err_buf));
+        elog(WARNING, "ECDSA verification error: %s", err_buf);
+    }
+
+cleanup:
+    EVP_MD_CTX_free(md_ctx);
+    EVP_PKEY_free(pkey);
+    pfree(der_sig);
+
+    return result;
+}
+
+/*
  * orochi_jwt_verify_signature
  *    Verify JWT signature
  */
@@ -647,13 +1019,17 @@ orochi_jwt_verify_signature(const char *header_payload,
         case OROCHI_JWT_RS256:
         case OROCHI_JWT_RS384:
         case OROCHI_JWT_RS512:
+            result = verify_rsa_signature(header_payload, strlen(header_payload),
+                                          (unsigned char *)signature_decoded, sig_len,
+                                          secret, alg);
+            break;
+
         case OROCHI_JWT_ES256:
         case OROCHI_JWT_ES384:
         case OROCHI_JWT_ES512:
-            /* RSA and ECDSA verification would go here */
-            /* For now, return false as not implemented */
-            result = false;
-            elog(WARNING, "RSA and ECDSA signature verification not yet implemented");
+            result = verify_ecdsa_signature(header_payload, strlen(header_payload),
+                                            (unsigned char *)signature_decoded, sig_len,
+                                            secret, alg);
             break;
 
         case OROCHI_JWT_ALG_NONE:

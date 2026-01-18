@@ -10,6 +10,8 @@
 
 #include "postgres.h"
 #include "fmgr.h"
+#include <float.h>
+
 #include "access/genam.h"
 #include "access/gin.h"
 #include "access/hash.h"
@@ -1052,9 +1054,16 @@ json_query_begin(JsonQueryPlan *plan, EState *estate)
         json_query_build_index_scan(plan->root_expr, plan->selected_index,
                                     &keys, &nkeys);
 
+#if PG_VERSION_NUM >= 180000
+        state->index_scan = index_beginscan(relation, index_rel,
+                                            GetActiveSnapshot(),
+                                            NULL, /* instrument */
+                                            nkeys, 0);
+#else
         state->index_scan = index_beginscan(relation, index_rel,
                                             GetActiveSnapshot(),
                                             nkeys, 0);
+#endif
         if (nkeys > 0 && keys != NULL)
             index_rescan(state->index_scan, keys, nkeys, NULL, 0);
 

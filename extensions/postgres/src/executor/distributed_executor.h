@@ -156,9 +156,15 @@ extern void orochi_executor_start_hook(QueryDesc *queryDesc, int eflags);
 /*
  * Executor run hook
  */
+#if PG_VERSION_NUM >= 180000
+extern void orochi_executor_run_hook(QueryDesc *queryDesc,
+                                     ScanDirection direction,
+                                     uint64 count);
+#else
 extern void orochi_executor_run_hook(QueryDesc *queryDesc,
                                      ScanDirection direction,
                                      uint64 count, bool execute_once);
+#endif
 
 /*
  * Executor finish hook
@@ -181,9 +187,9 @@ extern void orochi_execute_distributed_plan(DistributedPlan *plan,
                                             DistributedExecutorState *state);
 
 /*
- * Execute single task
+ * Execute single remote task
  */
-extern void orochi_execute_task(RemoteTask *task);
+extern void orochi_execute_remote_task(RemoteTask *task);
 
 /*
  * Wait for task completion

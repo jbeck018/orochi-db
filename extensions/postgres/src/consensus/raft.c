@@ -21,6 +21,7 @@
 #include "miscadmin.h"
 #include "libpq-fe.h"
 #include "utils/builtins.h"
+#include "commands/dbcommands.h"
 
 #include <stdlib.h>
 #include <time.h>
@@ -944,8 +945,9 @@ raft_install_snapshot(RaftNode *node, InstallSnapshotRequest *request)
             }
             else
             {
+                int saved_errno = errno;
                 elog(WARNING, "Raft node %d failed to save snapshot: %s",
-                     node->node_id, strerror(errno));
+                     node->node_id, strerror(saved_errno));
             }
 
             pfree(snapshot_path.data);

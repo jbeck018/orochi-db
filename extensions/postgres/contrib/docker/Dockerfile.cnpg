@@ -1,0 +1,50 @@
+# Orochi DB PostgreSQL Extension Image for CloudNativePG
+# This Dockerfile creates a PostgreSQL image with the Orochi extension pre-installed,
+# compatible with CloudNativePG operator.
+
+ARG PG_MAJOR=18
+
+# Use CloudNativePG's official PostgreSQL image as base
+# This ensures compatibility with CNPG operator expectations
+FROM ghcr.io/cloudnative-pg/postgresql:${PG_MAJOR}
+
+# Redeclare ARG after FROM to make it available in subsequent instructions
+ARG PG_MAJOR=18
+
+# Switch to root for installation
+USER root
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    postgresql-server-dev-${PG_MAJOR} \
+    libpq-dev \
+    liblz4-dev \
+    libzstd-dev \
+    libcurl4-openssl-dev \
+    libssl-dev \
+    librdkafka-dev \
+    git \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy extension source
+COPY . /tmp/orochi
+WORKDIR /tmp/orochi
+
+# Build and install extension
+RUN make clean && make PG_CONFIG=/usr/bin/pg_config && make install PG_CONFIG=/usr/bin/pg_config
+
+# Clean up build dependencies to reduce image size
+RUN apt-get purge -y --auto-remove \
+    build-essential \
+    postgresql-server-dev-${PG_MAJOR} \
+    git \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /tmp/orochi
+
+# Switch back to postgres user (required by CloudNativePG)
+USER 26
+
+# The shared_preload_libraries will be configured via CloudNativePG Cluster spec
+# The extension can be created with: CREATE EXTENSION orochi;

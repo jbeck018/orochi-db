@@ -1634,12 +1634,134 @@ orochi_auth_key_rotation_worker_main(Datum main_arg)
 /*
  * orochi_auth_process_revocation_queue
  *    Process pending token revocations
+ *
+ * This function checks for recently revoked tokens in the database
+ * and invalidates them in the shared memory cache. It handles:
+ *   - Revoked refresh tokens (auth.refresh_tokens)
+ *   - Revoked API keys (orochi.orochi_api_keys)
+ *   - Invalidated sessions (auth.sessions)
  */
 void
 orochi_auth_process_revocation_queue(void)
 {
+    static TimestampTz last_revocation_check = 0;
+    TimestampTz        now;
+    TimestampTz        check_window;
+    StringInfoData     query;
+    int                ret;
+    int                i;
+
+    now = GetCurrentTimestamp();
+
+    /* Initialize last check time on first call */
+    if (last_revocation_check == 0)
+        last_revocation_check = now - (60 * USECS_PER_SEC);  /* 60 seconds ago */
+
+    /* Don't check more than once per second */
+    if (now - last_revocation_check < USECS_PER_SEC)
+        return;
+
+    /* Query window: check for items revoked since last check, plus buffer */
+    check_window = last_revocation_check - (5 * USECS_PER_SEC);  /* 5 sec buffer */
+
+    if (SPI_connect() != SPI_OK_CONNECT)
+    {
+        elog(DEBUG1, "Failed to connect to SPI for revocation processing");
+        return;
+    }
+
+    initStringInfo(&query);
+
     /*
-     * TODO: Check pg_notify queue for token revocation messages
-     * and invalidate corresponding tokens in cache.
+     * Check for revoked sessions and invalidate their session IDs
      */
+    appendStringInfo(&query,
+        "SELECT id::text FROM auth.sessions "
+        "WHERE not_after IS NOT NULL AND not_after > '%s'::timestamptz "
+        "AND not_after <= '%s'::timestamptz",
+        timestamptz_to_str(check_window),
+        timestamptz_to_str(now));
+
+    ret = SPI_execute(query.data, true, 100);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0)
+    {
+        for (i = 0; i < (int)SPI_processed; i++)
+        {
+            char *session_id = SPI_getvalue(SPI_tuptable->vals[i],
+                                            SPI_tuptable->tupdesc, 1);
+            if (session_id != NULL)
+            {
+                orochi_auth_cache_invalidate_session(session_id);
+                elog(DEBUG1, "Invalidated revoked session: %s", session_id);
+                pfree(session_id);
+            }
+        }
+    }
+
+    /*
+     * Check for revoked API keys
+     */
+    resetStringInfo(&query);
+    appendStringInfo(&query,
+        "SELECT key_hash FROM orochi.orochi_api_keys "
+        "WHERE is_revoked = TRUE "
+        "AND revoked_at > '%s'::timestamptz "
+        "AND revoked_at <= '%s'::timestamptz",
+        timestamptz_to_str(check_window),
+        timestamptz_to_str(now));
+
+    ret = SPI_execute(query.data, true, 100);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0)
+    {
+        for (i = 0; i < (int)SPI_processed; i++)
+        {
+            char *key_hash = SPI_getvalue(SPI_tuptable->vals[i],
+                                          SPI_tuptable->tupdesc, 1);
+            if (key_hash != NULL)
+            {
+                orochi_auth_cache_invalidate_token(key_hash);
+                elog(DEBUG1, "Invalidated revoked API key");
+                pfree(key_hash);
+            }
+        }
+    }
+
+    /*
+     * Check for revoked refresh tokens - invalidate by user_id
+     * since refresh tokens are tied to users
+     */
+    resetStringInfo(&query);
+    appendStringInfo(&query,
+        "SELECT DISTINCT user_id::text FROM auth.refresh_tokens "
+        "WHERE revoked = TRUE "
+        "AND updated_at > '%s'::timestamptz "
+        "AND updated_at <= '%s'::timestamptz",
+        timestamptz_to_str(check_window),
+        timestamptz_to_str(now));
+
+    ret = SPI_execute(query.data, true, 100);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0)
+    {
+        for (i = 0; i < (int)SPI_processed; i++)
+        {
+            char *user_id = SPI_getvalue(SPI_tuptable->vals[i],
+                                         SPI_tuptable->tupdesc, 1);
+            if (user_id != NULL)
+            {
+                /* Don't invalidate all tokens for user on token rotation,
+                 * but do track it for debugging */
+                elog(DEBUG1, "Refresh token revoked for user: %s", user_id);
+                pfree(user_id);
+            }
+        }
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
+    /* Update last check timestamp */
+    last_revocation_check = now;
 }

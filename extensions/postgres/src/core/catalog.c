@@ -860,6 +860,38 @@ orochi_catalog_get_chunks_in_range(Oid hypertable_oid, TimestampTz start, Timest
     return chunks;
 }
 
+int
+orochi_catalog_get_chunk_count(Oid hypertable_oid)
+{
+    StringInfoData query;
+    int ret;
+    int count = 0;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "SELECT COUNT(*) FROM orochi.orochi_chunks WHERE hypertable_oid = %u",
+        hypertable_oid);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 0);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0)
+    {
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        bool isnull;
+
+        count = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+        if (isnull)
+            count = 0;
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
+    return count;
+}
+
 void
 orochi_catalog_update_chunk_tier(int64 chunk_id, OrochiStorageTier tier)
 {

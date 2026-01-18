@@ -325,6 +325,13 @@ extern bool pipeline_apply_transforms(Pipeline *pipeline,
                                       bool *nulls);
 
 /* ============================================================
+ * Shared Memory Functions
+ * ============================================================ */
+
+extern Size orochi_pipeline_shmem_size(void);
+extern void orochi_pipeline_shmem_init(void);
+
+/* ============================================================
  * Utility Functions
  * ============================================================ */
 

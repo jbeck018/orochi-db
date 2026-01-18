@@ -34,9 +34,12 @@ extern char *generate_aws_signature_v4(S3Client *client, const char *method,
                                       const char *date_stamp, const char *amz_date,
                                       char **out_authorization);
 
+/* S3MultipartPart is defined in tiered_storage.h */
+
 /* Forward declarations */
 static char *extract_upload_id_from_xml(const char *xml_data);
 static char *extract_etag_from_xml(const char *xml_data);
+static char *extract_etag_from_headers(const char *headers);
 
 /*
  * CURL buffer structure (also defined in tiered_storage.c)
@@ -46,6 +49,13 @@ typedef struct {
     size_t size;
     size_t capacity;
 } CurlBuffer;
+
+/*
+ * Structure to capture headers during CURL request
+ */
+typedef struct {
+    char *etag;
+} HeaderCapture;
 
 /* CURL write callback (also defined in tiered_storage.c) */
 static size_t
@@ -66,6 +76,52 @@ orochi_curl_write_cb_mp(void *contents, size_t size, size_t nmemb, void *userp)
     memcpy(&(buf->data[buf->size]), contents, realsize);
     buf->size += realsize;
     buf->data[buf->size] = 0;
+
+    return realsize;
+}
+
+/*
+ * CURL header callback to capture ETag from response headers
+ * S3 returns ETag in header like: ETag: "d41d8cd98f00b204e9800998ecf8427e"
+ */
+static size_t
+orochi_curl_header_cb_mp(char *buffer, size_t size, size_t nitems, void *userp)
+{
+    size_t realsize = size * nitems;
+    HeaderCapture *capture = (HeaderCapture *)userp;
+    const char *etag_prefix = "ETag:";
+    size_t prefix_len = strlen(etag_prefix);
+
+    /* Check if this header starts with "ETag:" (case-insensitive) */
+    if (realsize > prefix_len && strncasecmp(buffer, etag_prefix, prefix_len) == 0)
+    {
+        char *etag_start = buffer + prefix_len;
+        char *etag_end;
+        size_t etag_len;
+
+        /* Skip leading whitespace */
+        while (*etag_start == ' ' || *etag_start == '\t')
+            etag_start++;
+
+        /* Find end of ETag (before CRLF) */
+        etag_end = etag_start;
+        while (*etag_end && *etag_end != '\r' && *etag_end != '\n')
+            etag_end++;
+
+        /* Remove surrounding quotes if present */
+        if (*etag_start == '"')
+            etag_start++;
+        if (etag_end > etag_start && *(etag_end - 1) == '"')
+            etag_end--;
+
+        etag_len = etag_end - etag_start;
+        if (etag_len > 0)
+        {
+            capture->etag = palloc(etag_len + 1);
+            memcpy(capture->etag, etag_start, etag_len);
+            capture->etag[etag_len] = '\0';
+        }
+    }
 
     return realsize;
 }
@@ -133,6 +189,56 @@ extract_etag_from_xml(const char *xml_data)
         etag_end--;
 
     etag_len = etag_end - etag_start;
+    etag = palloc(etag_len + 1);
+    memcpy(etag, etag_start, etag_len);
+    etag[etag_len] = '\0';
+
+    return etag;
+}
+
+/*
+ * Parse ETag from HTTP response headers (fallback for non-XML responses)
+ * Header format: "ETag: \"d41d8cd98f00b204e9800998ecf8427e\"\r\n"
+ */
+static char *
+extract_etag_from_headers(const char *headers)
+{
+    const char *etag_prefix = "ETag:";
+    char *found;
+    char *etag_start;
+    char *etag_end;
+    char *etag;
+    size_t etag_len;
+
+    if (headers == NULL)
+        return NULL;
+
+    /* Case-insensitive search for "ETag:" header */
+    found = strcasestr(headers, etag_prefix);
+    if (found == NULL)
+        return NULL;
+
+    etag_start = found + strlen(etag_prefix);
+
+    /* Skip whitespace */
+    while (*etag_start == ' ' || *etag_start == '\t')
+        etag_start++;
+
+    /* Find end of value (CRLF or LF) */
+    etag_end = etag_start;
+    while (*etag_end && *etag_end != '\r' && *etag_end != '\n')
+        etag_end++;
+
+    /* Remove surrounding quotes */
+    if (*etag_start == '"')
+        etag_start++;
+    if (etag_end > etag_start && *(etag_end - 1) == '"')
+        etag_end--;
+
+    etag_len = etag_end - etag_start;
+    if (etag_len == 0)
+        return NULL;
+
     etag = palloc(etag_len + 1);
     memcpy(etag, etag_start, etag_len);
     etag[etag_len] = '\0';
@@ -259,18 +365,22 @@ s3_multipart_upload_start(S3Client *client, const char *key)
 /*
  * Upload a single part in multipart upload
  * PUT /{bucket}/{key}?partNumber={n}&uploadId={id}
- * Returns true on success
+ * Returns the ETag on success, NULL on failure
  * Minimum part size is 5MB except for the last part
+ *
+ * IMPORTANT: The returned ETag must be stored and passed to
+ * s3_multipart_upload_complete_with_parts() to finalize the upload.
  */
-bool
-s3_multipart_upload_part(S3Client *client, const char *key,
-                         const char *upload_id, int part_number,
-                         const char *data, int64 size)
+char *
+s3_multipart_upload_part_ex(S3Client *client, const char *key,
+                             const char *upload_id, int part_number,
+                             const char *data, int64 size)
 {
     CURL *curl;
     CURLcode res;
     struct curl_slist *headers = NULL;
     CurlBuffer response_buf;
+    HeaderCapture header_capture;
     char url[1024];
     char uri[512];
     char query_string[256];
@@ -282,16 +392,16 @@ s3_multipart_upload_part(S3Client *client, const char *key,
     time_t now;
     struct tm *tm_info;
     long http_code;
-    bool success = false;
+    char *result_etag = NULL;
 
     if (client == NULL || key == NULL || upload_id == NULL || data == NULL)
-        return false;
+        return NULL;
 
     /* Part numbers must be 1-10000 */
     if (part_number < 1 || part_number > 10000)
     {
         elog(WARNING, "Invalid part number %d (must be 1-10000)", part_number);
-        return false;
+        return NULL;
     }
 
     /* Minimum part size is 5MB except for last part */
@@ -305,6 +415,9 @@ s3_multipart_upload_part(S3Client *client, const char *key,
     response_buf.data = palloc(1024);
     response_buf.size = 0;
     response_buf.capacity = 1024;
+
+    /* Initialize header capture */
+    header_capture.etag = NULL;
 
     /* Get current time for signing */
     now = time(NULL);
@@ -335,7 +448,7 @@ s3_multipart_upload_part(S3Client *client, const char *key,
     if (!curl)
     {
         pfree(response_buf.data);
-        return false;
+        return NULL;
     }
 
     /* Set up headers */
@@ -362,6 +475,8 @@ s3_multipart_upload_part(S3Client *client, const char *key,
     curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, size);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, orochi_curl_write_cb_mp);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_buf);
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, orochi_curl_header_cb_mp);
+    curl_easy_setopt(curl, CURLOPT_HEADERDATA, &header_capture);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, client->timeout_ms / 1000);
     curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
 
@@ -371,14 +486,24 @@ s3_multipart_upload_part(S3Client *client, const char *key,
 
     if (res == CURLE_OK && http_code >= 200 && http_code < 300)
     {
-        success = true;
-        elog(LOG, "S3 Multipart part %d uploaded: %s/%s (%ld bytes)",
-             part_number, client->bucket, key, size);
+        if (header_capture.etag != NULL)
+        {
+            result_etag = header_capture.etag;
+            elog(LOG, "S3 Multipart part %d uploaded: %s/%s (%ld bytes, ETag: %s)",
+                 part_number, client->bucket, key, size, result_etag);
+        }
+        else
+        {
+            elog(WARNING, "S3 Multipart part %d uploaded but no ETag received",
+                 part_number);
+        }
     }
     else
     {
         elog(WARNING, "S3 Multipart part %d upload failed: HTTP %ld - %s",
              part_number, http_code, response_buf.data);
+        if (header_capture.etag != NULL)
+            pfree(header_capture.etag);
     }
 
     /* Cleanup */
@@ -388,22 +513,42 @@ s3_multipart_upload_part(S3Client *client, const char *key,
     pfree(authorization);
     pfree(payload_hash);
 
-    return success;
+    return result_etag;
 }
 
 /*
- * Complete multipart upload
+ * Legacy wrapper for backward compatibility
+ * Returns true on success, false on failure
+ * NOTE: This does not track ETags and will fail at completion.
+ * Use s3_multipart_upload_part_ex() for proper multipart uploads.
+ */
+bool
+s3_multipart_upload_part(S3Client *client, const char *key,
+                         const char *upload_id, int part_number,
+                         const char *data, int64 size)
+{
+    char *etag = s3_multipart_upload_part_ex(client, key, upload_id,
+                                              part_number, data, size);
+    if (etag != NULL)
+    {
+        pfree(etag);
+        return true;
+    }
+    return false;
+}
+
+/*
+ * Complete multipart upload with parts array
  * POST /{bucket}/{key}?uploadId={id}
  * Finalizes the upload by combining all parts
  *
- * Note: This simplified version sends empty completion XML.
- * A production implementation should track ETags from part uploads
- * and include them in the XML payload as:
- * <Part><PartNumber>N</PartNumber><ETag>etag</ETag></Part>
+ * This function properly builds the CompleteMultipartUpload XML
+ * with all part numbers and ETags as required by the S3 API.
  */
 bool
-s3_multipart_upload_complete(S3Client *client, const char *key,
-                              const char *upload_id)
+s3_multipart_upload_complete_with_parts(S3Client *client, const char *key,
+                                         const char *upload_id,
+                                         S3MultipartPart *parts, int num_parts)
 {
     CURL *curl;
     CURLcode res;
@@ -422,9 +567,16 @@ s3_multipart_upload_complete(S3Client *client, const char *key,
     struct tm *tm_info;
     long http_code;
     bool success = false;
+    int i;
 
     if (client == NULL || key == NULL || upload_id == NULL)
         return false;
+
+    if (parts == NULL || num_parts < 1)
+    {
+        elog(WARNING, "Cannot complete multipart upload without parts");
+        return false;
+    }
 
     /* Initialize response buffer */
     response_buf.data = palloc(4096);
@@ -433,8 +585,10 @@ s3_multipart_upload_complete(S3Client *client, const char *key,
 
     /*
      * Build CompleteMultipartUpload XML payload
+     * S3 requires all parts to be listed with their part numbers and ETags
+     * in ascending order by part number.
      *
-     * TODO: In production, this MUST include ETags from each part:
+     * Format:
      * <CompleteMultipartUpload>
      *   <Part>
      *     <PartNumber>1</PartNumber>
@@ -442,15 +596,33 @@ s3_multipart_upload_complete(S3Client *client, const char *key,
      *   </Part>
      *   ...
      * </CompleteMultipartUpload>
-     *
-     * Without ETags, S3 will reject the completion request.
      */
     initStringInfo(&complete_xml);
-    appendStringInfo(&complete_xml,
-        "<CompleteMultipartUpload>");
-    /* Part ETags should be inserted here */
-    appendStringInfo(&complete_xml,
-        "</CompleteMultipartUpload>");
+    appendStringInfo(&complete_xml, "<CompleteMultipartUpload>");
+
+    for (i = 0; i < num_parts; i++)
+    {
+        if (parts[i].etag == NULL)
+        {
+            elog(WARNING, "Part %d missing ETag, cannot complete upload",
+                 parts[i].part_number);
+            pfree(complete_xml.data);
+            pfree(response_buf.data);
+            return false;
+        }
+        appendStringInfo(&complete_xml,
+            "<Part>"
+            "<PartNumber>%d</PartNumber>"
+            "<ETag>\"%s\"</ETag>"
+            "</Part>",
+            parts[i].part_number,
+            parts[i].etag);
+    }
+
+    appendStringInfo(&complete_xml, "</CompleteMultipartUpload>");
+
+    elog(DEBUG1, "CompleteMultipartUpload XML (%d parts): %s",
+         num_parts, complete_xml.data);
 
     /* Get current time for signing */
     now = time(NULL);
@@ -521,8 +693,8 @@ s3_multipart_upload_complete(S3Client *client, const char *key,
     if (res == CURLE_OK && http_code >= 200 && http_code < 300)
     {
         success = true;
-        elog(LOG, "S3 Multipart upload completed: %s/%s (UploadId: %s)",
-             client->bucket, key, upload_id);
+        elog(LOG, "S3 Multipart upload completed: %s/%s (UploadId: %s, %d parts)",
+             client->bucket, key, upload_id, num_parts);
     }
     else
     {
@@ -539,6 +711,22 @@ s3_multipart_upload_complete(S3Client *client, const char *key,
     pfree(payload_hash);
 
     return success;
+}
+
+/*
+ * Legacy wrapper - DO NOT USE FOR PRODUCTION
+ * This version sends empty XML without ETags and will fail on real S3.
+ * Kept for backward compatibility with existing code.
+ */
+bool
+s3_multipart_upload_complete(S3Client *client, const char *key,
+                              const char *upload_id)
+{
+    elog(WARNING, "s3_multipart_upload_complete() called without parts - "
+                  "this will fail on S3. Use s3_multipart_upload_complete_with_parts() instead.");
+
+    /* Return false since this cannot work without ETags */
+    return false;
 }
 
 /*
@@ -654,6 +842,9 @@ s3_multipart_upload_abort(S3Client *client, const char *key,
  * Automatically chooses between:
  * - Regular upload for files < 100MB
  * - Multipart upload for files >= 100MB (10MB parts)
+ *
+ * This implementation properly tracks ETags for multipart uploads
+ * as required by the S3 CompleteMultipartUpload API.
  */
 S3UploadResult *
 orochi_upload_chunk_to_s3(S3Client *client, const char *key,
@@ -675,37 +866,68 @@ orochi_upload_chunk_to_s3(S3Client *client, const char *key,
         /* Use multipart upload for large files */
         S3UploadResult *result;
         char *upload_id;
+        S3MultipartPart *parts;
+        int max_parts;
+        int part_count;
         int part_number;
         int64 offset;
         bool success = true;
+        char *final_etag;
+        int i;
 
         result = palloc0(sizeof(S3UploadResult));
+
+        /* Calculate maximum number of parts needed */
+        max_parts = (int)((size + PART_SIZE - 1) / PART_SIZE);
+        if (max_parts > 10000)
+        {
+            result->success = false;
+            result->error_message = pstrdup("File too large: would exceed 10000 parts limit");
+            return result;
+        }
+
+        /* Allocate parts array to track ETags */
+        parts = palloc0(sizeof(S3MultipartPart) * max_parts);
+        part_count = 0;
 
         /* Start multipart upload */
         upload_id = s3_multipart_upload_start(client, key);
         if (upload_id == NULL)
         {
+            pfree(parts);
             result->success = false;
             result->error_message = pstrdup("Failed to initiate multipart upload");
             return result;
         }
 
-        /* Upload parts */
+        /* Upload parts and collect ETags */
         part_number = 1;
         offset = 0;
 
         while (offset < size)
         {
             int64 part_size = PART_SIZE;
+            char *etag;
+
             if (offset + part_size > size)
                 part_size = size - offset;
 
-            if (!s3_multipart_upload_part(client, key, upload_id, part_number,
-                                          data + offset, part_size))
+            /* Upload part and get ETag */
+            etag = s3_multipart_upload_part_ex(client, key, upload_id, part_number,
+                                                data + offset, part_size);
+
+            if (etag == NULL)
             {
                 success = false;
+                elog(WARNING, "Failed to upload part %d of multipart upload",
+                     part_number);
                 break;
             }
+
+            /* Store part info for completion */
+            parts[part_count].part_number = part_number;
+            parts[part_count].etag = etag;
+            part_count++;
 
             offset += part_size;
             part_number++;
@@ -713,14 +935,28 @@ orochi_upload_chunk_to_s3(S3Client *client, const char *key,
 
         if (success)
         {
-            /* Complete multipart upload */
-            if (s3_multipart_upload_complete(client, key, upload_id))
+            /* Complete multipart upload with all parts and ETags */
+            if (s3_multipart_upload_complete_with_parts(client, key, upload_id,
+                                                         parts, part_count))
             {
                 result->success = true;
-                result->etag = pstrdup("multipart-uploaded");
+
+                /* Build composite ETag (S3 format: "etag-N" where N is part count) */
+                final_etag = palloc(128);
+                if (part_count > 0 && parts[0].etag != NULL)
+                {
+                    snprintf(final_etag, 128, "%s-%d",
+                             parts[part_count - 1].etag, part_count);
+                }
+                else
+                {
+                    snprintf(final_etag, 128, "multipart-%d", part_count);
+                }
+                result->etag = final_etag;
                 result->http_status = 200;
+
                 elog(LOG, "Successfully uploaded %ld bytes in %d parts to %s/%s",
-                     size, part_number - 1, client->bucket, key);
+                     size, part_count, client->bucket, key);
             }
             else
             {
@@ -737,7 +973,15 @@ orochi_upload_chunk_to_s3(S3Client *client, const char *key,
             s3_multipart_upload_abort(client, key, upload_id);
         }
 
+        /* Cleanup parts array */
+        for (i = 0; i < part_count; i++)
+        {
+            if (parts[i].etag != NULL)
+                pfree(parts[i].etag);
+        }
+        pfree(parts);
         pfree(upload_id);
+
         return result;
     }
 }

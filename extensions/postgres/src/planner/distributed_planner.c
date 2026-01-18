@@ -24,11 +24,14 @@
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
 #include "utils/syscache.h"
+#include "libpq-fe.h"
+#include "commands/explain.h"
 
 #include "../orochi.h"
 #include "../core/catalog.h"
 #include "../sharding/distribution.h"
 #include "../sharding/physical_sharding.h"
+#include "../executor/distributed_executor.h"
 #include "distributed_planner.h"
 
 /* Previous planner hook */
@@ -1460,10 +1463,23 @@ orochi_explain_custom_scan(CustomScanState *node, List *ancestors, ExplainState 
     if (dplan == NULL)
         return;
 
+    /* ExplainPropertyText/Integer were removed in PG18 - use appendStringInfo directly */
+#if PG_VERSION_NUM >= 180000
+    if (es->format == EXPLAIN_FORMAT_TEXT)
+    {
+        appendStringInfoSpaces(es->str, es->indent * 2);
+        appendStringInfo(es->str, "Distributed: true\n");
+        appendStringInfoSpaces(es->str, es->indent * 2);
+        appendStringInfo(es->str, "Shards: %d\n", dplan->target_shard_count);
+        appendStringInfoSpaces(es->str, es->indent * 2);
+        appendStringInfo(es->str, "Fragments: %d\n", list_length(dplan->fragment_queries));
+    }
+#else
     ExplainPropertyText("Distributed", "true", es);
     ExplainPropertyInteger("Shards", NULL, dplan->target_shard_count, es);
     ExplainPropertyInteger("Fragments", NULL,
                            list_length(dplan->fragment_queries), es);
+#endif
 }
 
 /* ============================================================

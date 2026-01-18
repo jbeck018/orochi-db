@@ -42,7 +42,8 @@ DATA = sql/orochi--1.0.sql sql/ddl.sql
 PGFILEDESC = "Orochi DB - Modern HTAP PostgreSQL Extension"
 
 # Compiler flags
-PG_CPPFLAGS = -I$(srcdir)/src
+# Include both src directory and libpq headers (for raft consensus using libpq)
+PG_CPPFLAGS = -I$(srcdir)/src -I$(shell $(PG_CONFIG) --includedir)
 PG_CFLAGS = -std=c11
 
 # Enable SIMD optimizations if available
@@ -71,7 +72,7 @@ SHLIB_LINK = -llz4 -lzstd -lcurl -lssl -lcrypto -lrdkafka
 REGRESS = basic distributed hypertable columnar vector tiering json
 
 # Documentation
-DOCS = README.md docs/architecture.md docs/user-guide.md
+DOCS = docs/architecture.md docs/user-guide.md
 
 # Use PGXS
 PG_CONFIG ?= pg_config

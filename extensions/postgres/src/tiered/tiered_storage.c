@@ -13,6 +13,7 @@
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "postmaster/bgworker.h"
+#include "storage/fd.h"
 #include "storage/ipc.h"
 #include "storage/latch.h"
 #include "storage/proc.h"
@@ -34,6 +35,7 @@
 #include "../orochi.h"
 #include "../core/catalog.h"
 #include "../storage/columnar.h"
+#include "../storage/compression.h"
 #include "../timeseries/hypertable.h"
 #include "tiered_storage.h"
 
@@ -340,9 +342,9 @@ s3_client_test_connection(S3Client *client)
     strftime(amz_date, sizeof(amz_date), "%Y%m%dT%H%M%SZ", tm_info);
 
     /* Generate authorization header */
-    authorization = generate_aws_signature(client, "HEAD", client->bucket, "",
-                                           "", date_stamp, amz_date,
-                                           EMPTY_SHA256_HASH);
+    generate_aws_signature_v4(client, "HEAD", client->bucket, "",
+                              NULL, 0, date_stamp, amz_date,
+                              &authorization);
 
     curl = curl_easy_init();
     if (curl == NULL)
@@ -2192,20 +2194,85 @@ orochi_restore_chunk_from_s3(int64 chunk_id, S3Client *client, const char *s3_ke
         pfree(create_table_query.data);
 
         /*
-         * Restore data using COPY FROM STDIN with binary format
+         * Restore data using COPY FROM with binary format
          * The decompressed data is in PostgreSQL binary COPY format
+         *
+         * Since SPI doesn't support COPY FROM STDIN, we write to a temp file
+         * and use COPY FROM file path.
          */
-        initStringInfo(&copy_cmd);
-        appendStringInfo(&copy_cmd, "COPY %s FROM STDIN WITH (FORMAT binary)",
-                        chunk_table_name);
+        {
+            char temp_file_path[MAXPGPATH];
+            FILE *temp_file;
+            int64 data_size;
+            int written;
 
-        /* TODO: Implement actual COPY FROM using SPI or direct protocol */
-        /* For now, log that we would restore the data */
-        elog(DEBUG1, "Would execute: %s (%ld bytes of binary data)",
-             copy_cmd.data, compression_type == OROCHI_COMPRESS_NONE ?
-             compressed_size : uncompressed_size);
+            /* Get the actual data size */
+            data_size = compression_type == OROCHI_COMPRESS_NONE ?
+                        compressed_size : uncompressed_size;
 
-        pfree(copy_cmd.data);
+            /* Create temporary file in /tmp (accessible by PostgreSQL) */
+            snprintf(temp_file_path, sizeof(temp_file_path),
+                     "/tmp/orochi_chunk_%ld_restore_%d.bin", chunk_id, MyProcPid);
+
+            temp_file = AllocateFile(temp_file_path, "wb");
+            if (temp_file == NULL)
+            {
+                elog(WARNING, "Could not create temp file %s for chunk %ld restore: %m",
+                     temp_file_path, chunk_id);
+                success = false;
+                goto cleanup;
+            }
+
+            /* Write binary COPY data to temp file */
+            written = fwrite(data_ptr, 1, data_size, temp_file);
+            if (written != data_size)
+            {
+                elog(WARNING, "Failed to write chunk %ld data to temp file: "
+                     "wrote %d of %ld bytes",
+                     chunk_id, written, data_size);
+                FreeFile(temp_file);
+                unlink(temp_file_path);
+                success = false;
+                goto cleanup;
+            }
+
+            if (FreeFile(temp_file) != 0)
+            {
+                elog(WARNING, "Failed to close temp file for chunk %ld: %m", chunk_id);
+                unlink(temp_file_path);
+                success = false;
+                goto cleanup;
+            }
+
+            /* Execute COPY FROM file */
+            initStringInfo(&copy_cmd);
+            appendStringInfo(&copy_cmd,
+                            "COPY %s FROM '%s' WITH (FORMAT binary)",
+                            chunk_table_name, temp_file_path);
+
+            elog(DEBUG1, "Restoring chunk %ld: %s (%ld bytes)",
+                 chunk_id, copy_cmd.data, data_size);
+
+            spi_ret = SPI_execute(copy_cmd.data, false, 0);
+            pfree(copy_cmd.data);
+
+            /* Clean up temp file */
+            if (unlink(temp_file_path) != 0)
+            {
+                elog(DEBUG1, "Could not remove temp file %s: %m", temp_file_path);
+            }
+
+            if (spi_ret < 0)
+            {
+                elog(WARNING, "COPY FROM failed for chunk %ld (SPI result: %d)",
+                     chunk_id, spi_ret);
+                success = false;
+                goto cleanup;
+            }
+
+            elog(DEBUG1, "Successfully restored %ld rows to chunk table %s",
+                 SPI_processed, chunk_table_name);
+        }
 
         /* Mark chunk table as logged */
         initStringInfo(&create_table_query);

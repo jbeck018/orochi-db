@@ -19,6 +19,7 @@
 #include "miscadmin.h"
 #include "storage/proc.h"
 #include "storage/lwlock.h"
+#include "commands/dbcommands.h"
 
 #ifndef WIN32
 #include <sys/select.h>
@@ -36,13 +37,19 @@ bool orochi_use_raft_consensus = true;
  * LWLock Protection for Thread Safety
  * ============================================================ */
 
-/* Lock tranche IDs for connection pool and query cache */
+/* Lock tranche names for connection pool and query cache */
+#if PG_VERSION_NUM >= 180000
+/* PG18 simplified the tranche API - just use names directly */
+static const char *connection_pool_tranche_name = "OrochiConnectionPool";
+static const char *query_cache_tranche_name = "OrochiQueryCache";
+#else
 static LWLockTranche connection_pool_tranche = {
     .name = "OrochiConnectionPool"
 };
 static LWLockTranche query_cache_tranche = {
     .name = "OrochiQueryCache"
 };
+#endif
 
 /* LWLocks for protecting shared state */
 static LWLockPadded connection_pool_lock_padded;
@@ -63,12 +70,20 @@ init_executor_locks(void)
         return;
 
     /* Initialize connection pool lock */
+#if PG_VERSION_NUM >= 180000
+    LWLockRegisterTranche(LWTRANCHE_FIRST_USER_DEFINED, connection_pool_tranche_name);
+#else
     LWLockRegisterTranche(LWTRANCHE_FIRST_USER_DEFINED, &connection_pool_tranche);
+#endif
     LWLockInitialize(&connection_pool_lock_padded.lock, LWTRANCHE_FIRST_USER_DEFINED);
     connection_pool_lock = &connection_pool_lock_padded.lock;
 
     /* Initialize query cache lock */
+#if PG_VERSION_NUM >= 180000
+    LWLockRegisterTranche(LWTRANCHE_FIRST_USER_DEFINED + 1, query_cache_tranche_name);
+#else
     LWLockRegisterTranche(LWTRANCHE_FIRST_USER_DEFINED + 1, &query_cache_tranche);
+#endif
     LWLockInitialize(&query_cache_lock_padded.lock, LWTRANCHE_FIRST_USER_DEFINED + 1);
     query_cache_lock = &query_cache_lock_padded.lock;
 
@@ -178,14 +193,25 @@ orochi_executor_start_hook(QueryDesc *queryDesc, int eflags)
 }
 
 void
+#if PG_VERSION_NUM >= 180000
+orochi_executor_run_hook(QueryDesc *queryDesc, ScanDirection direction,
+                         uint64 count)
+#else
 orochi_executor_run_hook(QueryDesc *queryDesc, ScanDirection direction,
                          uint64 count, bool execute_once)
+#endif
 {
     /* Call previous hook */
     if (prev_executor_run_hook)
+#if PG_VERSION_NUM >= 180000
+        prev_executor_run_hook(queryDesc, direction, count);
+    else
+        standard_ExecutorRun(queryDesc, direction, count);
+#else
         prev_executor_run_hook(queryDesc, direction, count, execute_once);
     else
         standard_ExecutorRun(queryDesc, direction, count, execute_once);
+#endif
 }
 
 void
@@ -402,7 +428,7 @@ orochi_close_all_connections(void)
 }
 
 void
-orochi_execute_task(RemoteTask *task)
+orochi_execute_remote_task(RemoteTask *task)
 {
     PGconn *conn;
     PGresult *res;
@@ -600,7 +626,7 @@ orochi_adaptive_execute(DistributedExecutorState *state)
             if (task->state == TASK_PENDING &&
                 state->running_count < active_connections)
             {
-                orochi_execute_task(task);
+                orochi_execute_remote_task(task);
                 state->pending_count--;
                 state->running_count++;
                 started++;

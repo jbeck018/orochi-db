@@ -505,6 +505,35 @@ extern OrochiTokenValidation orochi_auth_validate_jwt_full(const char *token,
 extern OrochiTokenValidation orochi_auth_validate_api_key(const char *api_key);
 
 /*
+ * API Key Info structure for database operations
+ */
+typedef struct OrochiApiKeyInfo
+{
+    int64       key_id;
+    char        prefix[OROCHI_AUTH_API_KEY_PREFIX_SIZE + 1];
+    char        name[256];
+    char        user_id[OROCHI_AUTH_USER_ID_SIZE + 1];
+    char        tenant_id[OROCHI_AUTH_TENANT_ID_SIZE + 1];
+    TimestampTz created_at;
+    TimestampTz last_used_at;
+    TimestampTz expires_at;
+    bool        is_revoked;
+    bool        has_last_used;
+    bool        has_expires;
+} OrochiApiKeyInfo;
+
+/*
+ * Look up an API key by its hash in the database
+ * Returns: The API key info if found and valid, NULL otherwise
+ */
+extern OrochiApiKeyInfo *orochi_auth_lookup_api_key_db(const char *key_hash);
+
+/*
+ * Update the last_used_at timestamp for an API key
+ */
+extern void orochi_auth_update_api_key_usage(const char *key_hash);
+
+/*
  * Hash a token for cache lookup (SHA-256)
  */
 extern void orochi_auth_hash_token(const char *token, char *hash_out);

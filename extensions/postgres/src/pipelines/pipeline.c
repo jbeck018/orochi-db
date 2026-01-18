@@ -29,6 +29,7 @@
 #include "utils/snapmgr.h"
 #include "commands/copy.h"
 #include "catalog/pg_type.h"
+#include "utils/guc.h"
 
 #include "../orochi.h"
 #include "../core/catalog.h"

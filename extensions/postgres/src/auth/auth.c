@@ -661,8 +661,9 @@ OrochiTokenValidation
 orochi_auth_validate_api_key(const char *api_key)
 {
     OrochiTokenValidation result;
+    OrochiApiKeyInfo     *key_info;
     char                  key_hash[OROCHI_AUTH_TOKEN_HASH_SIZE + 1];
-    char                  prefix[OROCHI_AUTH_API_KEY_PREFIX_SIZE + 1];
+    TimestampTz           now;
 
     memset(&result, 0, sizeof(OrochiTokenValidation));
 
@@ -684,22 +685,66 @@ orochi_auth_validate_api_key(const char *api_key)
         return result;
     }
 
-    /* Extract prefix for lookup */
-    strlcpy(prefix, api_key, OROCHI_AUTH_API_KEY_PREFIX_SIZE + 1);
-
     /* Hash full key for verification */
     orochi_auth_hash_token(api_key, key_hash);
 
-    /*
-     * TODO: Look up API key in database by prefix,
-     * then verify hash matches stored hash.
-     * For now, return invalid.
-     */
-    result.is_valid = false;
-    strlcpy(result.error_code, "API_KEY_NOT_FOUND", sizeof(result.error_code));
-    strlcpy(result.error_message, "API key not found or invalid",
-            sizeof(result.error_message));
+    /* Look up API key in database by hash */
+    key_info = orochi_auth_lookup_api_key_db(key_hash);
 
+    if (key_info == NULL)
+    {
+        result.is_valid = false;
+        strlcpy(result.error_code, "API_KEY_NOT_FOUND", sizeof(result.error_code));
+        strlcpy(result.error_message, "API key not found",
+                sizeof(result.error_message));
+        return result;
+    }
+
+    /* Check if key is revoked */
+    if (key_info->is_revoked)
+    {
+        result.is_valid = false;
+        strlcpy(result.error_code, "API_KEY_REVOKED", sizeof(result.error_code));
+        strlcpy(result.error_message, "API key has been revoked",
+                sizeof(result.error_message));
+        pfree(key_info);
+        return result;
+    }
+
+    /* Check if key has expired */
+    now = GetCurrentTimestamp();
+    if (key_info->has_expires && key_info->expires_at < now)
+    {
+        result.is_valid = false;
+        strlcpy(result.error_code, "API_KEY_EXPIRED", sizeof(result.error_code));
+        strlcpy(result.error_message, "API key has expired",
+                sizeof(result.error_message));
+        pfree(key_info);
+        return result;
+    }
+
+    /* API key is valid - populate result */
+    result.is_valid = true;
+    result.token_type = OROCHI_TOKEN_API_KEY;
+    strlcpy(result.user_id, key_info->user_id, sizeof(result.user_id));
+    strlcpy(result.tenant_id, key_info->tenant_id, sizeof(result.tenant_id));
+    result.issued_at = key_info->created_at;
+
+    if (key_info->has_expires)
+        result.expires_at = key_info->expires_at;
+    else
+        result.expires_at = 0;  /* No expiry */
+
+    /* Update last_used_at timestamp asynchronously */
+    orochi_auth_update_api_key_usage(key_hash);
+
+    /* Track auth request in shared memory */
+    if (OrochiAuthSharedState != NULL)
+    {
+        pg_atomic_fetch_add_u64(&OrochiAuthSharedState->total_auth_requests, 1);
+    }
+
+    pfree(key_info);
     return result;
 }
 

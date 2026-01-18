@@ -27,7 +27,24 @@
 #include "utils/datum.h"
 #include "utils/fmgroids.h"
 #include "utils/memutils.h"
+#if PG_VERSION_NUM >= 180000
+#include "common/hashfn.h"
+/* PG18 removed some operator OID macros - define them using known OIDs */
+#ifndef Int8EqualOperator
+#define Int8EqualOperator 410
+#endif
+#ifndef Float8EqualOperator
+#define Float8EqualOperator 670
+#endif
+#ifndef Int4GreaterOperator
+#define Int4GreaterOperator 521
+#endif
+#ifndef Int8GreaterOperator
+#define Int8GreaterOperator 413
+#endif
+#else
 #include "utils/hashutils.h"
+#endif
 #include "utils/rel.h"
 #include "utils/syscache.h"
 #include "utils/typcache.h"

@@ -508,23 +508,7 @@ orochi_auth_is_jwt_format(const char *token)
  * API Keys Database Operations
  * ============================================================ */
 
-/*
- * API Key Info structure for list results
- */
-typedef struct OrochiApiKeyInfo
-{
-    int64       key_id;
-    char        prefix[OROCHI_AUTH_API_KEY_PREFIX_SIZE + 1];
-    char        name[256];
-    char        user_id[OROCHI_AUTH_USER_ID_SIZE + 1];
-    char        tenant_id[OROCHI_AUTH_TENANT_ID_SIZE + 1];
-    TimestampTz created_at;
-    TimestampTz last_used_at;
-    TimestampTz expires_at;
-    bool        is_revoked;
-    bool        has_last_used;
-    bool        has_expires;
-} OrochiApiKeyInfo;
+/* OrochiApiKeyInfo is defined in auth.h */
 
 /*
  * orochi_auth_ensure_api_keys_table

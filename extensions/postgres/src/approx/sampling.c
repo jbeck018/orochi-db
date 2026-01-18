@@ -236,6 +236,7 @@ bernoulli_sample_stats(BernoulliSampleState *state,
  */
 typedef struct ReservoirSampleItem
 {
+    int32       num_values;                     /* Number of values stored */
     Datum       values[FLEXIBLE_ARRAY_MEMBER];  /* Column values */
     /* bool nulls[] follows */
 } ReservoirSampleItem;

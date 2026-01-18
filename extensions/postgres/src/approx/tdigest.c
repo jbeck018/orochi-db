@@ -20,6 +20,7 @@
 
 #include "postgres.h"
 #include "fmgr.h"
+#include "varatt.h"
 #include "lib/stringinfo.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"

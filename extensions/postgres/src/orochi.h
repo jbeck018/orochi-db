@@ -456,8 +456,6 @@ extern Oid orochi_json_create_index(Oid table_oid, int16 column_attnum,
                                     const char **paths, int path_count,
                                     OrochiJsonIndexType index_type);
 extern void orochi_json_drop_index(Oid index_oid);
-extern bool orochi_json_path_is_indexed(Oid table_oid, int16 column_attnum,
-                                        const char *path);
 extern List *orochi_json_get_indexes(Oid table_oid, int16 column_attnum);
 
 /* JSON Path Statistics */

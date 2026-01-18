@@ -17,10 +17,42 @@
 #include "fmgr.h"
 #include "access/tableam.h"
 #include "catalog/pg_type.h"
+#include "catalog/pg_operator.h"
 #include "nodes/primnodes.h"
 #include "utils/builtins.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
+
+/* PG18 removed some operator OID macros - define them using known OIDs */
+#if PG_VERSION_NUM >= 180000
+#ifndef Int4EqualOperator
+#define Int4EqualOperator 96
+#endif
+#ifndef Int8EqualOperator
+#define Int8EqualOperator 410
+#endif
+#ifndef Float8EqualOperator
+#define Float8EqualOperator 670
+#endif
+#ifndef Int4LessOperator
+#define Int4LessOperator 97
+#endif
+#ifndef Int8LessOperator
+#define Int8LessOperator 412
+#endif
+#ifndef Int84LEOperator
+#define Int84LEOperator 542
+#endif
+#ifndef Int4GreaterOperator
+#define Int4GreaterOperator 521
+#endif
+#ifndef Int8GreaterOperator
+#define Int8GreaterOperator 413
+#endif
+#ifndef Int84GEOperator
+#define Int84GEOperator 544
+#endif
+#endif
 
 #include <stdint.h>  /* For uint8, int32, int64 types */
 

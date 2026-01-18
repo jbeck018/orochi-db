@@ -336,7 +336,7 @@ orochi_get_hypertable_info(Oid hypertable_oid)
                 SPI_getvalue(tuple, tupdesc, 2);
 
             dim_type = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 3, &isnull));
-            info->dimensions[i].dim_type = (dim_type == 0) ? DIM_TYPE_TIME : DIM_TYPE_SPACE;
+            info->dimensions[i].dim_type = (dim_type == 0) ? DIMENSION_TIME : DIMENSION_SPACE;
 
             info->dimensions[i].num_slices =
                 DatumGetInt32(SPI_getbinval(tuple, tupdesc, 4, &isnull));
