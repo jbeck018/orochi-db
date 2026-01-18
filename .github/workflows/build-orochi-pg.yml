@@ -25,7 +25,8 @@ env:
   GHCR_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/orochi-pg
 
 jobs:
-  build-and-push:
+  build-and-push-ghcr:
+    name: Build and Push to GHCR
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -45,32 +46,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install doctl
-        uses: digitalocean/action-doctl@v2
-        if: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN != '' }}
-        with:
-          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
-
-      - name: Log in to DigitalOcean Container Registry
-        if: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN != '' }}
-        run: doctl registry login --expiry-seconds 3600
-
-      - name: Extract metadata for GHCR
-        id: ghcr-meta
+      - name: Extract metadata for Docker
+        id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.GHCR_IMAGE_NAME }}
-          tags: |
-            type=raw,value=${{ github.event.inputs.pg_version || '18' }}
-            type=raw,value=${{ github.event.inputs.pg_version || '18' }}-${{ github.sha }}
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' && (github.event.inputs.pg_version || '18') == '18' }}
-
-      - name: Extract metadata for DO Registry
-        id: do-meta
-        if: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN != '' }}
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.DO_REGISTRY }}/${{ env.DO_IMAGE_NAME }}
           tags: |
             type=raw,value=${{ github.event.inputs.pg_version || '18' }}
             type=raw,value=${{ github.event.inputs.pg_version || '18' }}-${{ github.sha }}
@@ -82,23 +62,8 @@ jobs:
           context: ./extensions/postgres
           file: ./extensions/postgres/contrib/docker/Dockerfile.cnpg
           push: true
-          tags: ${{ steps.ghcr-meta.outputs.tags }}
-          labels: ${{ steps.ghcr-meta.outputs.labels }}
-          platforms: linux/amd64
-          build-args: |
-            PG_MAJOR=${{ github.event.inputs.pg_version || '18' }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build and push to DO Registry
-        if: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN != '' }}
-        uses: docker/build-push-action@v5
-        with:
-          context: ./extensions/postgres
-          file: ./extensions/postgres/contrib/docker/Dockerfile.cnpg
-          push: true
-          tags: ${{ steps.do-meta.outputs.tags }}
-          labels: ${{ steps.do-meta.outputs.labels }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64
           build-args: |
             PG_MAJOR=${{ github.event.inputs.pg_version || '18' }}
@@ -107,8 +72,57 @@ jobs:
 
       - name: Verify image
         run: |
-          echo "Images pushed successfully"
-          echo "GHCR Tags: ${{ steps.ghcr-meta.outputs.tags }}"
-          if [[ -n "${{ steps.do-meta.outputs.tags }}" ]]; then
-            echo "DO Registry Tags: ${{ steps.do-meta.outputs.tags }}"
-          fi
+          echo "Image pushed successfully to GHCR"
+          echo "Tags: ${{ steps.meta.outputs.tags }}"
+
+  build-and-push-do:
+    name: Build and Push to DO Registry
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    # Only run if DO token is configured
+    if: ${{ vars.ENABLE_DO_REGISTRY == 'true' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Log in to DigitalOcean Container Registry
+        run: doctl registry login --expiry-seconds 3600
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DO_REGISTRY }}/${{ env.DO_IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ github.event.inputs.pg_version || '18' }}
+            type=raw,value=${{ github.event.inputs.pg_version || '18' }}-${{ github.sha }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' && (github.event.inputs.pg_version || '18') == '18' }}
+
+      - name: Build and push to DO Registry
+        uses: docker/build-push-action@v5
+        with:
+          context: ./extensions/postgres
+          file: ./extensions/postgres/contrib/docker/Dockerfile.cnpg
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64
+          build-args: |
+            PG_MAJOR=${{ github.event.inputs.pg_version || '18' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify image
+        run: |
+          echo "Image pushed successfully to DO Registry"
+          echo "Tags: ${{ steps.meta.outputs.tags }}"
