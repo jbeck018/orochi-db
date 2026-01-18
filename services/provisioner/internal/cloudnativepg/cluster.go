@@ -220,7 +220,9 @@ func (m *ClusterManager) buildClusterSpec(spec *types.ClusterSpec) *unstructured
 	imageName := spec.ImageName
 	if imageName == "" {
 		// Use custom Orochi PostgreSQL image with extension pre-installed
-		imageName = fmt.Sprintf("registry.digitalocean.com/orochi-registry/orochi-pg:%s", postgresVersion)
+		// Primary: GHCR (publicly accessible)
+		// Alternative: registry.digitalocean.com/orochi-registry/orochi-pg
+		imageName = fmt.Sprintf("ghcr.io/jbeck018/orochi-pg:%s", postgresVersion)
 	}
 
 	storageClass := spec.Storage.StorageClass
