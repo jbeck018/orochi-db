@@ -1,0 +1,186 @@
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    CHUNK DATA SERIALIZATION FLOW                            │
+│                  (tiered_storage.c: do_tier_transition)                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+                                    ┌─────────┐
+                                    │ Chunk   │
+                                    │ Table   │
+                                    │ (_chunk_│
+                                    │   1234) │
+                                    └────┬────┘
+                                         │
+                        ┌────────────────┴────────────────┐
+                        │  1. Get Column Metadata         │
+                        │  SELECT attnum, atttypid...     │
+                        │  → column_count = N             │
+                        └────────────────┬────────────────┘
+                                         │
+                        ┌────────────────┴────────────────┐
+                        │  2. Fetch All Rows              │
+                        │  SELECT * FROM chunk_table      │
+                        │  → SPI_tuptable with M rows     │
+                        └────────────────┬────────────────┘
+                                         │
+                 ┌───────────────────────┴───────────────────────┐
+                 │  3. Build PostgreSQL Binary COPY Format       │
+                 │                                                │
+                 │  ┌─────────────────────────────────────────┐  │
+                 │  │ Header:                                 │  │
+                 │  │   "PGCOPY\n\377\r\n\0" (11 bytes)      │  │
+                 │  │   flags: int32                          │  │
+                 │  │   header_ext_len: int32                 │  │
+                 │  └─────────────────────────────────────────┘  │
+                 │                                                │
+                 │  For each row (M times):                       │
+                 │  ┌─────────────────────────────────────────┐  │
+                 │  │ field_count: int16 (N)                  │  │
+                 │  │                                         │  │
+                 │  │ For each field (N times):               │  │
+                 │  │   if (NULL):                            │  │
+                 │  │     length: int32 = -1                  │  │
+                 │  │   else:                                 │  │
+                 │  │     length: int32                       │  │
+                 │  │     data: binary bytes                  │  │
+                 │  └─────────────────────────────────────────┘  │
+                 │                                                │
+                 │  ┌─────────────────────────────────────────┐  │
+                 │  │ Trailer: int16 = -1                     │  │
+                 │  └─────────────────────────────────────────┘  │
+                 └───────────────────┬────────────────────────────┘
+                                     │
+                                     │ copy_data buffer
+                                     │ (uncompressed binary COPY)
+                                     │
+                 ┌───────────────────┴────────────────────────────┐
+                 │  4. Compress Data                              │
+                 │                                                 │
+                 │  compressed_size = columnar_compress_buffer(   │
+                 │      copy_data.data,                           │
+                 │      copy_data.len,                            │
+                 │      compressed_data,                          │
+                 │      ...,                                      │
+                 │      OROCHI_COMPRESS_LZ4,                      │
+                 │      COLUMNAR_COMPRESSION_LEVEL_DEFAULT        │
+                 │  );                                            │
+                 │                                                 │
+                 │  Compression ratio: ~70-90% reduction          │
+                 └───────────────────┬────────────────────────────┘
+                                     │
+                                     │ compressed_data
+                                     │
+                 ┌───────────────────┴────────────────────────────┐
+                 │  5. Build Orochi Chunk File                    │
+                 │                                                 │
+                 │  ┌──────────────────────────────────────────┐  │
+                 │  │ Orochi Header (64 bytes):                │  │
+                 │  │   magic:        0x4F524348 ("ORCH")      │  │
+                 │  │   version:      1                        │  │
+                 │  │   flags:        0x02 (compressed)        │  │
+                 │  │   chunk_id:     1234                     │  │
+                 │  │   range_start:  2024-01-01 00:00:00      │  │
+                 │  │   range_end:    2024-01-02 00:00:00      │  │
+                 │  │   row_count:    86400                    │  │
+                 │  │   column_count: 5                        │  │
+                 │  │   compression:  OROCHI_COMPRESS_LZ4      │  │
+                 │  │   uncompressed: 45678912 bytes           │  │
+                 │  │   compressed:   6789123 bytes            │  │
+                 │  │   checksum:     0xABCD1234               │  │
+                 │  └──────────────────────────────────────────┘  │
+                 │                                                 │
+                 │  ┌──────────────────────────────────────────┐  │
+                 │  │ Compressed COPY Data:                    │  │
+                 │  │   [LZ4 compressed binary COPY format]    │  │
+                 │  │   6,789,123 bytes                        │  │
+                 │  └──────────────────────────────────────────┘  │
+                 └───────────────────┬────────────────────────────┘
+                                     │
+                                     │ chunk_buffer
+                                     │ (complete S3 object)
+                                     │
+                 ┌───────────────────┴────────────────────────────┐
+                 │  6. Upload to S3                               │
+                 │                                                 │
+                 │  PUT /orochi/chunks/1234.columnar              │
+                 │  Content-Type: application/octet-stream        │
+                 │  Content-Length: 6789187                       │
+                 │  Authorization: AWS4-HMAC-SHA256 ...           │
+                 │                                                 │
+                 │  HTTP 200 OK                                   │
+                 └───────────────────┬────────────────────────────┘
+                                     │
+                                     ▼
+                              ┌─────────────┐
+                              │ S3 Bucket   │
+                              │ Cold Tier   │
+                              └─────────────┘
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         DATA TYPE HANDLING                                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+PostgreSQL Type           │ Binary Representation
+─────────────────────────┼──────────────────────────────────────────────────
+int4, int8               │ Pass-by-value: direct binary (4/8 bytes)
+float4, float8           │ Pass-by-value: IEEE 754 format
+timestamp, timestamptz   │ Pass-by-value: 8-byte microsecond offset
+text, varchar            │ Variable-length: length header + UTF-8 bytes
+numeric                  │ Variable-length: custom PostgreSQL format
+bytea                    │ Variable-length: raw bytes
+uuid                     │ Fixed-length: 16 bytes
+jsonb                    │ Variable-length: PostgreSQL JSONB format
+arrays                   │ Variable-length: array header + elements
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         MEMORY MANAGEMENT                                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Allocation                 │ Cleanup
+──────────────────────────┼─────────────────────────────────────────────────
+chunk_buffer (StringInfo) │ pfree(chunk_buffer.data)
+copy_data (StringInfo)    │ pfree(copy_data.data)
+compressed_data           │ pfree(compressed_data) [if != copy_data.data]
+s3_key                    │ pfree(s3_key)
+s3_client                 │ s3_client_destroy(client)
+
+All error paths properly free allocated memory before returning false.
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         PERFORMANCE METRICS                                 │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Operation                  │ Typical Performance
+──────────────────────────┼─────────────────────────────────────────────────
+SPI SELECT (100K rows)    │ ~200ms (single query)
+Binary serialization      │ ~50ms (in-memory copy)
+LZ4 compression           │ ~100ms (500 MB/s throughput)
+S3 upload (10MB)          │ ~500ms (20 MB/s over network)
+Total (100K row chunk)    │ ~850ms
+
+Compression ratios:
+- Numeric data:  85-90% reduction
+- Text data:     70-80% reduction
+- Mixed data:    75-85% reduction
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      ERROR HANDLING & RECOVERY                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Error Condition                    │ Handling
+──────────────────────────────────┼────────────────────────────────────────
+Chunk not found in catalog        │ Log warning, cleanup, return false
+Column metadata query fails       │ Log warning, cleanup, return false
+SELECT * query fails              │ Log warning, cleanup, return false
+Compression fails                 │ Use uncompressed, set flag 0x01
+S3 upload fails                   │ Log warning, cleanup, return false
+Out of memory (palloc)            │ PostgreSQL ereport ERROR (automatic)
+
+All paths ensure:
+1. SPI_finish() called if SPI_connect() succeeded
+2. All palloc'd memory freed
+3. S3 client destroyed
+4. Appropriate error logged

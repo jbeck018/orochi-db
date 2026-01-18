@@ -1,0 +1,58 @@
+---
+# Standard StorageClass for Orochi DB Warm Tier
+# Balanced cost and performance for less frequently accessed data
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: orochi-warm-tier
+  labels:
+    app.kubernetes.io/name: orochi-db
+    app.kubernetes.io/component: storage
+    orochi.db/tier: warm
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "false"
+    description: "Standard SSD storage for Orochi DB warm tier data"
+
+# DigitalOcean Block Storage CSI driver
+provisioner: dobs.csi.digitalocean.com
+
+# WaitForFirstConsumer - delay volume creation until pod is scheduled
+# This ensures volume is created in the same zone as the pod
+volumeBindingMode: WaitForFirstConsumer
+
+# Retain the volume when PVC is deleted (for data safety in warm tier)
+# Can be manually deleted after verification
+reclaimPolicy: Retain
+
+# Allow volume expansion for growing datasets
+allowVolumeExpansion: true
+
+# Parameters specific to DigitalOcean Block Storage
+parameters:
+  # Standard ext4 filesystem
+  type: "ext4"
+
+  # DigitalOcean provides 40 IOPS per GB
+  # Warm tier typically uses smaller volumes with moderate IOPS
+
+# Mount options for balanced performance
+mountOptions:
+  - noatime        # Don't update access times
+  - nodiratime     # Don't update directory access times
+  - discard        # Enable TRIM for SSDs
+
+---
+# Example PersistentVolumeClaim using this StorageClass
+# apiVersion: v1
+# kind: PersistentVolumeClaim
+# metadata:
+#   name: orochi-warm-data
+#   labels:
+#     orochi.db/tier: warm
+# spec:
+#   accessModes:
+#     - ReadWriteOnce
+#   storageClassName: orochi-warm-tier
+#   resources:
+#     requests:
+#       storage: 50Gi  # Moderate size for warm data

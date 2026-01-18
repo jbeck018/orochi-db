@@ -250,3 +250,91 @@ monitoring:
     enabled: true
     labels:
       grafana_dashboard: "1"
+
+# Storage Configuration - Production
+storage:
+  createStorageClasses: true
+  createDefaultClass: true
+
+  # Use DigitalOcean for production (or change to aws/gcp/azure)
+  provider: digitalocean
+
+  # Hot Tier - Production settings
+  hotTier:
+    name: orochi-hot-tier
+    volumeBindingMode: Immediate
+    reclaimPolicy: Delete
+    allowVolumeExpansion: true
+
+    parameters:
+      type: "ext4"
+
+    mountOptions:
+      - noatime
+      - nodiratime
+      - discard
+      - barrier=0
+
+    annotations:
+      orochi.db/recommended-min-size: "200Gi"
+      orochi.db/production: "true"
+      orochi.db/iops-per-gb: "40"
+      orochi.db/max-iops: "7500"
+      digitalocean.com/storage-tier: "hot"
+
+  # Warm Tier - Production settings
+  warmTier:
+    name: orochi-warm-tier
+    volumeBindingMode: WaitForFirstConsumer
+    reclaimPolicy: Retain
+    allowVolumeExpansion: true
+
+    parameters:
+      type: "ext4"
+
+    mountOptions:
+      - noatime
+      - nodiratime
+      - discard
+
+    annotations:
+      orochi.db/recommended-min-size: "100Gi"
+      orochi.db/production: "true"
+      digitalocean.com/storage-tier: "warm"
+
+  # Cold Tier - Production settings
+  coldTier:
+    name: orochi-cold-tier
+    volumeBindingMode: WaitForFirstConsumer
+    reclaimPolicy: Retain
+    allowVolumeExpansion: true
+
+    parameters:
+      type: "ext4"
+
+    mountOptions:
+      - noatime
+      - nodiratime
+      - discard
+      - data=writeback
+
+    annotations:
+      orochi.db/recommended-min-size: "500Gi"
+      orochi.db/production: "true"
+      orochi.db/use-case: "backups,archives,wal"
+      digitalocean.com/storage-tier: "cold"
+
+  # Default StorageClass - Production settings
+  defaultClass:
+    name: orochi-default
+    volumeBindingMode: WaitForFirstConsumer
+    reclaimPolicy: Delete
+    allowVolumeExpansion: true
+
+    parameters:
+      type: "ext4"
+
+    mountOptions:
+      - noatime
+      - nodiratime
+      - discard

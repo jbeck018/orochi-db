@@ -1,0 +1,59 @@
+---
+# Fast SSD StorageClass for Orochi DB Hot Tier
+# Optimized for high IOPS and low latency workloads
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: orochi-hot-tier
+  labels:
+    app.kubernetes.io/name: orochi-db
+    app.kubernetes.io/component: storage
+    orochi.db/tier: hot
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "false"
+    description: "High-performance SSD storage for Orochi DB hot tier data"
+
+# DigitalOcean Block Storage CSI driver
+provisioner: dobs.csi.digitalocean.com
+
+# Immediate binding - volume is created immediately when PVC is created
+volumeBindingMode: Immediate
+
+# Delete the volume when PVC is deleted
+reclaimPolicy: Delete
+
+# Allow volume expansion for growing datasets
+allowVolumeExpansion: true
+
+# Parameters specific to DigitalOcean Block Storage
+parameters:
+  # Use high-performance SSD volumes
+  # DigitalOcean provides SSD-based block storage by default
+  type: "ext4"
+
+  # Enable IOPS optimization
+  # DigitalOcean automatically optimizes IOPS based on volume size
+  # Larger volumes = higher IOPS (40 IOPS per GB, up to 7,500 IOPS)
+
+# Mount options for optimal performance
+mountOptions:
+  - noatime        # Don't update access times (reduces writes)
+  - nodiratime     # Don't update directory access times
+  - discard        # Enable TRIM for SSDs
+  - barrier=0      # Disable barriers for better performance (safe with battery-backed RAID)
+
+---
+# Example PersistentVolumeClaim using this StorageClass
+# apiVersion: v1
+# kind: PersistentVolumeClaim
+# metadata:
+#   name: orochi-hot-data
+#   labels:
+#     orochi.db/tier: hot
+# spec:
+#   accessModes:
+#     - ReadWriteOnce
+#   storageClassName: orochi-hot-tier
+#   resources:
+#     requests:
+#       storage: 100Gi  # Min 100Gi for good IOPS (4,000 IOPS)

@@ -1,0 +1,41 @@
+{
+  "name": "production-cluster",
+  "namespace": "production",
+  "instances": 3,
+  "postgresVersion": "16",
+  "resources": {
+    "cpuRequest": "2",
+    "cpuLimit": "4",
+    "memoryRequest": "8Gi",
+    "memoryLimit": "16Gi"
+  },
+  "storage": {
+    "size": "100Gi",
+    "storageClass": "fast-ssd"
+  },
+  "orochiConfig": {
+    "enabled": true,
+    "defaultShardCount": 32,
+    "chunkInterval": "1 day",
+    "enableColumnar": true,
+    "defaultCompression": "lz4",
+    "tiering": {
+      "enabled": true,
+      "hotDuration": "3 days",
+      "warmDuration": "14 days",
+      "coldDuration": "90 days",
+      "s3Config": {
+        "endpoint": "s3.us-west-2.amazonaws.com",
+        "bucket": "production-orochi-cold-us-west-2",
+        "region": "us-west-2"
+      }
+    }
+  },
+  "labels": {
+    "eks.amazonaws.com/serviceaccount": "orochi-postgres"
+  },
+  "annotations": {
+    "eks.amazonaws.com/role-arn": "arn:aws:iam::123456789012:role/orochi-postgres-s3-access",
+    "description": "Uses IAM role for S3 access instead of static credentials"
+  }
+}

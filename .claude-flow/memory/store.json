@@ -60,6 +60,113 @@
       "storedAt": "2026-01-17T15:29:51.278Z",
       "accessCount": 0,
       "lastAccessed": "2026-01-17T15:29:51.278Z"
+    },
+    "fks-analysis": {
+      "key": "fks-analysis",
+      "value": {
+        "fks_features": {
+          "built_on": "Fly Machines (Firecracker VMs)",
+          "storage": "Fly Volumes NVMe",
+          "networking": "WireGuard mesh",
+          "security": [
+            "encrypted traffic",
+            "VPN isolation",
+            "encrypted volumes",
+            "auto-rotating API tokens"
+          ],
+          "limitations": [
+            "no HPA yet",
+            "no DaemonSets",
+            "no node affinity",
+            "beta status"
+          ],
+          "good_for": [
+            "services needing K8s API access",
+            "complex orchestration"
+          ]
+        },
+        "current_architecture": {
+          "control_plane": "Go API - deployed to Fly.io",
+          "dashboard": "React/TanStack - deployed to Fly.io",
+          "provisioner": "Needs K8s API - not deployed",
+          "autoscaler": "Needs K8s API - not deployed"
+        },
+        "recommendation": "Hybrid: Keep control plane and dashboard on regular Fly.io (simpler, production-ready). Deploy provisioner and autoscaler on FKS when it exits beta OR use a separate managed K8s cluster."
+      },
+      "metadata": {
+        "type": "deployment-analysis",
+        "timestamp": "2026-01-17"
+      },
+      "storedAt": "2026-01-17T17:51:31.482Z",
+      "accessCount": 0,
+      "lastAccessed": "2026-01-17T17:51:31.482Z"
+    },
+    "e2e-test-config": {
+      "key": "e2e-test-config",
+      "value": {
+        "api_url": "http://134.199.141.125",
+        "dashboard_url": "http://24.199.68.43",
+        "admin_email": "admin@orochi.cloud",
+        "admin_password": "OrochiAdmin2026!",
+        "test_org": "e2e-test-org",
+        "test_cluster": "e2e-test-cluster"
+      },
+      "metadata": {},
+      "storedAt": "2026-01-17T22:22:55.223Z",
+      "accessCount": 0,
+      "lastAccessed": "2026-01-17T22:22:55.223Z"
+    },
+    "e2e-test-results-2026-01-17": {
+      "key": "e2e-test-results-2026-01-17",
+      "value": {
+        "timestamp": "2026-01-17T22:25:00Z",
+        "infrastructure": {
+          "fly_io_torn_down": true,
+          "digitalocean_active": true,
+          "control_plane_ip": "134.199.141.125",
+          "dashboard_ip": "24.199.68.43"
+        },
+        "tests": {
+          "authentication": {
+            "login": "PASS",
+            "get_me": "PASS",
+            "token_refresh": "PASS"
+          },
+          "clusters": {
+            "create": "PASS",
+            "get": "PASS",
+            "list": "PASS",
+            "update": "PASS",
+            "delete": "PASS"
+          },
+          "admin": {
+            "list_users": "PASS",
+            "list_clusters": "PASS"
+          },
+          "dashboard_pages": {
+            "total": 15,
+            "passed": 15,
+            "failed": 0
+          },
+          "static_assets": {
+            "css": "PASS",
+            "js": "PASS"
+          }
+        },
+        "summary": {
+          "total_tests": 25,
+          "passed": 25,
+          "failed": 0,
+          "pass_rate": "100%"
+        }
+      },
+      "metadata": {
+        "type": "e2e-test-report",
+        "environment": "digitalocean-production"
+      },
+      "storedAt": "2026-01-17T22:25:54.289Z",
+      "accessCount": 0,
+      "lastAccessed": "2026-01-17T22:25:54.289Z"
     }
   },
   "version": "3.0.0"

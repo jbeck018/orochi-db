@@ -585,3 +585,153 @@ monitoring:
 metrics:
   enabled: true
   port: 9090
+
+# =============================================================================
+# Storage Configuration (Tiered Storage)
+# =============================================================================
+storage:
+  # Create StorageClass resources
+  createStorageClasses: true
+
+  # Create a default StorageClass for non-tiered clusters
+  createDefaultClass: true
+
+  # Cloud provider: digitalocean, aws, gcp, azure, custom
+  provider: digitalocean
+
+  # Hot Tier - High-performance storage for frequently accessed data
+  hotTier:
+    name: orochi-hot-tier
+    # Volume binding mode: Immediate or WaitForFirstConsumer
+    volumeBindingMode: Immediate
+    # Reclaim policy: Delete or Retain
+    reclaimPolicy: Delete
+    allowVolumeExpansion: true
+
+    # Provider-specific parameters
+    parameters:
+      # DigitalOcean
+      type: "ext4"
+      # AWS (when provider=aws)
+      # type: gp3
+      # iops: "16000"
+      # throughput: "1000"
+      # encrypted: "true"
+      # GCP (when provider=gcp)
+      # type: pd-ssd
+      # replicationType: regional-pd
+      # Azure (when provider=azure)
+      # type: Premium_LRS
+      # kind: Managed
+
+    # Mount options
+    mountOptions:
+      - noatime
+      - nodiratime
+      - discard
+      - barrier=0
+
+    # Custom provisioner (only if provider=custom)
+    provisioner: ""
+
+    # Custom annotations
+    annotations:
+      orochi.db/recommended-min-size: "100Gi"
+      orochi.db/iops-per-gb: "40"
+      orochi.db/max-iops: "7500"
+
+  # Warm Tier - Standard storage for moderately accessed data
+  warmTier:
+    name: orochi-warm-tier
+    volumeBindingMode: WaitForFirstConsumer
+    reclaimPolicy: Retain
+    allowVolumeExpansion: true
+
+    # Provider-specific parameters
+    parameters:
+      # DigitalOcean
+      type: "ext4"
+      # AWS
+      # type: gp3
+      # iops: "3000"
+      # throughput: "125"
+      # encrypted: "true"
+      # GCP
+      # type: pd-balanced
+      # replicationType: regional-pd
+      # Azure
+      # type: StandardSSD_LRS
+      # kind: Managed
+
+    # Mount options
+    mountOptions:
+      - noatime
+      - nodiratime
+      - discard
+
+    provisioner: ""
+
+    annotations:
+      orochi.db/recommended-min-size: "50Gi"
+      orochi.db/iops-per-gb: "40"
+
+  # Cold Tier - Cost-optimized storage for backups and archives
+  coldTier:
+    name: orochi-cold-tier
+    volumeBindingMode: WaitForFirstConsumer
+    reclaimPolicy: Retain
+    allowVolumeExpansion: true
+
+    # Provider-specific parameters
+    parameters:
+      # DigitalOcean
+      type: "ext4"
+      # AWS
+      # type: st1  # Throughput-optimized HDD
+      # encrypted: "true"
+      # GCP
+      # type: pd-standard
+      # replicationType: regional-pd
+      # Azure
+      # type: Standard_LRS
+      # kind: Managed
+
+    # Mount options
+    mountOptions:
+      - noatime
+      - nodiratime
+      - discard
+      - data=writeback
+
+    provisioner: ""
+
+    annotations:
+      orochi.db/recommended-min-size: "200Gi"
+      orochi.db/use-case: "backups,archives,wal"
+
+  # Default StorageClass (for non-tiered clusters)
+  defaultClass:
+    name: orochi-default
+    volumeBindingMode: WaitForFirstConsumer
+    reclaimPolicy: Delete
+    allowVolumeExpansion: true
+
+    # Provider-specific parameters
+    parameters:
+      # DigitalOcean
+      type: "ext4"
+      # AWS
+      # type: gp3
+      # encrypted: "true"
+      # GCP
+      # type: pd-balanced
+      # Azure
+      # type: StandardSSD_LRS
+      # kind: Managed
+
+    mountOptions:
+      - noatime
+      - nodiratime
+      - discard
+
+    provisioner: ""

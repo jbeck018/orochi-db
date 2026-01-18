@@ -87,6 +87,28 @@ spec:
 {{- if .OrochiConfig.EnableColumnar }}
       orochi.enable_columnar: "on"
 {{- end }}
+{{- if .OrochiConfig.Tiering }}
+{{- if .OrochiConfig.Tiering.Enabled }}
+      # Tiered storage configuration
+      orochi.tiering_enabled: "on"
+{{- if .OrochiConfig.Tiering.HotDuration }}
+      orochi.tiering_hot_duration: "{{ .OrochiConfig.Tiering.HotDuration }}"
+{{- end }}
+{{- if .OrochiConfig.Tiering.WarmDuration }}
+      orochi.tiering_warm_duration: "{{ .OrochiConfig.Tiering.WarmDuration }}"
+{{- end }}
+{{- if .OrochiConfig.Tiering.ColdDuration }}
+      orochi.tiering_cold_duration: "{{ .OrochiConfig.Tiering.ColdDuration }}"
+{{- end }}
+{{- if .OrochiConfig.Tiering.S3Config }}
+      orochi.s3_endpoint: "{{ .OrochiConfig.Tiering.S3Config.Endpoint }}"
+      orochi.s3_bucket: "{{ .OrochiConfig.Tiering.S3Config.Bucket }}"
+{{- if .OrochiConfig.Tiering.S3Config.Region }}
+      orochi.s3_region: "{{ .OrochiConfig.Tiering.S3Config.Region }}"
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
 {{- if .OrochiConfig.CustomParameters }}
 {{- range $key, $value := .OrochiConfig.CustomParameters }}
       {{ $key }}: "{{ $value }}"
@@ -223,3 +245,33 @@ spec:
 
   # Enable superuser access for administration
   enableSuperuserAccess: true
+
+{{- if .OrochiConfig }}
+{{- if .OrochiConfig.Tiering }}
+{{- if .OrochiConfig.Tiering.Enabled }}
+{{- if .OrochiConfig.Tiering.S3Config }}
+{{- if .OrochiConfig.Tiering.S3Config.AccessKeySecret }}
+  # Environment variables for S3 tiering credentials
+  env:
+    - name: AWS_ACCESS_KEY_ID
+      valueFrom:
+        secretKeyRef:
+          name: {{ .OrochiConfig.Tiering.S3Config.AccessKeySecret }}
+          key: AWS_ACCESS_KEY_ID
+    - name: AWS_SECRET_ACCESS_KEY
+      valueFrom:
+        secretKeyRef:
+          name: {{ .OrochiConfig.Tiering.S3Config.AccessKeySecret }}
+          key: AWS_SECRET_ACCESS_KEY
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+  # Bootstrap configuration - creates extension automatically on cluster creation
+  bootstrap:
+    initdb:
+      postInitSQL:
+        - "CREATE EXTENSION IF NOT EXISTS orochi"
+        - "SELECT orochi.initialize()"

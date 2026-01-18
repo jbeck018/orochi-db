@@ -207,6 +207,23 @@ static inline int list_length(List *l)
     return l ? l->length : 0;
 }
 
+/* List accessor functions */
+static inline void *linitial(List *l)
+{
+    return l && l->head ? l->head->ptr_value : NULL;
+}
+
+static inline void *lsecond(List *l)
+{
+    return l && l->head && l->head->next ? l->head->next->ptr_value : NULL;
+}
+
+static inline void *lthird(List *l)
+{
+    return l && l->head && l->head->next && l->head->next->next ?
+           l->head->next->next->ptr_value : NULL;
+}
+
 /* ============================================================
  * PostgreSQL Type OIDs (Common Ones)
  * ============================================================ */
@@ -294,6 +311,18 @@ static inline int list_length(List *l)
 #define likely(x)       __builtin_expect(!!(x), 1)
 #define unlikely(x)     __builtin_expect(!!(x), 0)
 #endif
+
+/* String duplication */
+static inline char *pstrdup(const char *str)
+{
+    char *result;
+    if (!str)
+        return NULL;
+    result = (char *)malloc(strlen(str) + 1);
+    if (result)
+        strcpy(result, str);
+    return result;
+}
 
 /* Integer to pointer casts */
 #define Int32GetDatum(x)    ((Datum)(int32)(x))

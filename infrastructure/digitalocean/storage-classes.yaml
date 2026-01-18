@@ -1,0 +1,139 @@
+---
+# DigitalOcean Kubernetes StorageClass Definitions for Orochi DB
+# Deploy with: kubectl apply -f infrastructure/digitalocean/storage-classes.yaml
+#
+# This file contains all three storage tiers for Orochi DB:
+# - Hot Tier: High-performance SSD for frequently accessed data
+# - Warm Tier: Standard SSD for moderately accessed data
+# - Cold Tier: Cost-optimized storage for backups and archives
+#
+# DigitalOcean Block Storage Notes:
+# - All volumes are SSD-based
+# - IOPS: 40 per GB, up to 7,500 IOPS max
+# - Volume sizes: 1 GB to 16 TB
+# - Pricing: ~$0.10/GB/month (as of 2024)
+# - Snapshots: Additional cost for backups
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: orochi-hot-tier
+  labels:
+    app.kubernetes.io/name: orochi-db
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/managed-by: kubectl
+    orochi.db/tier: hot
+    orochi.db/performance: high
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "false"
+    description: "High-performance SSD storage for Orochi DB hot tier data"
+    digitalocean.com/storage-tier: "hot"
+    orochi.db/recommended-min-size: "100Gi"
+    orochi.db/iops-per-gb: "40"
+    orochi.db/max-iops: "7500"
+
+provisioner: dobs.csi.digitalocean.com
+volumeBindingMode: Immediate
+reclaimPolicy: Delete
+allowVolumeExpansion: true
+
+parameters:
+  type: "ext4"
+
+mountOptions:
+  - noatime
+  - nodiratime
+  - discard
+  - barrier=0
+
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: orochi-warm-tier
+  labels:
+    app.kubernetes.io/name: orochi-db
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/managed-by: kubectl
+    orochi.db/tier: warm
+    orochi.db/performance: medium
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "false"
+    description: "Standard SSD storage for Orochi DB warm tier data"
+    digitalocean.com/storage-tier: "warm"
+    orochi.db/recommended-min-size: "50Gi"
+    orochi.db/iops-per-gb: "40"
+
+provisioner: dobs.csi.digitalocean.com
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+
+parameters:
+  type: "ext4"
+
+mountOptions:
+  - noatime
+  - nodiratime
+  - discard
+
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: orochi-cold-tier
+  labels:
+    app.kubernetes.io/name: orochi-db
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/managed-by: kubectl
+    orochi.db/tier: cold
+    orochi.db/performance: low
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "false"
+    description: "Cost-optimized storage for Orochi DB cold tier, backups, and archives"
+    digitalocean.com/storage-tier: "cold"
+    orochi.db/recommended-min-size: "200Gi"
+    orochi.db/use-case: "backups,archives,wal"
+    orochi.db/alternative: "DigitalOcean Spaces for true object storage"
+
+provisioner: dobs.csi.digitalocean.com
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+
+parameters:
+  type: "ext4"
+
+mountOptions:
+  - noatime
+  - nodiratime
+  - discard
+  - data=writeback
+
+---
+# Optional: Default StorageClass for general PostgreSQL data (CNPG default)
+# This can be used for clusters that don't use tiered storage
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: orochi-default
+  labels:
+    app.kubernetes.io/name: orochi-db
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/managed-by: kubectl
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "false"
+    description: "Default storage for Orochi DB clusters without tiered storage"
+
+provisioner: dobs.csi.digitalocean.com
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Delete
+allowVolumeExpansion: true
+
+parameters:
+  type: "ext4"
+
+mountOptions:
+  - noatime
+  - nodiratime
+  - discard

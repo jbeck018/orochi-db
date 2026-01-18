@@ -398,15 +398,43 @@ func (s *Service) applyDefaults(spec *types.ClusterSpec) {
 
 // createTieringSecrets creates secrets for tiered storage S3 access
 func (s *Service) createTieringSecrets(ctx context.Context, spec *types.ClusterSpec) error {
-	if spec.OrochiConfig.Tiering.S3Config.AccessKeySecret == "" {
+	s3Config := spec.OrochiConfig.Tiering.S3Config
+	if s3Config == nil {
 		return nil
 	}
 
-	// The secret should already exist; we just verify it's there
-	_, err := s.resourceManager.GetSecret(ctx, spec.Namespace, spec.OrochiConfig.Tiering.S3Config.AccessKeySecret)
+	// If no access key secret is specified, assume IAM role-based authentication
+	if s3Config.AccessKeySecret == "" {
+		s.logger.Info("no S3 access key secret specified, assuming IAM role-based authentication",
+			zap.String("cluster", spec.Name),
+		)
+		return nil
+	}
+
+	// Verify the secret exists and is accessible
+	secret, err := s.resourceManager.GetSecret(ctx, spec.Namespace, s3Config.AccessKeySecret)
 	if err != nil {
 		return fmt.Errorf("tiering S3 credentials secret not found: %w", err)
 	}
+
+	// Validate the secret has the required keys
+	requiredKeys := []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"}
+	for _, key := range requiredKeys {
+		if _, ok := secret.Data[key]; !ok {
+			s.logger.Warn("S3 credentials secret missing required key",
+				zap.String("secret", s3Config.AccessKeySecret),
+				zap.String("missingKey", key),
+			)
+			return fmt.Errorf("S3 credentials secret %s missing required key: %s", s3Config.AccessKeySecret, key)
+		}
+	}
+
+	s.logger.Info("validated S3 credentials secret for tiered storage",
+		zap.String("cluster", spec.Name),
+		zap.String("secret", s3Config.AccessKeySecret),
+		zap.String("endpoint", s3Config.Endpoint),
+		zap.String("bucket", s3Config.Bucket),
+	)
 
 	return nil
 }

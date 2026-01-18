@@ -253,6 +253,15 @@ func (m *ClusterManager) buildClusterSpec(spec *types.ClusterSpec) *unstructured
 					"parameters":             m.buildPostgresParameters(spec),
 					"shared_preload_libraries": []interface{}{"orochi"},
 				},
+				// Bootstrap configuration - creates extension automatically on cluster creation
+				"bootstrap": map[string]interface{}{
+					"initdb": map[string]interface{}{
+						"postInitSQL": []interface{}{
+							"CREATE EXTENSION IF NOT EXISTS orochi",
+							"SELECT orochi.initialize()",
+						},
+					},
+				},
 			},
 		},
 	}
@@ -294,6 +303,33 @@ func (m *ClusterManager) buildClusterSpec(spec *types.ClusterSpec) *unstructured
 	if spec.Pooler != nil && spec.Pooler.Enabled {
 		specObj := cluster.Object["spec"].(map[string]interface{})
 		specObj["pooler"] = m.buildPoolerConfiguration(spec.Pooler)
+	}
+
+	// Configure environment variables for S3 tiering credentials
+	if spec.OrochiConfig != nil && spec.OrochiConfig.Tiering != nil && spec.OrochiConfig.Tiering.Enabled {
+		if spec.OrochiConfig.Tiering.S3Config != nil && spec.OrochiConfig.Tiering.S3Config.AccessKeySecret != "" {
+			specObj := cluster.Object["spec"].(map[string]interface{})
+			specObj["env"] = []interface{}{
+				map[string]interface{}{
+					"name": "AWS_ACCESS_KEY_ID",
+					"valueFrom": map[string]interface{}{
+						"secretKeyRef": map[string]interface{}{
+							"name": spec.OrochiConfig.Tiering.S3Config.AccessKeySecret,
+							"key":  "AWS_ACCESS_KEY_ID",
+						},
+					},
+				},
+				map[string]interface{}{
+					"name": "AWS_SECRET_ACCESS_KEY",
+					"valueFrom": map[string]interface{}{
+						"secretKeyRef": map[string]interface{}{
+							"name": spec.OrochiConfig.Tiering.S3Config.AccessKeySecret,
+							"key":  "AWS_SECRET_ACCESS_KEY",
+						},
+					},
+				},
+			}
+		}
 	}
 
 	return cluster
@@ -414,7 +450,31 @@ func (m *ClusterManager) buildPostgresParameters(spec *types.ClusterSpec) map[st
 			params["orochi.enable_columnar"] = "on"
 		}
 
-		// Apply custom parameters
+		// Apply tiering configuration
+		if spec.OrochiConfig.Tiering != nil && spec.OrochiConfig.Tiering.Enabled {
+			params["orochi.tiering_enabled"] = "on"
+
+			if spec.OrochiConfig.Tiering.HotDuration != "" {
+				params["orochi.tiering_hot_duration"] = spec.OrochiConfig.Tiering.HotDuration
+			}
+			if spec.OrochiConfig.Tiering.WarmDuration != "" {
+				params["orochi.tiering_warm_duration"] = spec.OrochiConfig.Tiering.WarmDuration
+			}
+			if spec.OrochiConfig.Tiering.ColdDuration != "" {
+				params["orochi.tiering_cold_duration"] = spec.OrochiConfig.Tiering.ColdDuration
+			}
+
+			// S3 configuration for cold/frozen tiers
+			if spec.OrochiConfig.Tiering.S3Config != nil {
+				params["orochi.s3_endpoint"] = spec.OrochiConfig.Tiering.S3Config.Endpoint
+				params["orochi.s3_bucket"] = spec.OrochiConfig.Tiering.S3Config.Bucket
+				if spec.OrochiConfig.Tiering.S3Config.Region != "" {
+					params["orochi.s3_region"] = spec.OrochiConfig.Tiering.S3Config.Region
+				}
+			}
+		}
+
+		// Apply custom parameters (can override defaults)
 		for k, v := range spec.OrochiConfig.CustomParameters {
 			params[k] = v
 		}

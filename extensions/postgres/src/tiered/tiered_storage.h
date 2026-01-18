@@ -47,6 +47,8 @@ typedef struct S3Object
     char               *etag;
     int64               size;
     TimestampTz         last_modified;
+    char               *content_type;
+    char               *storage_class;
 } S3Object;
 
 typedef struct S3UploadResult

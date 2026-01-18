@@ -1,0 +1,307 @@
+---
+# Example CloudNativePG Cluster with Tiered Storage on DigitalOcean
+#
+# This example demonstrates:
+# - Hot tier storage for primary database data
+# - Cold tier storage for WAL archives
+# - Backup configuration to DigitalOcean Spaces
+# - Multi-instance HA setup
+# - Resource allocation
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: orochi-example
+  labels:
+    app.kubernetes.io/name: orochi-db
+    environment: production
+
+---
+# Secret for DigitalOcean Spaces (S3-compatible) backups
+apiVersion: v1
+kind: Secret
+metadata:
+  name: orochi-backup-credentials
+  namespace: orochi-example
+type: Opaque
+stringData:
+  # Replace with your DigitalOcean Spaces credentials
+  ACCESS_KEY_ID: "YOUR_SPACES_ACCESS_KEY"
+  ACCESS_SECRET_KEY: "YOUR_SPACES_SECRET_KEY"
+
+---
+# CloudNativePG Cluster with Tiered Storage
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: orochi-tiered-example
+  namespace: orochi-example
+  labels:
+    app.kubernetes.io/name: orochi-db
+    orochi.db/tier-mode: tiered
+spec:
+  # Number of PostgreSQL instances
+  instances: 3
+
+  # PostgreSQL version
+  imageName: ghcr.io/cloudnative-pg/postgresql:16
+
+  # Bootstrap from empty database
+  bootstrap:
+    initdb:
+      database: orochi
+      owner: orochi
+      secret:
+        name: orochi-superuser
+
+  # Primary data storage - HOT TIER
+  storage:
+    storageClass: orochi-hot-tier
+    size: 200Gi  # 7,500 IOPS on DigitalOcean
+    resizeInUseVolumes: true
+    pvcTemplate:
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 200Gi
+      volumeMode: Filesystem
+
+  # WAL storage - COLD TIER (for archiving)
+  walStorage:
+    storageClass: orochi-cold-tier
+    size: 100Gi
+    resizeInUseVolumes: true
+    pvcTemplate:
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 100Gi
+
+  # Backup configuration
+  backup:
+    # Backup retention policy
+    retentionPolicy: "30d"
+
+    # Barman backup to DigitalOcean Spaces (S3-compatible)
+    barmanObjectStore:
+      # Replace with your Spaces bucket and region
+      destinationPath: "s3://orochi-backups/orochi-tiered-example/"
+      endpointURL: "https://nyc3.digitaloceanspaces.com"
+
+      # S3 credentials
+      s3Credentials:
+        accessKeyId:
+          name: orochi-backup-credentials
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: orochi-backup-credentials
+          key: ACCESS_SECRET_KEY
+
+      # WAL configuration
+      wal:
+        compression: gzip
+        encryption: AES256
+        maxParallel: 4
+
+      # Data configuration
+      data:
+        compression: gzip
+        encryption: AES256
+        jobs: 4
+
+    # Volume snapshots (optional - using cold tier)
+    volumeSnapshot:
+      className: orochi-cold-tier
+      snapshotOwnerReference: none
+
+  # PostgreSQL configuration
+  postgresql:
+    parameters:
+      # Memory settings
+      shared_buffers: "2GB"
+      effective_cache_size: "6GB"
+      maintenance_work_mem: "512MB"
+      work_mem: "64MB"
+
+      # WAL settings
+      wal_level: "replica"
+      max_wal_size: "4GB"
+      min_wal_size: "1GB"
+      wal_compression: "on"
+
+      # Checkpoint settings
+      checkpoint_timeout: "15min"
+      checkpoint_completion_target: "0.9"
+
+      # Query planner
+      random_page_cost: "1.1"  # SSD
+      effective_io_concurrency: "200"  # SSD
+
+      # Logging
+      log_destination: "csvlog"
+      logging_collector: "on"
+      log_directory: "/var/log/postgresql"
+      log_filename: "postgresql-%Y-%m-%d.log"
+      log_rotation_age: "1d"
+      log_min_duration_statement: "1000"  # Log queries > 1s
+
+      # Orochi extension
+      shared_preload_libraries: "orochi"
+
+      # Connection settings
+      max_connections: "200"
+
+  # Resource allocation
+  resources:
+    requests:
+      memory: "4Gi"
+      cpu: "2"
+    limits:
+      memory: "8Gi"
+      cpu: "4"
+
+  # Monitoring
+  monitoring:
+    enablePodMonitor: true
+
+  # Node affinity (spread across nodes)
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels:
+              postgresql: orochi-tiered-example
+          topologyKey: kubernetes.io/hostname
+
+  # Node selector (optional - target specific node pools)
+  nodeSelector:
+    workload-type: database
+
+  # Tolerations (optional)
+  tolerations:
+    - key: "workload-type"
+      operator: "Equal"
+      value: "database"
+      effect: "NoSchedule"
+
+---
+# Superuser secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: orochi-superuser
+  namespace: orochi-example
+type: kubernetes.io/basic-auth
+stringData:
+  username: orochi
+  password: "ChangeMe_SecurePassword123!"
+
+---
+# Scheduled Backup (daily at 2 AM)
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: orochi-daily-backup
+  namespace: orochi-example
+spec:
+  # Cron schedule (2 AM daily)
+  schedule: "0 2 * * *"
+
+  # Suspend if needed
+  suspend: false
+
+  # Backup method
+  method: barmanObjectStore
+
+  # Target cluster
+  cluster:
+    name: orochi-tiered-example
+
+  # Immediate backup on creation
+  immediate: false
+
+---
+# Example PVC for additional warm tier storage (user data)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: orochi-warm-analytics
+  namespace: orochi-example
+  labels:
+    orochi.db/tier: warm
+    orochi.db/purpose: analytics
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: orochi-warm-tier
+  resources:
+    requests:
+      storage: 100Gi
+
+---
+# Example PVC for cold tier (manual backups)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: orochi-cold-manual-backups
+  namespace: orochi-example
+  labels:
+    orochi.db/tier: cold
+    orochi.db/purpose: manual-backup
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: orochi-cold-tier
+  resources:
+    requests:
+      storage: 500Gi
+
+---
+# Service for external access (optional)
+apiVersion: v1
+kind: Service
+metadata:
+  name: orochi-tiered-example-external
+  namespace: orochi-example
+  annotations:
+    service.beta.kubernetes.io/do-loadbalancer-name: "orochi-tiered-lb"
+    service.beta.kubernetes.io/do-loadbalancer-protocol: "tcp"
+    service.beta.kubernetes.io/do-loadbalancer-healthcheck-port: "5432"
+spec:
+  type: LoadBalancer
+  selector:
+    postgresql: orochi-tiered-example
+    role: primary
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+      protocol: TCP
+
+---
+# Example ConfigMap for custom PostgreSQL configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: orochi-custom-config
+  namespace: orochi-example
+data:
+  # Custom PostgreSQL settings
+  custom.conf: |
+    # Orochi-specific settings
+    orochi.shard_count = 16
+    orochi.enable_columnar = on
+    orochi.enable_tiering = on
+    orochi.hot_tier_threshold = '7 days'
+    orochi.warm_tier_threshold = '30 days'
+    orochi.cold_tier_threshold = '90 days'
+
+    # Vector operations
+    orochi.enable_simd = on
+    orochi.vector_index_threads = 4
+
+    # Streaming
+    orochi.enable_kafka = on
+    orochi.kafka_batch_size = 1000

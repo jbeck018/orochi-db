@@ -1,0 +1,265 @@
+{{- if .Values.storage.createStorageClasses }}
+---
+# Orochi DB Tiered Storage Classes - Helm Template
+# Supports multiple cloud providers: DigitalOcean, AWS, GCP, Azure
+#
+# Storage Tiers:
+# - Hot: High-performance, frequently accessed data
+# - Warm: Standard performance, moderately accessed data
+# - Cold: Cost-optimized, backups and archives
+---
+# Hot Tier StorageClass
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ .Values.storage.hotTier.name | default "orochi-hot-tier" }}
+  labels:
+    {{- include "orochi-cloud.labels" . | nindent 4 }}
+    app.kubernetes.io/component: storage
+    orochi.db/tier: hot
+    orochi.db/performance: high
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "false"
+    description: "High-performance storage for Orochi DB hot tier data"
+    {{- with .Values.storage.hotTier.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+
+{{- if eq .Values.storage.provider "digitalocean" }}
+provisioner: dobs.csi.digitalocean.com
+{{- else if eq .Values.storage.provider "aws" }}
+provisioner: ebs.csi.aws.com
+{{- else if eq .Values.storage.provider "gcp" }}
+provisioner: pd.csi.storage.gke.io
+{{- else if eq .Values.storage.provider "azure" }}
+provisioner: disk.csi.azure.com
+{{- else }}
+provisioner: {{ .Values.storage.hotTier.provisioner }}
+{{- end }}
+
+volumeBindingMode: {{ .Values.storage.hotTier.volumeBindingMode | default "Immediate" }}
+reclaimPolicy: {{ .Values.storage.hotTier.reclaimPolicy | default "Delete" }}
+allowVolumeExpansion: {{ .Values.storage.hotTier.allowVolumeExpansion | default true }}
+
+parameters:
+{{- if eq .Values.storage.provider "digitalocean" }}
+  type: "ext4"
+{{- else if eq .Values.storage.provider "aws" }}
+  type: {{ .Values.storage.hotTier.parameters.type | default "gp3" }}
+  iops: {{ .Values.storage.hotTier.parameters.iops | default "16000" | quote }}
+  throughput: {{ .Values.storage.hotTier.parameters.throughput | default "1000" | quote }}
+  encrypted: {{ .Values.storage.hotTier.parameters.encrypted | default "true" | quote }}
+  {{- with .Values.storage.hotTier.parameters.kmsKeyId }}
+  kmsKeyId: {{ . | quote }}
+  {{- end }}
+{{- else if eq .Values.storage.provider "gcp" }}
+  type: {{ .Values.storage.hotTier.parameters.type | default "pd-ssd" }}
+  replication-type: {{ .Values.storage.hotTier.parameters.replicationType | default "regional-pd" }}
+  {{- with .Values.storage.hotTier.parameters.provisionedIops }}
+  provisioned-iops-on-create: {{ . | quote }}
+  {{- end }}
+{{- else if eq .Values.storage.provider "azure" }}
+  storageaccounttype: {{ .Values.storage.hotTier.parameters.type | default "Premium_LRS" }}
+  kind: {{ .Values.storage.hotTier.parameters.kind | default "Managed" }}
+{{- else }}
+  {{- toYaml .Values.storage.hotTier.parameters | nindent 2 }}
+{{- end }}
+
+{{- with .Values.storage.hotTier.mountOptions }}
+mountOptions:
+  {{- toYaml . | nindent 2 }}
+{{- else }}
+mountOptions:
+  - noatime
+  - nodiratime
+  {{- if ne .Values.storage.provider "azure" }}
+  - discard
+  {{- end }}
+  {{- if eq .Values.storage.provider "digitalocean" }}
+  - barrier=0
+  {{- end }}
+{{- end }}
+
+---
+# Warm Tier StorageClass
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ .Values.storage.warmTier.name | default "orochi-warm-tier" }}
+  labels:
+    {{- include "orochi-cloud.labels" . | nindent 4 }}
+    app.kubernetes.io/component: storage
+    orochi.db/tier: warm
+    orochi.db/performance: medium
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "false"
+    description: "Standard storage for Orochi DB warm tier data"
+    {{- with .Values.storage.warmTier.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+
+{{- if eq .Values.storage.provider "digitalocean" }}
+provisioner: dobs.csi.digitalocean.com
+{{- else if eq .Values.storage.provider "aws" }}
+provisioner: ebs.csi.aws.com
+{{- else if eq .Values.storage.provider "gcp" }}
+provisioner: pd.csi.storage.gke.io
+{{- else if eq .Values.storage.provider "azure" }}
+provisioner: disk.csi.azure.com
+{{- else }}
+provisioner: {{ .Values.storage.warmTier.provisioner }}
+{{- end }}
+
+volumeBindingMode: {{ .Values.storage.warmTier.volumeBindingMode | default "WaitForFirstConsumer" }}
+reclaimPolicy: {{ .Values.storage.warmTier.reclaimPolicy | default "Retain" }}
+allowVolumeExpansion: {{ .Values.storage.warmTier.allowVolumeExpansion | default true }}
+
+parameters:
+{{- if eq .Values.storage.provider "digitalocean" }}
+  type: "ext4"
+{{- else if eq .Values.storage.provider "aws" }}
+  type: {{ .Values.storage.warmTier.parameters.type | default "gp3" }}
+  iops: {{ .Values.storage.warmTier.parameters.iops | default "3000" | quote }}
+  throughput: {{ .Values.storage.warmTier.parameters.throughput | default "125" | quote }}
+  encrypted: {{ .Values.storage.warmTier.parameters.encrypted | default "true" | quote }}
+{{- else if eq .Values.storage.provider "gcp" }}
+  type: {{ .Values.storage.warmTier.parameters.type | default "pd-balanced" }}
+  replication-type: {{ .Values.storage.warmTier.parameters.replicationType | default "regional-pd" }}
+{{- else if eq .Values.storage.provider "azure" }}
+  storageaccounttype: {{ .Values.storage.warmTier.parameters.type | default "StandardSSD_LRS" }}
+  kind: {{ .Values.storage.warmTier.parameters.kind | default "Managed" }}
+{{- else }}
+  {{- toYaml .Values.storage.warmTier.parameters | nindent 2 }}
+{{- end }}
+
+{{- with .Values.storage.warmTier.mountOptions }}
+mountOptions:
+  {{- toYaml . | nindent 2 }}
+{{- else }}
+mountOptions:
+  - noatime
+  - nodiratime
+  {{- if ne .Values.storage.provider "azure" }}
+  - discard
+  {{- end }}
+{{- end }}
+
+---
+# Cold Tier StorageClass
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ .Values.storage.coldTier.name | default "orochi-cold-tier" }}
+  labels:
+    {{- include "orochi-cloud.labels" . | nindent 4 }}
+    app.kubernetes.io/component: storage
+    orochi.db/tier: cold
+    orochi.db/performance: low
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "false"
+    description: "Cost-optimized storage for Orochi DB cold tier, backups, and archives"
+    {{- with .Values.storage.coldTier.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+
+{{- if eq .Values.storage.provider "digitalocean" }}
+provisioner: dobs.csi.digitalocean.com
+{{- else if eq .Values.storage.provider "aws" }}
+provisioner: ebs.csi.aws.com
+{{- else if eq .Values.storage.provider "gcp" }}
+provisioner: pd.csi.storage.gke.io
+{{- else if eq .Values.storage.provider "azure" }}
+provisioner: disk.csi.azure.com
+{{- else }}
+provisioner: {{ .Values.storage.coldTier.provisioner }}
+{{- end }}
+
+volumeBindingMode: {{ .Values.storage.coldTier.volumeBindingMode | default "WaitForFirstConsumer" }}
+reclaimPolicy: {{ .Values.storage.coldTier.reclaimPolicy | default "Retain" }}
+allowVolumeExpansion: {{ .Values.storage.coldTier.allowVolumeExpansion | default true }}
+
+parameters:
+{{- if eq .Values.storage.provider "digitalocean" }}
+  type: "ext4"
+{{- else if eq .Values.storage.provider "aws" }}
+  type: {{ .Values.storage.coldTier.parameters.type | default "st1" }}
+  encrypted: {{ .Values.storage.coldTier.parameters.encrypted | default "true" | quote }}
+{{- else if eq .Values.storage.provider "gcp" }}
+  type: {{ .Values.storage.coldTier.parameters.type | default "pd-standard" }}
+  replication-type: {{ .Values.storage.coldTier.parameters.replicationType | default "regional-pd" }}
+{{- else if eq .Values.storage.provider "azure" }}
+  storageaccounttype: {{ .Values.storage.coldTier.parameters.type | default "Standard_LRS" }}
+  kind: {{ .Values.storage.coldTier.parameters.kind | default "Managed" }}
+{{- else }}
+  {{- toYaml .Values.storage.coldTier.parameters | nindent 2 }}
+{{- end }}
+
+{{- with .Values.storage.coldTier.mountOptions }}
+mountOptions:
+  {{- toYaml . | nindent 2 }}
+{{- else }}
+mountOptions:
+  - noatime
+  - nodiratime
+  {{- if ne .Values.storage.provider "azure" }}
+  - discard
+  {{- end }}
+  {{- if eq .Values.storage.provider "digitalocean" }}
+  - data=writeback
+  {{- end }}
+{{- end }}
+
+{{- if .Values.storage.createDefaultClass }}
+---
+# Default StorageClass (for non-tiered clusters)
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ .Values.storage.defaultClass.name | default "orochi-default" }}
+  labels:
+    {{- include "orochi-cloud.labels" . | nindent 4 }}
+    app.kubernetes.io/component: storage
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "false"
+    description: "Default storage for Orochi DB clusters without tiered storage"
+
+{{- if eq .Values.storage.provider "digitalocean" }}
+provisioner: dobs.csi.digitalocean.com
+{{- else if eq .Values.storage.provider "aws" }}
+provisioner: ebs.csi.aws.com
+{{- else if eq .Values.storage.provider "gcp" }}
+provisioner: pd.csi.storage.gke.io
+{{- else if eq .Values.storage.provider "azure" }}
+provisioner: disk.csi.azure.com
+{{- else }}
+provisioner: {{ .Values.storage.defaultClass.provisioner }}
+{{- end }}
+
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Delete
+allowVolumeExpansion: true
+
+parameters:
+{{- if eq .Values.storage.provider "digitalocean" }}
+  type: "ext4"
+{{- else if eq .Values.storage.provider "aws" }}
+  type: gp3
+  encrypted: "true"
+{{- else if eq .Values.storage.provider "gcp" }}
+  type: pd-balanced
+{{- else if eq .Values.storage.provider "azure" }}
+  storageaccounttype: StandardSSD_LRS
+  kind: Managed
+{{- else }}
+  {{- toYaml .Values.storage.defaultClass.parameters | nindent 2 }}
+{{- end }}
+
+mountOptions:
+  - noatime
+  - nodiratime
+  {{- if ne .Values.storage.provider "azure" }}
+  - discard
+  {{- end }}
+{{- end }}
+
+{{- end }}

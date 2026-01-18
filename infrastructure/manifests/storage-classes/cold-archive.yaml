@@ -1,0 +1,77 @@
+---
+# Cold Archive StorageClass for Orochi DB Cold Tier
+# Cost-optimized storage for backups, WAL archives, and rarely accessed data
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: orochi-cold-tier
+  labels:
+    app.kubernetes.io/name: orochi-db
+    app.kubernetes.io/component: storage
+    orochi.db/tier: cold
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "false"
+    description: "Cost-optimized storage for Orochi DB cold tier, backups, and archives"
+
+# DigitalOcean Block Storage CSI driver
+provisioner: dobs.csi.digitalocean.com
+
+# WaitForFirstConsumer - delay volume creation until pod is scheduled
+volumeBindingMode: WaitForFirstConsumer
+
+# Retain the volume when PVC is deleted (critical for backups/archives)
+# Requires manual deletion to prevent accidental data loss
+reclaimPolicy: Retain
+
+# Allow volume expansion for growing backup storage
+allowVolumeExpansion: true
+
+# Parameters specific to DigitalOcean Block Storage
+parameters:
+  # Standard ext4 filesystem
+  type: "ext4"
+
+  # Note: DigitalOcean doesn't have separate "cold" storage tier
+  # For true cold storage, consider using DigitalOcean Spaces (S3-compatible)
+  # This StorageClass is optimized for infrequent access patterns
+
+# Mount options optimized for sequential reads/writes (backup workloads)
+mountOptions:
+  - noatime        # Don't update access times
+  - nodiratime     # Don't update directory access times
+  - discard        # Enable TRIM
+  - data=writeback # Optimize for sequential writes (backups)
+
+---
+# Example PersistentVolumeClaim for WAL archives
+# apiVersion: v1
+# kind: PersistentVolumeClaim
+# metadata:
+#   name: orochi-wal-archive
+#   labels:
+#     orochi.db/tier: cold
+#     orochi.db/purpose: wal-archive
+# spec:
+#   accessModes:
+#     - ReadWriteOnce
+#   storageClassName: orochi-cold-tier
+#   resources:
+#     requests:
+#       storage: 200Gi  # Large storage for WAL archives
+#
+---
+# Example PersistentVolumeClaim for backups
+# apiVersion: v1
+# kind: PersistentVolumeClaim
+# metadata:
+#   name: orochi-backups
+#   labels:
+#     orochi.db/tier: cold
+#     orochi.db/purpose: backup
+# spec:
+#   accessModes:
+#     - ReadWriteOnce
+#   storageClassName: orochi-cold-tier
+#   resources:
+#     requests:
+#       storage: 500Gi  # Large storage for full backups

@@ -1,0 +1,115 @@
+{
+  "name": "analytics-cluster",
+  "namespace": "production",
+  "instances": 5,
+  "postgresVersion": "16",
+  "imageName": "ghcr.io/orochi-db/orochi-pg:16",
+  "resources": {
+    "cpuRequest": "2",
+    "cpuLimit": "4",
+    "memoryRequest": "8Gi",
+    "memoryLimit": "16Gi"
+  },
+  "storage": {
+    "size": "100Gi",
+    "storageClass": "fast-ssd",
+    "resizeInUseVolumes": true,
+    "walSize": "20Gi",
+    "walStorageClass": "fast-ssd"
+  },
+  "orochiConfig": {
+    "enabled": true,
+    "defaultShardCount": 64,
+    "chunkInterval": "1 day",
+    "enableColumnar": true,
+    "defaultCompression": "zstd",
+    "tiering": {
+      "enabled": true,
+      "hotDuration": "7 days",
+      "warmDuration": "30 days",
+      "coldDuration": "180 days",
+      "s3Config": {
+        "endpoint": "s3.us-east-1.amazonaws.com",
+        "bucket": "production-orochi-cold-storage",
+        "region": "us-east-1",
+        "accessKeySecret": "orochi-s3-credentials"
+      }
+    },
+    "customParameters": {
+      "orochi.max_parallel_workers": "8",
+      "orochi.maintenance_workers": "4"
+    }
+  },
+  "backupConfig": {
+    "retentionPolicy": "30d",
+    "barmanObjectStore": {
+      "destinationPath": "s3://production-orochi-backups/analytics-cluster",
+      "endpoint": "s3.us-east-1.amazonaws.com",
+      "s3Credentials": {
+        "accessKeyIdSecret": "orochi-s3-credentials",
+        "secretAccessKeySecret": "orochi-s3-credentials"
+      },
+      "wal": {
+        "compression": "zstd"
+      },
+      "data": {
+        "compression": "zstd",
+        "jobs": 4,
+        "immediateCheckpoint": true
+      }
+    },
+    "scheduledBackup": {
+      "enabled": true,
+      "schedule": "0 2 * * *",
+      "immediate": false
+    }
+  },
+  "monitoring": {
+    "enablePodMonitor": true,
+    "scrapeInterval": "30s",
+    "customQueries": {
+      "orochi_tiering_stats": "SELECT * FROM orochi.tiering_stats()"
+    }
+  },
+  "pooler": {
+    "enabled": true,
+    "instances": 3,
+    "type": "rw",
+    "pgbouncer": {
+      "poolMode": "transaction",
+      "defaultPoolSize": 25,
+      "maxClientConn": 1000,
+      "parameters": {
+        "max_client_conn": "1000",
+        "default_pool_size": "25",
+        "pool_mode": "transaction"
+      }
+    }
+  },
+  "affinity": {
+    "enablePodAntiAffinity": true,
+    "topologyKey": "kubernetes.io/hostname",
+    "nodeSelector": {
+      "workload": "database"
+    },
+    "tolerations": [
+      {
+        "key": "database",
+        "operator": "Equal",
+        "value": "true",
+        "effect": "NoSchedule"
+      }
+    ]
+  },
+  "labels": {
+    "orochi.io/owner-id": "org-12345",
+    "orochi.io/organization-id": "acme-corp",
+    "orochi.io/tier": "production",
+    "app": "analytics",
+    "team": "data-engineering"
+  },
+  "annotations": {
+    "description": "Production analytics cluster with tiered storage",
+    "contact": "data-eng@example.com"
+  }
+}

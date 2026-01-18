@@ -30,6 +30,22 @@ var (
 	ErrClusterOperationPending = errors.New("another operation is pending on this cluster")
 )
 
+// Tiering configuration errors.
+var (
+	ErrTieringHotDurationRequired  = errors.New("hot tier duration is required when tiering is enabled")
+	ErrTieringWarmDurationRequired = errors.New("warm tier duration is required when tiering is enabled")
+	ErrTieringColdDurationRequired = errors.New("cold tier duration is required when tiering is enabled")
+	ErrTieringInvalidCompression   = errors.New("compression type must be 'lz4' or 'zstd'")
+	ErrS3ConfigRequired            = errors.New("S3 configuration is required when tiering is enabled")
+	ErrS3EndpointRequired          = errors.New("S3 endpoint is required")
+	ErrS3BucketRequired            = errors.New("S3 bucket is required")
+	ErrS3RegionRequired            = errors.New("S3 region is required")
+	ErrS3AccessKeyRequired         = errors.New("S3 access key is required")
+	ErrS3SecretKeyRequired         = errors.New("S3 secret key is required")
+	ErrInvalidShardCount           = errors.New("shard count must be non-negative")
+	ErrShardCountTooHigh           = errors.New("shard count cannot exceed 1024")
+)
+
 // Authentication errors.
 var (
 	ErrTokenInvalid       = errors.New("invalid or expired token")

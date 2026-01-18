@@ -90,6 +90,58 @@
       "createdAt": "2026-01-17T15:29:35.253Z",
       "model": "sonnet",
       "modelRoutedBy": "explicit"
+    },
+    "npm-deps-analyzer": {
+      "agentId": "npm-deps-analyzer",
+      "agentType": "researcher",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "model": "sonnet"
+      },
+      "createdAt": "2026-01-17T17:39:11.952Z",
+      "model": "sonnet",
+      "modelRoutedBy": "explicit"
+    },
+    "backend-analyzer": {
+      "agentId": "backend-analyzer",
+      "agentType": "researcher",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "model": "sonnet"
+      },
+      "createdAt": "2026-01-17T17:39:12.443Z",
+      "model": "sonnet",
+      "modelRoutedBy": "explicit"
+    },
+    "infra-analyzer": {
+      "agentId": "infra-analyzer",
+      "agentType": "researcher",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "model": "sonnet"
+      },
+      "createdAt": "2026-01-17T17:39:12.912Z",
+      "model": "sonnet",
+      "modelRoutedBy": "explicit"
+    },
+    "fks-deployment-analyst": {
+      "agentId": "fks-deployment-analyst",
+      "agentType": "researcher",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "model": "sonnet"
+      },
+      "createdAt": "2026-01-17T17:51:16.453Z",
+      "model": "sonnet",
+      "modelRoutedBy": "explicit"
     }
   },
   "version": "3.0.0"

@@ -48,6 +48,11 @@ extern void test_webauthn(void);
 extern void test_magic_link(void);
 extern void test_branch_access(void);
 
+/* Tiered storage test suites */
+extern void test_tiered_storage(void);
+extern void test_s3_multipart(void);
+extern void test_s3_operations(void);
+
 /* Placeholder for future test suites - uncomment as implemented */
 /* extern void test_hyperloglog(void); */
 /* extern void test_tdigest(void); */
@@ -76,6 +81,11 @@ static void run_all_tests(void)
     RUN_TEST_SUITE(test_webauthn);
     RUN_TEST_SUITE(test_magic_link);
     RUN_TEST_SUITE(test_branch_access);
+
+    /* Tiered storage test suites */
+    RUN_TEST_SUITE(test_tiered_storage);
+    RUN_TEST_SUITE(test_s3_multipart);
+    RUN_TEST_SUITE(test_s3_operations);
 
     /* Add test suites here as they are implemented:
      * RUN_TEST_SUITE(test_hyperloglog);

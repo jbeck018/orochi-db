@@ -14,6 +14,7 @@ OBJS = \
 	src/sharding/physical_sharding.o \
 	src/timeseries/hypertable.o \
 	src/tiered/tiered_storage.o \
+	src/tiered/s3_multipart.o \
 	src/vector/vector_ops.o \
 	src/planner/distributed_planner.o \
 	src/executor/distributed_executor.o \

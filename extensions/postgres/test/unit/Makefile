@@ -5,11 +5,14 @@
 CC = gcc
 CFLAGS = -std=c11 -Wall -Wextra -Wno-unused-parameter -g -O2
 
+# Include paths from pkg-config
+PKG_CFLAGS = $(shell pkg-config --cflags liblz4 libzstd openssl 2>/dev/null)
+
 # Include paths
 # - test/unit for test_framework.h
 # - test/unit/mocks for postgres_mock.h
 # - src for Orochi headers (when testing actual modules)
-INCLUDES = -I. -I./mocks -I../../src
+INCLUDES = -I. -I./mocks -I../../src $(PKG_CFLAGS)
 
 # Source directories
 SRCDIR = ../../src
@@ -29,7 +32,10 @@ TEST_SRCS = run_tests.c \
             test_jwt.c \
             test_webauthn.c \
             test_magic_link.c \
-            test_branch_access.c
+            test_branch_access.c \
+            test_tiered_storage.c \
+            test_s3_multipart.c \
+            test_s3_operations.c
 
 # Object files for tests
 TEST_OBJS = $(TEST_SRCS:.c=.o)
@@ -41,8 +47,11 @@ TEST_OBJS = $(TEST_SRCS:.c=.o)
 
 MODULE_OBJS = $(MODULE_SRCS:.c=.o)
 
+# Library paths from pkg-config
+PKG_LIBS = $(shell pkg-config --libs liblz4 libzstd openssl 2>/dev/null)
+
 # Libraries needed
-LIBS = -lm
+LIBS = -lm $(PKG_LIBS)
 
 # Phony targets
 .PHONY: all clean test help
@@ -109,6 +118,11 @@ test_jwt.o: test_jwt.c test_framework.h mocks/postgres_mock.h
 test_webauthn.o: test_webauthn.c test_framework.h mocks/postgres_mock.h
 test_magic_link.o: test_magic_link.c test_framework.h mocks/postgres_mock.h
 test_branch_access.o: test_branch_access.c test_framework.h mocks/postgres_mock.h
+
+# Tiered storage test files
+test_tiered_storage.o: test_tiered_storage.c test_framework.h mocks/postgres_mock.h
+test_s3_multipart.o: test_s3_multipart.c test_framework.h mocks/postgres_mock.h
+test_s3_operations.o: test_s3_operations.c test_framework.h mocks/postgres_mock.h
 
 # Additional test files (add as implemented)
 # test_hyperloglog.o: test_hyperloglog.c test_framework.h mocks/postgres_mock.h

@@ -1,0 +1,23 @@
+{
+  "name": "dev-cluster",
+  "namespace": "development",
+  "instances": 1,
+  "resources": {
+    "cpuRequest": "500m",
+    "memoryRequest": "1Gi"
+  },
+  "storage": {
+    "size": "10Gi"
+  },
+  "orochiConfig": {
+    "enabled": true,
+    "tiering": {
+      "enabled": true,
+      "s3Config": {
+        "endpoint": "minio.dev.svc.cluster.local:9000",
+        "bucket": "dev-orochi-cold",
+        "accessKeySecret": "minio-credentials"
+      }
+    }
+  }
+}

@@ -1,22 +1,482 @@
 {
   "initialized": true,
-  "topology": "hierarchical",
+  "topology": "mesh",
   "workers": [
     "orochi-worker-1768662639789-g1i5",
     "orochi-worker-1768662639789-mwas",
     "orochi-worker-1768662639789-0s7a",
-    "orochi-worker-1768662639789-smm3"
+    "orochi-worker-1768662639789-smm3",
+    "infra-worker-1768672836498-6jv7",
+    "infra-worker-1768672836498-vvls",
+    "infra-worker-1768672836498-bnpf",
+    "theme-refactor-1768676003488-0hmm",
+    "theme-refactor-1768676003488-hhec",
+    "theme-refactor-1768676003488-ljtm",
+    "route-worker-1768679251512-ol1r",
+    "route-worker-1768679251512-tnds",
+    "route-worker-1768679251512-nxek",
+    "dashboard-worker-1768680420371-pwdm",
+    "dashboard-worker-1768680420371-jg5s",
+    "dashboard-worker-1768680420371-e7uu",
+    "dashboard-worker-1768680420371-xl3z",
+    "isolation-worker-1768681832380-xip6",
+    "isolation-worker-1768681832380-n3gv",
+    "isolation-worker-1768681832380-fvc2",
+    "e2e-tester-1768688557113-gbc7",
+    "e2e-tester-1768688557113-a3t9",
+    "e2e-tester-1768688557113-sjs5",
+    "scrub-worker-1768688986952-y558",
+    "scrub-worker-1768688986952-g8hd",
+    "scrub-worker-1768688986952-t7nj",
+    "scrub-worker-1768688986952-hkfg",
+    "feature-researcher-1768690331752-vsy8",
+    "feature-researcher-1768690331752-98t8",
+    "feature-researcher-1768690331752-ztnx",
+    "feature-researcher-1768690331752-3zj5",
+    "storage-reviewer-1768694965149-q89m",
+    "storage-reviewer-1768694965149-2nf5",
+    "storage-reviewer-1768694965149-kfrh",
+    "impl-worker-1768695317191-euja",
+    "impl-worker-1768695317191-jt15",
+    "impl-worker-1768695317191-3zzb",
+    "impl-worker-1768695317191-zxcs",
+    "impl-worker-1768695317191-rtbj"
   ],
   "consensus": {
-    "pending": [],
+    "pending": [
+      {
+        "proposalId": "proposal-1768685710783-uv4ujl",
+        "type": "infrastructure-decision",
+        "value": {
+          "recommendation": "digitalocean",
+          "reasons": [
+            "lower-k8s-cost",
+            "free-control-plane",
+            "managed-databases",
+            "cilium-integration",
+            "container-registry"
+          ],
+          "migration_complexity": "medium"
+        },
+        "proposedBy": "system",
+        "proposedAt": "2026-01-17T21:35:10.783Z",
+        "votes": {},
+        "status": "pending"
+      },
+      {
+        "proposalId": "proposal-1768690483384-k3xcm0",
+        "type": "architecture",
+        "value": {
+          "feature_set": "orochi-cloud-v2",
+          "components": {
+            "signup_flow": {
+              "two_step": true,
+              "step1": "basic_registration",
+              "step2": "org_setup_or_invite",
+              "org_options": [
+                "create_new",
+                "accept_invite",
+                "join_later"
+              ]
+            },
+            "invite_system": {
+              "backend": {
+                "tables": [
+                  "organization_invites"
+                ],
+                "fields": [
+                  "id",
+                  "org_id",
+                  "email",
+                  "role",
+                  "token",
+                  "invited_by",
+                  "expires_at",
+                  "accepted_at",
+                  "created_at"
+                ],
+                "expiry": "24h",
+                "roles": [
+                  "owner",
+                  "admin",
+                  "member",
+                  "viewer"
+                ]
+              },
+              "frontend": {
+                "invite_modal": true,
+                "email_templates": true,
+                "pending_invites_list": true
+              }
+            },
+            "data_browser": {
+              "tech_stack": {
+                "grid": "TanStack Table v8",
+                "virtualization": "TanStack Virtual",
+                "sql_editor": "Monaco Editor or CodeMirror"
+              },
+              "table_filtering": {
+                "exclude_patterns": [
+                  "hypertable_*",
+                  "orochi_*",
+                  "_timescaledb_*",
+                  "_pg_*",
+                  "pg_*"
+                ],
+                "show_only": "user_created_tables"
+              },
+              "features": [
+                "crud",
+                "inline_edit",
+                "column_resize",
+                "sorting",
+                "filtering",
+                "export_csv",
+                "query_history"
+              ]
+            },
+            "cluster_settings": {
+              "features": [
+                "connection_pooling",
+                "performance_advisor",
+                "index_suggestions",
+                "query_stats",
+                "storage_usage"
+              ]
+            }
+          }
+        },
+        "proposedBy": "system",
+        "proposedAt": "2026-01-17T22:54:43.384Z",
+        "votes": {},
+        "status": "pending"
+      }
+    ],
     "history": []
   },
-  "sharedMemory": {},
-  "createdAt": "2026-01-17T15:10:32.646Z",
-  "updatedAt": "2026-01-17T15:10:39.789Z",
+  "sharedMemory": {
+    "broadcasts": [
+      {
+        "messageId": "msg-1768676012942-z6vr28",
+        "message": "Starting theme refactoring: Converting Orochi Dashboard to Howler-ops theme with Fira Code font and amber/yellow color scheme",
+        "priority": "high",
+        "fromId": "system",
+        "timestamp": "2026-01-17T18:53:32.942Z"
+      },
+      {
+        "messageId": "msg-1768676609006-4ln2or",
+        "message": "Committing howler-ops theme refactoring and beta testing plan. Files include: dashboard theme CSS, package.json with Fira Code font, control plane deployment configs, and comprehensive testing documentation.",
+        "priority": "high",
+        "fromId": "system",
+        "timestamp": "2026-01-17T19:03:29.006Z"
+      },
+      {
+        "messageId": "msg-1768676987394-lp6kgc",
+        "message": "Load test results: 6099 req/sec handled, rate limiting active (366K 429 responses), 81ms avg latency. Machine count stable at 2. Connection-based autoscaling not triggered - load test generates many short-lived requests rather than sustained connections.",
+        "priority": "normal",
+        "fromId": "system",
+        "timestamp": "2026-01-17T19:09:47.394Z"
+      },
+      {
+        "messageId": "msg-1768677140774-gejw6s",
+        "message": "Testing complete. Summary: Theme applied successfully, API endpoints working, autoscaling verified (horizontal and vertical), E2E revealed token handling bug in dashboard. All core infrastructure operational.",
+        "priority": "high",
+        "fromId": "system",
+        "timestamp": "2026-01-17T19:12:20.774Z"
+      },
+      {
+        "messageId": "msg-1768677544963-329ndm",
+        "message": "Starting bug fix session. Priority 1: Dashboard auth token not being stored after login. Priority 2: Fira Code font 404 errors. Investigating auth flow now.",
+        "priority": "high",
+        "fromId": "system",
+        "timestamp": "2026-01-17T19:19:04.963Z"
+      },
+      {
+        "messageId": "msg-1768679277988-ye69dt",
+        "message": "Starting route refactoring: Creating folder structure src/routes/clusters/$id/ with layout route and moving child routes",
+        "priority": "high",
+        "fromId": "system",
+        "timestamp": "2026-01-17T19:47:57.988Z"
+      },
+      {
+        "messageId": "msg-1768683928534-2ufasb",
+        "message": "Starting two parallel work streams: 1) E2E cluster lifecycle testing with actual deployed clusters (not localhost), 2) Admin Dashboard with proper admin seeding and RBAC. Need to verify customer cluster provisioning, connectivity, and admin-only access controls.",
+        "priority": "high",
+        "fromId": "queen-orchestrator",
+        "timestamp": "2026-01-17T21:05:28.534Z"
+      },
+      {
+        "messageId": "msg-1768684182524-aa6qe0",
+        "message": "Admin seeding mechanism complete: Control plane now accepts ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_NAME environment variables to seed an admin user on startup. Frontend admin routes are protected with beforeLoad guard that redirects non-admins.",
+        "priority": "normal",
+        "fromId": "queen-orchestrator",
+        "timestamp": "2026-01-17T21:09:42.524Z"
+      },
+      {
+        "messageId": "msg-1768684999444-w2lc9o",
+        "message": "Architecture analysis needed: Control plane on Fly.io, Provisioner needs Kubernetes. Analyzing deployment topology and determining if E2E with real deployed app is possible.",
+        "priority": "high",
+        "fromId": "system",
+        "timestamp": "2026-01-17T21:23:19.444Z"
+      },
+      {
+        "messageId": "msg-1768685074651-n49z0a",
+        "message": "ARCHITECTURE ANALYSIS COMPLETE: Control plane on Fly.io uses SIMULATED provisioning (fake connection URLs). The real provisioner service exists but is NOT connected - no gRPC integration between control plane and provisioner. For real cluster provisioning: 1) Need Kubernetes cluster (FKS/EKS), 2) Deploy provisioner + CloudNativePG operator, 3) Add gRPC client to control plane to call provisioner.",
+        "priority": "high",
+        "fromId": "system",
+        "timestamp": "2026-01-17T21:24:34.651Z"
+      },
+      {
+        "messageId": "msg-1768685642380-o0bv75",
+        "message": "INFRASTRUCTURE DECISION: Evaluating migration from Fly.io to DigitalOcean or Linode for full Kubernetes + CloudNativePG support. Need analysis of: 1) Cost comparison, 2) Kubernetes managed service quality, 3) CloudNativePG compatibility, 4) Migration complexity, 5) Developer experience",
+        "priority": "high",
+        "fromId": "system",
+        "timestamp": "2026-01-17T21:34:02.380Z"
+      },
+      {
+        "messageId": "msg-1768685998032-h99uqq",
+        "message": "MIGRATION INITIATED: Fly.io → DigitalOcean. Tasks: 1) Create DOKS cluster, 2) Install CloudNativePG, 3) Deploy provisioner, 4) Deploy control plane, 5) Deploy dashboard, 6) Configure DNS/networking, 7) Tear down Fly.io, 8) E2E testing. All workers coordinate on this priority task.",
+        "priority": "critical",
+        "fromId": "system",
+        "timestamp": "2026-01-17T21:39:58.032Z"
+      },
+      {
+        "messageId": "msg-1768687031317-jvicbc",
+        "message": "IMAGES PUSHED: All 3 Docker images (control-plane, provisioner, dashboard) are now in registry.digitalocean.com/orochi-registry. Proceeding with Kubernetes deployments.",
+        "priority": "high",
+        "fromId": "system",
+        "timestamp": "2026-01-17T21:57:11.317Z"
+      },
+      {
+        "messageId": "msg-1768688760594-ssxmkd",
+        "message": "E2E Test Suite Complete - All 25 tests passed (100% pass rate)",
+        "priority": "high",
+        "fromId": "system",
+        "timestamp": "2026-01-17T22:26:00.594Z"
+      },
+      {
+        "messageId": "msg-1768688977489-zdt2cv",
+        "message": "Starting comprehensive codebase scrub - fixing NOT_FOUND endpoints, TODOs, mocks, and dummy data",
+        "priority": "high",
+        "fromId": "system",
+        "timestamp": "2026-01-17T22:29:37.489Z"
+      },
+      {
+        "messageId": "msg-1768690469275-ozva11",
+        "message": "ARCHITECTURAL PROPOSAL: We need to design and implement the following features for Orochi Cloud to compete with Supabase/NeonDB:\n\n1. **Org-Required Signup**: New users must either create an organization or accept an invite during signup\n2. **Organization Invites**: Email-based invite system with roles (owner, admin, member, viewer), 24hr expiry\n3. **Data Browser**: High-performance table editor with:\n   - Virtual scrolling for 100k+ rows (TanStack Table + TanStack Virtual)\n   - ONLY show user tables (exclude hypertables, shards, orochi_* internal tables)\n   - Inline editing with CRUD operations\n   - SQL editor with syntax highlighting, explain/analyze\n   - Query history with descriptions\n4. **Cluster Settings Dashboard**: Connection pooling, performance advisor, missing index detection\n\nPlease analyze and contribute architectural decisions for each component.",
+        "priority": "high",
+        "fromId": "system",
+        "timestamp": "2026-01-17T22:54:29.275Z"
+      }
+    ],
+    "implementation-plan": {
+      "tasks": [
+        {
+          "id": 1,
+          "name": "Team/Org Model",
+          "status": "pending",
+          "description": "Add organizations table and team membership for cluster isolation"
+        },
+        {
+          "id": 2,
+          "name": "PgCat Integration",
+          "status": "pending",
+          "description": "Add connection pooling configuration for customer clusters"
+        },
+        {
+          "id": 3,
+          "name": "Cluster Lifecycle Test",
+          "status": "pending",
+          "description": "E2E test: create, connect, query, delete cluster"
+        },
+        {
+          "id": 4,
+          "name": "Admin Dashboard",
+          "status": "pending",
+          "description": "Admin-only views for managing all clusters and users"
+        }
+      ]
+    },
+    "admin-status": {
+      "backend": "complete - RequireRole(admin) middleware protects /api/v1/admin routes",
+      "frontend": "MISSING - admin routes have no beforeLoad guard to check user role",
+      "seeding": "MISSING - no mechanism to create first admin user",
+      "infrastructure": "MISSING - no orochi-cloud namespace or CloudNativePG in Kubernetes"
+    },
+    "architecture-analysis": {
+      "analysis": {
+        "dashboard": "Fly.io (orochi-dashboard.fly.dev)",
+        "controlPlane": "Fly.io (orochi-control-plane.fly.dev)",
+        "provisioner": "NOT DEPLOYED - requires Kubernetes",
+        "problem": "Provisioner uses k8s.io/apimachinery to create CloudNativePG Cluster resources. It MUST run inside Kubernetes cluster to access K8s API.",
+        "solution": "Need FKS (Fly.io Kubernetes Service), EKS, or other K8s provider to deploy provisioner and CloudNativePG operator"
+      },
+      "e2eStatus": {
+        "localTest": "PASSED - CloudNativePG works in kind cluster",
+        "productionTest": "BLOCKED - no provisioner deployed, no Kubernetes cluster available"
+      }
+    },
+    "infrastructure-evaluation": {
+      "current": "fly.io",
+      "candidates": [
+        "digitalocean",
+        "linode"
+      ],
+      "requirements": [
+        "managed-kubernetes",
+        "cloudnativepg",
+        "container-registry",
+        "load-balancer",
+        "persistent-volumes"
+      ]
+    },
+    "supabase-features": {
+      "sql_editor": {
+        "features": [
+          "inline AI assistant (CMD+K)",
+          "explain/analyze diagrams",
+          "query history",
+          "saved queries",
+          "AI-generated descriptions"
+        ],
+        "notes": "Primary interface for many developers - everything done through SQL editor"
+      },
+      "table_editor": {
+        "features": [
+          "spreadsheet-like UI",
+          "CRUD operations",
+          "inline editing",
+          "row-level security aware"
+        ],
+        "notes": "Makes Postgres as easy as a spreadsheet"
+      },
+      "organization": {
+        "roles": [
+          "Owner",
+          "Administrator",
+          "Developer",
+          "Read-Only"
+        ],
+        "invite_flow": "email invitation valid 24hrs",
+        "project_scoped_roles": "Team/Enterprise only"
+      },
+      "cluster_settings": {
+        "features": [
+          "connection pooling",
+          "cron jobs",
+          "queues",
+          "performance suggestions",
+          "security advisor",
+          "missing index detection"
+        ]
+      }
+    },
+    "neondb-features": {
+      "sql_editor": {
+        "features": [
+          "query history with AI descriptions",
+          "explain/analyze",
+          "saved queries"
+        ],
+        "notes": "Auto-saves queries with AI-generated descriptions"
+      },
+      "branching": {
+        "features": [
+          "git-like database branching",
+          "point-in-time recovery",
+          "Head/Time/LSN branch points"
+        ],
+        "notes": "Unique differentiator"
+      },
+      "cluster_settings": {
+        "features": [
+          "connection pooling (up to 1000)",
+          "compute autoscaling",
+          "scale to zero",
+          "concurrent connection limits"
+        ]
+      }
+    },
+    "data-grid-architecture": {
+      "recommended": "TanStack Table + TanStack Virtual",
+      "rationale": "Already using TanStack Router, headless gives full control, 9KB gzipped, handles 100k+ rows with virtualization",
+      "alternatives": {
+        "ag_grid": "Enterprise ready but heavy, batteries included",
+        "syncfusion": "Commercial, handles millions"
+      },
+      "key_features": [
+        "row/column virtualization",
+        "inline editing",
+        "column resize/reorder",
+        "server-side operations for 100k+ rows"
+      ]
+    },
+    "implementation-progress": {
+      "completed": [
+        "migration_003_invites_settings",
+        "invite_service",
+        "invite_models",
+        "invite_handlers",
+        "router_invite_routes"
+      ],
+      "in_progress": [
+        "data_browser_api"
+      ],
+      "pending": [
+        "registration_flow_update",
+        "frontend_components",
+        "cluster_settings"
+      ]
+    },
+    "storage-review-findings": {
+      "reviewDate": "2026-01-18",
+      "extensionStatus": "NOT_PRODUCTION_READY",
+      "controlPlaneStatus": "API_NEEDS_EXTENSION",
+      "infrastructureStatus": "60-70%_READY",
+      "criticalGaps": [
+        "S3 tiered storage incomplete - only exports metadata not actual data",
+        "Control plane API doesn't expose tiering/S3/compression config",
+        "CREATE EXTENSION orochi not auto-run on cluster creation",
+        "Storage classes not defined in repo",
+        "Multipart upload not implemented",
+        "Chunk recall from S3 not implemented"
+      ]
+    },
+    "storage-implementation-complete": {
+      "completedAt": "2026-01-18",
+      "components": {
+        "cExtension": {
+          "chunkSerialization": "fixed",
+          "s3Recall": "implemented",
+          "s3Multipart": "implemented",
+          "s3ListHead": "implemented",
+          "tests": "76 tests passing"
+        },
+        "controlPlane": {
+          "tieringAPI": "implemented",
+          "s3Config": "implemented",
+          "migration004": "created",
+          "tests": "all passing"
+        },
+        "provisioner": {
+          "tieringGUCs": "wired",
+          "bootstrapSQL": "added",
+          "s3Secrets": "implemented",
+          "tests": "all passing"
+        },
+        "kubernetes": {
+          "storageClasses": "created",
+          "helmTemplates": "updated",
+          "documentation": "comprehensive"
+        }
+      }
+    }
+  },
+  "createdAt": "2026-01-17T23:38:02.444Z",
+  "updatedAt": "2026-01-18T00:33:28.038Z",
   "queen": {
-    "agentId": "orochi-coordinator",
-    "electedAt": "2026-01-17T15:10:32.646Z",
+    "agentId": "code-review-queen",
+    "electedAt": "2026-01-17T23:38:02.444Z",
     "term": 1
   }
 }

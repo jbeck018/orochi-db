@@ -55,8 +55,28 @@ func (s *ClusterService) Create(ctx context.Context, ownerID uuid.UUID, req *mod
 		BackupEnabled:   req.BackupEnabled,
 		BackupRetention: req.BackupRetention,
 		PoolerEnabled:   req.PoolerEnabled, // PgBouncer connection pooling
+		EnableColumnar:  req.EnableColumnar,
+		DefaultShardCount: req.DefaultShardCount,
 		CreatedAt:       time.Now(),
 		UpdatedAt:       time.Now(),
+	}
+
+	// Apply tiering configuration if provided
+	if req.TieringConfig != nil && req.TieringConfig.Enabled {
+		cluster.TieringEnabled = true
+		cluster.TieringHotDuration = &req.TieringConfig.HotDuration
+		cluster.TieringWarmDuration = &req.TieringConfig.WarmDuration
+		cluster.TieringColdDuration = &req.TieringConfig.ColdDuration
+		cluster.TieringCompression = &req.TieringConfig.CompressionType
+
+		// Apply S3 configuration for cold/frozen tiers
+		if req.S3Config != nil {
+			cluster.S3Endpoint = &req.S3Config.Endpoint
+			cluster.S3Bucket = &req.S3Config.Bucket
+			cluster.S3Region = &req.S3Config.Region
+			// Note: S3 credentials are passed to provisioner via gRPC
+			// and stored in Kubernetes secrets, not in database
+		}
 	}
 
 	// Atomic insert with conflict detection on (owner_id, name) unique constraint.
@@ -66,9 +86,12 @@ func (s *ClusterService) Create(ctx context.Context, ownerID uuid.UUID, req *mod
 		INSERT INTO clusters (
 			id, name, owner_id, organization_id, status, tier, provider, region, version,
 			node_count, node_size, storage_gb, maintenance_day, maintenance_hour,
-			backup_enabled, backup_retention_days, pooler_enabled, created_at, updated_at
+			backup_enabled, backup_retention_days, pooler_enabled,
+			tiering_enabled, tiering_hot_duration, tiering_warm_duration, tiering_cold_duration,
+			tiering_compression, s3_endpoint, s3_bucket, s3_region,
+			enable_columnar, default_shard_count, created_at, updated_at
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
 		ON CONFLICT (owner_id, name) WHERE deleted_at IS NULL DO NOTHING
 		RETURNING id
 	`
@@ -80,6 +103,10 @@ func (s *ClusterService) Create(ctx context.Context, ownerID uuid.UUID, req *mod
 		cluster.NodeCount, cluster.NodeSize, cluster.StorageGB,
 		cluster.MaintenanceDay, cluster.MaintenanceHour,
 		cluster.BackupEnabled, cluster.BackupRetention, cluster.PoolerEnabled,
+		cluster.TieringEnabled, cluster.TieringHotDuration, cluster.TieringWarmDuration,
+		cluster.TieringColdDuration, cluster.TieringCompression,
+		cluster.S3Endpoint, cluster.S3Bucket, cluster.S3Region,
+		cluster.EnableColumnar, cluster.DefaultShardCount,
 		cluster.CreatedAt, cluster.UpdatedAt,
 	).Scan(&insertedID)
 
@@ -96,9 +123,14 @@ func (s *ClusterService) Create(ctx context.Context, ownerID uuid.UUID, req *mod
 		"cluster_id", cluster.ID,
 		"name", cluster.Name,
 		"owner_id", ownerID,
+		"tiering_enabled", cluster.TieringEnabled,
+		"columnar_enabled", cluster.EnableColumnar,
+		"shard_count", cluster.DefaultShardCount,
 	)
 
 	// In production, this would trigger the provisioning workflow
+	// Tiering configuration (hot/warm/cold durations, compression) is passed to provisioner
+	// S3 credentials from req.S3Config are passed to provisioner via gRPC and stored in Kubernetes secrets
 	// Use a derived context with timeout for the background operation (provisioning takes ~15s simulated)
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -115,7 +147,9 @@ func (s *ClusterService) GetByID(ctx context.Context, id uuid.UUID) (*models.Clu
 		SELECT id, name, owner_id, organization_id, status, tier, provider, region, version,
 			   node_count, node_size, storage_gb, connection_url, pooler_url,
 			   maintenance_day, maintenance_hour, backup_enabled, backup_retention_days,
-			   pooler_enabled, created_at, updated_at, deleted_at
+			   pooler_enabled, tiering_enabled, tiering_hot_duration, tiering_warm_duration,
+			   tiering_cold_duration, tiering_compression, s3_endpoint, s3_bucket, s3_region,
+			   enable_columnar, default_shard_count, created_at, updated_at, deleted_at
 		FROM clusters
 		WHERE id = $1 AND deleted_at IS NULL
 	`
@@ -127,6 +161,10 @@ func (s *ClusterService) GetByID(ctx context.Context, id uuid.UUID) (*models.Clu
 		&cluster.NodeCount, &cluster.NodeSize, &cluster.StorageGB, &cluster.ConnectionURL, &cluster.PoolerURL,
 		&cluster.MaintenanceDay, &cluster.MaintenanceHour,
 		&cluster.BackupEnabled, &cluster.BackupRetention, &cluster.PoolerEnabled,
+		&cluster.TieringEnabled, &cluster.TieringHotDuration, &cluster.TieringWarmDuration,
+		&cluster.TieringColdDuration, &cluster.TieringCompression,
+		&cluster.S3Endpoint, &cluster.S3Bucket, &cluster.S3Region,
+		&cluster.EnableColumnar, &cluster.DefaultShardCount,
 		&cluster.CreatedAt, &cluster.UpdatedAt, &cluster.DeletedAt,
 	)
 	if err != nil {
@@ -146,7 +184,9 @@ func (s *ClusterService) GetByName(ctx context.Context, ownerID uuid.UUID, name 
 		SELECT id, name, owner_id, organization_id, status, tier, provider, region, version,
 			   node_count, node_size, storage_gb, connection_url, pooler_url,
 			   maintenance_day, maintenance_hour, backup_enabled, backup_retention_days,
-			   pooler_enabled, created_at, updated_at, deleted_at
+			   pooler_enabled, tiering_enabled, tiering_hot_duration, tiering_warm_duration,
+			   tiering_cold_duration, tiering_compression, s3_endpoint, s3_bucket, s3_region,
+			   enable_columnar, default_shard_count, created_at, updated_at, deleted_at
 		FROM clusters
 		WHERE owner_id = $1 AND name = $2 AND deleted_at IS NULL
 	`
@@ -158,6 +198,10 @@ func (s *ClusterService) GetByName(ctx context.Context, ownerID uuid.UUID, name 
 		&cluster.NodeCount, &cluster.NodeSize, &cluster.StorageGB, &cluster.ConnectionURL, &cluster.PoolerURL,
 		&cluster.MaintenanceDay, &cluster.MaintenanceHour,
 		&cluster.BackupEnabled, &cluster.BackupRetention, &cluster.PoolerEnabled,
+		&cluster.TieringEnabled, &cluster.TieringHotDuration, &cluster.TieringWarmDuration,
+		&cluster.TieringColdDuration, &cluster.TieringCompression,
+		&cluster.S3Endpoint, &cluster.S3Bucket, &cluster.S3Region,
+		&cluster.EnableColumnar, &cluster.DefaultShardCount,
 		&cluster.CreatedAt, &cluster.UpdatedAt, &cluster.DeletedAt,
 	)
 	if err != nil {
@@ -199,7 +243,9 @@ func (s *ClusterService) List(ctx context.Context, ownerID uuid.UUID, page, page
 		SELECT id, name, owner_id, organization_id, status, tier, provider, region, version,
 			   node_count, node_size, storage_gb, connection_url, pooler_url,
 			   maintenance_day, maintenance_hour, backup_enabled, backup_retention_days,
-			   pooler_enabled, created_at, updated_at, deleted_at
+			   pooler_enabled, tiering_enabled, tiering_hot_duration, tiering_warm_duration,
+			   tiering_cold_duration, tiering_compression, s3_endpoint, s3_bucket, s3_region,
+			   enable_columnar, default_shard_count, created_at, updated_at, deleted_at
 		FROM clusters
 		WHERE owner_id = $1 AND deleted_at IS NULL
 		ORDER BY created_at DESC
@@ -222,6 +268,10 @@ func (s *ClusterService) List(ctx context.Context, ownerID uuid.UUID, page, page
 			&cluster.NodeCount, &cluster.NodeSize, &cluster.StorageGB, &cluster.ConnectionURL, &cluster.PoolerURL,
 			&cluster.MaintenanceDay, &cluster.MaintenanceHour,
 			&cluster.BackupEnabled, &cluster.BackupRetention, &cluster.PoolerEnabled,
+			&cluster.TieringEnabled, &cluster.TieringHotDuration, &cluster.TieringWarmDuration,
+			&cluster.TieringColdDuration, &cluster.TieringCompression,
+			&cluster.S3Endpoint, &cluster.S3Bucket, &cluster.S3Region,
+			&cluster.EnableColumnar, &cluster.DefaultShardCount,
 			&cluster.CreatedAt, &cluster.UpdatedAt, &cluster.DeletedAt,
 		)
 		if err != nil {
@@ -255,7 +305,9 @@ func (s *ClusterService) Update(ctx context.Context, id uuid.UUID, req *models.C
 		SELECT id, name, owner_id, organization_id, status, tier, provider, region, version,
 			   node_count, node_size, storage_gb, connection_url, pooler_url,
 			   maintenance_day, maintenance_hour, backup_enabled, backup_retention_days,
-			   pooler_enabled, created_at, updated_at, deleted_at
+			   pooler_enabled, tiering_enabled, tiering_hot_duration, tiering_warm_duration,
+			   tiering_cold_duration, tiering_compression, s3_endpoint, s3_bucket, s3_region,
+			   enable_columnar, default_shard_count, created_at, updated_at, deleted_at
 		FROM clusters
 		WHERE id = $1 AND deleted_at IS NULL
 		FOR UPDATE
@@ -268,6 +320,10 @@ func (s *ClusterService) Update(ctx context.Context, id uuid.UUID, req *models.C
 		&cluster.NodeCount, &cluster.NodeSize, &cluster.StorageGB, &cluster.ConnectionURL, &cluster.PoolerURL,
 		&cluster.MaintenanceDay, &cluster.MaintenanceHour,
 		&cluster.BackupEnabled, &cluster.BackupRetention, &cluster.PoolerEnabled,
+		&cluster.TieringEnabled, &cluster.TieringHotDuration, &cluster.TieringWarmDuration,
+		&cluster.TieringColdDuration, &cluster.TieringCompression,
+		&cluster.S3Endpoint, &cluster.S3Bucket, &cluster.S3Region,
+		&cluster.EnableColumnar, &cluster.DefaultShardCount,
 		&cluster.CreatedAt, &cluster.UpdatedAt, &cluster.DeletedAt,
 	)
 	if err != nil {
@@ -441,7 +497,9 @@ func (s *ClusterService) Scale(ctx context.Context, id uuid.UUID, req *models.Cl
 		SELECT id, name, owner_id, organization_id, status, tier, provider, region, version,
 			   node_count, node_size, storage_gb, connection_url, pooler_url,
 			   maintenance_day, maintenance_hour, backup_enabled, backup_retention_days,
-			   pooler_enabled, created_at, updated_at, deleted_at
+			   pooler_enabled, tiering_enabled, tiering_hot_duration, tiering_warm_duration,
+			   tiering_cold_duration, tiering_compression, s3_endpoint, s3_bucket, s3_region,
+			   enable_columnar, default_shard_count, created_at, updated_at, deleted_at
 		FROM clusters
 		WHERE id = $1 AND deleted_at IS NULL
 		FOR UPDATE
@@ -454,6 +512,10 @@ func (s *ClusterService) Scale(ctx context.Context, id uuid.UUID, req *models.Cl
 		&cluster.NodeCount, &cluster.NodeSize, &cluster.StorageGB, &cluster.ConnectionURL, &cluster.PoolerURL,
 		&cluster.MaintenanceDay, &cluster.MaintenanceHour,
 		&cluster.BackupEnabled, &cluster.BackupRetention, &cluster.PoolerEnabled,
+		&cluster.TieringEnabled, &cluster.TieringHotDuration, &cluster.TieringWarmDuration,
+		&cluster.TieringColdDuration, &cluster.TieringCompression,
+		&cluster.S3Endpoint, &cluster.S3Bucket, &cluster.S3Region,
+		&cluster.EnableColumnar, &cluster.DefaultShardCount,
 		&cluster.CreatedAt, &cluster.UpdatedAt, &cluster.DeletedAt,
 	)
 	if err != nil {
@@ -614,7 +676,9 @@ func (s *ClusterService) GetByIDWithOwnerCheck(ctx context.Context, clusterID, u
 		SELECT id, name, owner_id, organization_id, status, tier, provider, region, version,
 			   node_count, node_size, storage_gb, connection_url, pooler_url,
 			   maintenance_day, maintenance_hour, backup_enabled, backup_retention_days,
-			   pooler_enabled, created_at, updated_at, deleted_at
+			   pooler_enabled, tiering_enabled, tiering_hot_duration, tiering_warm_duration,
+			   tiering_cold_duration, tiering_compression, s3_endpoint, s3_bucket, s3_region,
+			   enable_columnar, default_shard_count, created_at, updated_at, deleted_at
 		FROM clusters
 		WHERE id = $1 AND deleted_at IS NULL
 	`
@@ -626,6 +690,10 @@ func (s *ClusterService) GetByIDWithOwnerCheck(ctx context.Context, clusterID, u
 		&cluster.NodeCount, &cluster.NodeSize, &cluster.StorageGB, &cluster.ConnectionURL, &cluster.PoolerURL,
 		&cluster.MaintenanceDay, &cluster.MaintenanceHour,
 		&cluster.BackupEnabled, &cluster.BackupRetention, &cluster.PoolerEnabled,
+		&cluster.TieringEnabled, &cluster.TieringHotDuration, &cluster.TieringWarmDuration,
+		&cluster.TieringColdDuration, &cluster.TieringCompression,
+		&cluster.S3Endpoint, &cluster.S3Bucket, &cluster.S3Region,
+		&cluster.EnableColumnar, &cluster.DefaultShardCount,
 		&cluster.CreatedAt, &cluster.UpdatedAt, &cluster.DeletedAt,
 	)
 	if err != nil {
@@ -659,7 +727,9 @@ func (s *ClusterService) UpdateWithOwnerCheck(ctx context.Context, id, userID uu
 		SELECT id, name, owner_id, organization_id, status, tier, provider, region, version,
 			   node_count, node_size, storage_gb, connection_url, pooler_url,
 			   maintenance_day, maintenance_hour, backup_enabled, backup_retention_days,
-			   pooler_enabled, created_at, updated_at, deleted_at
+			   pooler_enabled, tiering_enabled, tiering_hot_duration, tiering_warm_duration,
+			   tiering_cold_duration, tiering_compression, s3_endpoint, s3_bucket, s3_region,
+			   enable_columnar, default_shard_count, created_at, updated_at, deleted_at
 		FROM clusters
 		WHERE id = $1 AND deleted_at IS NULL
 		FOR UPDATE
@@ -672,6 +742,10 @@ func (s *ClusterService) UpdateWithOwnerCheck(ctx context.Context, id, userID uu
 		&cluster.NodeCount, &cluster.NodeSize, &cluster.StorageGB, &cluster.ConnectionURL, &cluster.PoolerURL,
 		&cluster.MaintenanceDay, &cluster.MaintenanceHour,
 		&cluster.BackupEnabled, &cluster.BackupRetention, &cluster.PoolerEnabled,
+		&cluster.TieringEnabled, &cluster.TieringHotDuration, &cluster.TieringWarmDuration,
+		&cluster.TieringColdDuration, &cluster.TieringCompression,
+		&cluster.S3Endpoint, &cluster.S3Bucket, &cluster.S3Region,
+		&cluster.EnableColumnar, &cluster.DefaultShardCount,
 		&cluster.CreatedAt, &cluster.UpdatedAt, &cluster.DeletedAt,
 	)
 	if err != nil {
@@ -856,7 +930,9 @@ func (s *ClusterService) ScaleWithOwnerCheck(ctx context.Context, id, userID uui
 		SELECT id, name, owner_id, organization_id, status, tier, provider, region, version,
 			   node_count, node_size, storage_gb, connection_url, pooler_url,
 			   maintenance_day, maintenance_hour, backup_enabled, backup_retention_days,
-			   pooler_enabled, created_at, updated_at, deleted_at
+			   pooler_enabled, tiering_enabled, tiering_hot_duration, tiering_warm_duration,
+			   tiering_cold_duration, tiering_compression, s3_endpoint, s3_bucket, s3_region,
+			   enable_columnar, default_shard_count, created_at, updated_at, deleted_at
 		FROM clusters
 		WHERE id = $1 AND deleted_at IS NULL
 		FOR UPDATE
@@ -869,6 +945,10 @@ func (s *ClusterService) ScaleWithOwnerCheck(ctx context.Context, id, userID uui
 		&cluster.NodeCount, &cluster.NodeSize, &cluster.StorageGB, &cluster.ConnectionURL, &cluster.PoolerURL,
 		&cluster.MaintenanceDay, &cluster.MaintenanceHour,
 		&cluster.BackupEnabled, &cluster.BackupRetention, &cluster.PoolerEnabled,
+		&cluster.TieringEnabled, &cluster.TieringHotDuration, &cluster.TieringWarmDuration,
+		&cluster.TieringColdDuration, &cluster.TieringCompression,
+		&cluster.S3Endpoint, &cluster.S3Bucket, &cluster.S3Region,
+		&cluster.EnableColumnar, &cluster.DefaultShardCount,
 		&cluster.CreatedAt, &cluster.UpdatedAt, &cluster.DeletedAt,
 	)
 	if err != nil {

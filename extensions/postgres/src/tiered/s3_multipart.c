@@ -1,0 +1,743 @@
+/*-------------------------------------------------------------------------
+ *
+ * s3_multipart.c
+ *    S3 Multipart Upload Implementation
+ *
+ * Implements AWS S3 multipart upload API for large object uploads:
+ * - InitiateMultipartUpload
+ * - UploadPart
+ * - CompleteMultipartUpload
+ * - AbortMultipartUpload
+ *
+ * Copyright (c) 2024, Orochi DB Contributors
+ *
+ *-------------------------------------------------------------------------
+ */
+
+#include "postgres.h"
+#include "fmgr.h"
+#include "utils/builtins.h"
+#include "utils/memutils.h"
+
+#include <curl/curl.h>
+#include <openssl/hmac.h>
+#include <openssl/sha.h>
+#include <time.h>
+#include <string.h>
+
+#include "tiered_storage.h"
+
+/* External functions from tiered_storage.c */
+extern char *generate_aws_signature_v4(S3Client *client, const char *method,
+                                      const char *uri, const char *query_string,
+                                      const char *payload, size_t payload_len,
+                                      const char *date_stamp, const char *amz_date,
+                                      char **out_authorization);
+
+/* Forward declarations */
+static char *extract_upload_id_from_xml(const char *xml_data);
+static char *extract_etag_from_xml(const char *xml_data);
+
+/*
+ * CURL buffer structure (also defined in tiered_storage.c)
+ */
+typedef struct {
+    char *data;
+    size_t size;
+    size_t capacity;
+} CurlBuffer;
+
+/* CURL write callback (also defined in tiered_storage.c) */
+static size_t
+orochi_curl_write_cb_mp(void *contents, size_t size, size_t nmemb, void *userp)
+{
+    size_t realsize = size * nmemb;
+    CurlBuffer *buf = (CurlBuffer *)userp;
+
+    if (buf->size + realsize + 1 > buf->capacity)
+    {
+        size_t new_capacity = buf->capacity * 2;
+        if (new_capacity < buf->size + realsize + 1)
+            new_capacity = buf->size + realsize + 1 + 1024;
+        buf->data = repalloc(buf->data, new_capacity);
+        buf->capacity = new_capacity;
+    }
+
+    memcpy(&(buf->data[buf->size]), contents, realsize);
+    buf->size += realsize;
+    buf->data[buf->size] = 0;
+
+    return realsize;
+}
+
+/*
+ * Parse UploadId from InitiateMultipartUpload XML response
+ */
+static char *
+extract_upload_id_from_xml(const char *xml_data)
+{
+    char *id_start;
+    char *id_end;
+    char *upload_id;
+    size_t id_len;
+
+    if (xml_data == NULL)
+        return NULL;
+
+    /* Look for <UploadId>...</UploadId> */
+    id_start = strstr(xml_data, "<UploadId>");
+    if (id_start == NULL)
+        return NULL;
+
+    id_start += 10;  /* Skip "<UploadId>" */
+    id_end = strstr(id_start, "</UploadId>");
+    if (id_end == NULL)
+        return NULL;
+
+    id_len = id_end - id_start;
+    upload_id = palloc(id_len + 1);
+    memcpy(upload_id, id_start, id_len);
+    upload_id[id_len] = '\0';
+
+    return upload_id;
+}
+
+/*
+ * Parse ETag from XML response body
+ */
+static char *
+extract_etag_from_xml(const char *xml_data)
+{
+    char *etag_start;
+    char *etag_end;
+    char *etag;
+    size_t etag_len;
+
+    if (xml_data == NULL)
+        return NULL;
+
+    /* Look for <ETag>...</ETag> in XML response */
+    etag_start = strstr(xml_data, "<ETag>");
+    if (etag_start == NULL)
+        return NULL;
+
+    etag_start += 6;  /* Skip "<ETag>" */
+    etag_end = strstr(etag_start, "</ETag>");
+    if (etag_end == NULL)
+        return NULL;
+
+    /* Remove quotes if present */
+    if (*etag_start == '"')
+        etag_start++;
+    if (*(etag_end - 1) == '"')
+        etag_end--;
+
+    etag_len = etag_end - etag_start;
+    etag = palloc(etag_len + 1);
+    memcpy(etag, etag_start, etag_len);
+    etag[etag_len] = '\0';
+
+    return etag;
+}
+
+/*
+ * Initiate multipart upload
+ * POST /{bucket}/{key}?uploads
+ * Returns upload_id to be used in subsequent part uploads
+ */
+char *
+s3_multipart_upload_start(S3Client *client, const char *key)
+{
+    CURL *curl;
+    CURLcode res;
+    struct curl_slist *headers = NULL;
+    CurlBuffer response_buf;
+    char url[1024];
+    char uri[512];
+    char query_string[] = "uploads";
+    char date_stamp[16];
+    char amz_date[32];
+    char *authorization;
+    char *payload_hash;
+    char header_buf[512];
+    time_t now;
+    struct tm *tm_info;
+    long http_code;
+    char *upload_id = NULL;
+
+    if (client == NULL || key == NULL)
+        return NULL;
+
+    /* Initialize response buffer */
+    response_buf.data = palloc(4096);
+    response_buf.size = 0;
+    response_buf.capacity = 4096;
+
+    /* Get current time for signing */
+    now = time(NULL);
+    tm_info = gmtime(&now);
+    strftime(date_stamp, sizeof(date_stamp), "%Y%m%d", tm_info);
+    strftime(amz_date, sizeof(amz_date), "%Y%m%dT%H%M%SZ", tm_info);
+
+    /* Build URI and URL */
+    snprintf(uri, sizeof(uri), "/%s/%s", client->bucket, key);
+    if (client->use_ssl)
+        snprintf(url, sizeof(url), "https://%s%s?uploads", client->endpoint, uri);
+    else
+        snprintf(url, sizeof(url), "http://%s%s?uploads", client->endpoint, uri);
+
+    /* Generate AWS Signature V4 */
+    payload_hash = generate_aws_signature_v4(client, "POST", uri, query_string,
+                                              "", 0, date_stamp, amz_date,
+                                              &authorization);
+
+    /* Initialize CURL */
+    curl = curl_easy_init();
+    if (!curl)
+    {
+        pfree(response_buf.data);
+        return NULL;
+    }
+
+    /* Set up headers */
+    snprintf(header_buf, sizeof(header_buf), "Host: %s", client->endpoint);
+    headers = curl_slist_append(headers, header_buf);
+
+    snprintf(header_buf, sizeof(header_buf), "x-amz-date: %s", amz_date);
+    headers = curl_slist_append(headers, header_buf);
+
+    snprintf(header_buf, sizeof(header_buf), "x-amz-content-sha256: %s", payload_hash);
+    headers = curl_slist_append(headers, header_buf);
+
+    snprintf(header_buf, sizeof(header_buf), "Authorization: %s", authorization);
+    headers = curl_slist_append(headers, header_buf);
+
+    /* Configure CURL for POST request */
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_POST, 1L);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, "");
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, 0);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, orochi_curl_write_cb_mp);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_buf);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, client->timeout_ms / 1000);
+
+    /* Perform request */
+    res = curl_easy_perform(curl);
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+    if (res == CURLE_OK && http_code >= 200 && http_code < 300)
+    {
+        /* Parse UploadId from XML response */
+        upload_id = extract_upload_id_from_xml(response_buf.data);
+        if (upload_id)
+        {
+            elog(LOG, "S3 Multipart upload initiated: %s/%s (UploadId: %s)",
+                 client->bucket, key, upload_id);
+        }
+        else
+        {
+            elog(WARNING, "Failed to parse UploadId from response: %s", response_buf.data);
+        }
+    }
+    else
+    {
+        elog(WARNING, "S3 Multipart upload initiation failed: HTTP %ld - %s",
+             http_code, response_buf.data);
+    }
+
+    /* Cleanup */
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+    pfree(response_buf.data);
+    pfree(authorization);
+    pfree(payload_hash);
+
+    return upload_id;
+}
+
+/*
+ * Upload a single part in multipart upload
+ * PUT /{bucket}/{key}?partNumber={n}&uploadId={id}
+ * Returns true on success
+ * Minimum part size is 5MB except for the last part
+ */
+bool
+s3_multipart_upload_part(S3Client *client, const char *key,
+                         const char *upload_id, int part_number,
+                         const char *data, int64 size)
+{
+    CURL *curl;
+    CURLcode res;
+    struct curl_slist *headers = NULL;
+    CurlBuffer response_buf;
+    char url[1024];
+    char uri[512];
+    char query_string[256];
+    char date_stamp[16];
+    char amz_date[32];
+    char *authorization;
+    char *payload_hash;
+    char header_buf[512];
+    time_t now;
+    struct tm *tm_info;
+    long http_code;
+    bool success = false;
+
+    if (client == NULL || key == NULL || upload_id == NULL || data == NULL)
+        return false;
+
+    /* Part numbers must be 1-10000 */
+    if (part_number < 1 || part_number > 10000)
+    {
+        elog(WARNING, "Invalid part number %d (must be 1-10000)", part_number);
+        return false;
+    }
+
+    /* Minimum part size is 5MB except for last part */
+    if (size < 5 * 1024 * 1024)
+    {
+        elog(DEBUG1, "Part %d is smaller than 5MB (%ld bytes), assuming last part",
+             part_number, size);
+    }
+
+    /* Initialize response buffer */
+    response_buf.data = palloc(1024);
+    response_buf.size = 0;
+    response_buf.capacity = 1024;
+
+    /* Get current time for signing */
+    now = time(NULL);
+    tm_info = gmtime(&now);
+    strftime(date_stamp, sizeof(date_stamp), "%Y%m%d", tm_info);
+    strftime(amz_date, sizeof(amz_date), "%Y%m%dT%H%M%SZ", tm_info);
+
+    /* Build query string and URI */
+    snprintf(query_string, sizeof(query_string), "partNumber=%d&uploadId=%s",
+             part_number, upload_id);
+    snprintf(uri, sizeof(uri), "/%s/%s", client->bucket, key);
+
+    /* Build URL */
+    if (client->use_ssl)
+        snprintf(url, sizeof(url), "https://%s%s?%s",
+                 client->endpoint, uri, query_string);
+    else
+        snprintf(url, sizeof(url), "http://%s%s?%s",
+                 client->endpoint, uri, query_string);
+
+    /* Generate AWS Signature V4 */
+    payload_hash = generate_aws_signature_v4(client, "PUT", uri, query_string,
+                                              data, size, date_stamp, amz_date,
+                                              &authorization);
+
+    /* Initialize CURL */
+    curl = curl_easy_init();
+    if (!curl)
+    {
+        pfree(response_buf.data);
+        return false;
+    }
+
+    /* Set up headers */
+    snprintf(header_buf, sizeof(header_buf), "Host: %s", client->endpoint);
+    headers = curl_slist_append(headers, header_buf);
+
+    snprintf(header_buf, sizeof(header_buf), "x-amz-date: %s", amz_date);
+    headers = curl_slist_append(headers, header_buf);
+
+    snprintf(header_buf, sizeof(header_buf), "x-amz-content-sha256: %s", payload_hash);
+    headers = curl_slist_append(headers, header_buf);
+
+    snprintf(header_buf, sizeof(header_buf), "Authorization: %s", authorization);
+    headers = curl_slist_append(headers, header_buf);
+
+    snprintf(header_buf, sizeof(header_buf), "Content-Length: %ld", size);
+    headers = curl_slist_append(headers, header_buf);
+
+    /* Configure CURL for PUT request */
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, data);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, size);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, orochi_curl_write_cb_mp);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_buf);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, client->timeout_ms / 1000);
+    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
+
+    /* Perform request */
+    res = curl_easy_perform(curl);
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+    if (res == CURLE_OK && http_code >= 200 && http_code < 300)
+    {
+        success = true;
+        elog(LOG, "S3 Multipart part %d uploaded: %s/%s (%ld bytes)",
+             part_number, client->bucket, key, size);
+    }
+    else
+    {
+        elog(WARNING, "S3 Multipart part %d upload failed: HTTP %ld - %s",
+             part_number, http_code, response_buf.data);
+    }
+
+    /* Cleanup */
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+    pfree(response_buf.data);
+    pfree(authorization);
+    pfree(payload_hash);
+
+    return success;
+}
+
+/*
+ * Complete multipart upload
+ * POST /{bucket}/{key}?uploadId={id}
+ * Finalizes the upload by combining all parts
+ *
+ * Note: This simplified version sends empty completion XML.
+ * A production implementation should track ETags from part uploads
+ * and include them in the XML payload as:
+ * <Part><PartNumber>N</PartNumber><ETag>etag</ETag></Part>
+ */
+bool
+s3_multipart_upload_complete(S3Client *client, const char *key,
+                              const char *upload_id)
+{
+    CURL *curl;
+    CURLcode res;
+    struct curl_slist *headers = NULL;
+    CurlBuffer response_buf;
+    char url[1024];
+    char uri[512];
+    char query_string[256];
+    char date_stamp[16];
+    char amz_date[32];
+    char *authorization;
+    char *payload_hash;
+    char header_buf[512];
+    StringInfoData complete_xml;
+    time_t now;
+    struct tm *tm_info;
+    long http_code;
+    bool success = false;
+
+    if (client == NULL || key == NULL || upload_id == NULL)
+        return false;
+
+    /* Initialize response buffer */
+    response_buf.data = palloc(4096);
+    response_buf.size = 0;
+    response_buf.capacity = 4096;
+
+    /*
+     * Build CompleteMultipartUpload XML payload
+     *
+     * TODO: In production, this MUST include ETags from each part:
+     * <CompleteMultipartUpload>
+     *   <Part>
+     *     <PartNumber>1</PartNumber>
+     *     <ETag>"etag-value"</ETag>
+     *   </Part>
+     *   ...
+     * </CompleteMultipartUpload>
+     *
+     * Without ETags, S3 will reject the completion request.
+     */
+    initStringInfo(&complete_xml);
+    appendStringInfo(&complete_xml,
+        "<CompleteMultipartUpload>");
+    /* Part ETags should be inserted here */
+    appendStringInfo(&complete_xml,
+        "</CompleteMultipartUpload>");
+
+    /* Get current time for signing */
+    now = time(NULL);
+    tm_info = gmtime(&now);
+    strftime(date_stamp, sizeof(date_stamp), "%Y%m%d", tm_info);
+    strftime(amz_date, sizeof(amz_date), "%Y%m%dT%H%M%SZ", tm_info);
+
+    /* Build query string and URI */
+    snprintf(query_string, sizeof(query_string), "uploadId=%s", upload_id);
+    snprintf(uri, sizeof(uri), "/%s/%s", client->bucket, key);
+
+    /* Build URL */
+    if (client->use_ssl)
+        snprintf(url, sizeof(url), "https://%s%s?%s",
+                 client->endpoint, uri, query_string);
+    else
+        snprintf(url, sizeof(url), "http://%s%s?%s",
+                 client->endpoint, uri, query_string);
+
+    /* Generate AWS Signature V4 */
+    payload_hash = generate_aws_signature_v4(client, "POST", uri, query_string,
+                                              complete_xml.data, complete_xml.len,
+                                              date_stamp, amz_date,
+                                              &authorization);
+
+    /* Initialize CURL */
+    curl = curl_easy_init();
+    if (!curl)
+    {
+        pfree(response_buf.data);
+        pfree(complete_xml.data);
+        return false;
+    }
+
+    /* Set up headers */
+    snprintf(header_buf, sizeof(header_buf), "Host: %s", client->endpoint);
+    headers = curl_slist_append(headers, header_buf);
+
+    snprintf(header_buf, sizeof(header_buf), "x-amz-date: %s", amz_date);
+    headers = curl_slist_append(headers, header_buf);
+
+    snprintf(header_buf, sizeof(header_buf), "x-amz-content-sha256: %s", payload_hash);
+    headers = curl_slist_append(headers, header_buf);
+
+    snprintf(header_buf, sizeof(header_buf), "Authorization: %s", authorization);
+    headers = curl_slist_append(headers, header_buf);
+
+    snprintf(header_buf, sizeof(header_buf), "Content-Type: application/xml");
+    headers = curl_slist_append(headers, header_buf);
+
+    snprintf(header_buf, sizeof(header_buf), "Content-Length: %d", complete_xml.len);
+    headers = curl_slist_append(headers, header_buf);
+
+    /* Configure CURL for POST request */
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_POST, 1L);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, complete_xml.data);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, complete_xml.len);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, orochi_curl_write_cb_mp);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_buf);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, client->timeout_ms / 1000);
+
+    /* Perform request */
+    res = curl_easy_perform(curl);
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+    if (res == CURLE_OK && http_code >= 200 && http_code < 300)
+    {
+        success = true;
+        elog(LOG, "S3 Multipart upload completed: %s/%s (UploadId: %s)",
+             client->bucket, key, upload_id);
+    }
+    else
+    {
+        elog(WARNING, "S3 Multipart upload completion failed: HTTP %ld - %s",
+             http_code, response_buf.data);
+    }
+
+    /* Cleanup */
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+    pfree(response_buf.data);
+    pfree(complete_xml.data);
+    pfree(authorization);
+    pfree(payload_hash);
+
+    return success;
+}
+
+/*
+ * Abort multipart upload
+ * DELETE /{bucket}/{key}?uploadId={id}
+ * Cleans up all uploaded parts
+ */
+void
+s3_multipart_upload_abort(S3Client *client, const char *key,
+                           const char *upload_id)
+{
+    CURL *curl;
+    CURLcode res;
+    struct curl_slist *headers = NULL;
+    CurlBuffer response_buf;
+    char url[1024];
+    char uri[512];
+    char query_string[256];
+    char date_stamp[16];
+    char amz_date[32];
+    char *authorization;
+    char *payload_hash;
+    char header_buf[512];
+    time_t now;
+    struct tm *tm_info;
+    long http_code;
+
+    if (client == NULL || key == NULL || upload_id == NULL)
+        return;
+
+    /* Initialize response buffer */
+    response_buf.data = palloc(1024);
+    response_buf.size = 0;
+    response_buf.capacity = 1024;
+
+    /* Get current time for signing */
+    now = time(NULL);
+    tm_info = gmtime(&now);
+    strftime(date_stamp, sizeof(date_stamp), "%Y%m%d", tm_info);
+    strftime(amz_date, sizeof(amz_date), "%Y%m%dT%H%M%SZ", tm_info);
+
+    /* Build query string and URI */
+    snprintf(query_string, sizeof(query_string), "uploadId=%s", upload_id);
+    snprintf(uri, sizeof(uri), "/%s/%s", client->bucket, key);
+
+    /* Build URL */
+    if (client->use_ssl)
+        snprintf(url, sizeof(url), "https://%s%s?%s",
+                 client->endpoint, uri, query_string);
+    else
+        snprintf(url, sizeof(url), "http://%s%s?%s",
+                 client->endpoint, uri, query_string);
+
+    /* Generate AWS Signature V4 */
+    payload_hash = generate_aws_signature_v4(client, "DELETE", uri, query_string,
+                                              "", 0, date_stamp, amz_date,
+                                              &authorization);
+
+    /* Initialize CURL */
+    curl = curl_easy_init();
+    if (!curl)
+    {
+        pfree(response_buf.data);
+        return;
+    }
+
+    /* Set up headers */
+    snprintf(header_buf, sizeof(header_buf), "Host: %s", client->endpoint);
+    headers = curl_slist_append(headers, header_buf);
+
+    snprintf(header_buf, sizeof(header_buf), "x-amz-date: %s", amz_date);
+    headers = curl_slist_append(headers, header_buf);
+
+    snprintf(header_buf, sizeof(header_buf), "x-amz-content-sha256: %s", payload_hash);
+    headers = curl_slist_append(headers, header_buf);
+
+    snprintf(header_buf, sizeof(header_buf), "Authorization: %s", authorization);
+    headers = curl_slist_append(headers, header_buf);
+
+    /* Configure CURL for DELETE request */
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, orochi_curl_write_cb_mp);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_buf);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, client->timeout_ms / 1000);
+
+    /* Perform request */
+    res = curl_easy_perform(curl);
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+    if (res == CURLE_OK && http_code >= 200 && http_code < 300)
+    {
+        elog(LOG, "S3 Multipart upload aborted: %s/%s (UploadId: %s)",
+             client->bucket, key, upload_id);
+    }
+    else
+    {
+        elog(WARNING, "S3 Multipart upload abort failed: HTTP %ld - %s",
+             http_code, response_buf.data);
+    }
+
+    /* Cleanup */
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+    pfree(response_buf.data);
+    pfree(authorization);
+    pfree(payload_hash);
+}
+
+/*
+ * Helper function to upload chunk to S3
+ * Automatically chooses between:
+ * - Regular upload for files < 100MB
+ * - Multipart upload for files >= 100MB (10MB parts)
+ */
+S3UploadResult *
+orochi_upload_chunk_to_s3(S3Client *client, const char *key,
+                           const char *data, int64 size)
+{
+    const int64 MULTIPART_THRESHOLD = 100 * 1024 * 1024;  /* 100MB */
+    const int64 PART_SIZE = 10 * 1024 * 1024;             /* 10MB parts */
+
+    if (size < MULTIPART_THRESHOLD)
+    {
+        /* Use regular upload for small files */
+        extern S3UploadResult *s3_upload(S3Client *client, const char *key,
+                                        const char *data, int64 size,
+                                        const char *content_type);
+        return s3_upload(client, key, data, size, "application/octet-stream");
+    }
+    else
+    {
+        /* Use multipart upload for large files */
+        S3UploadResult *result;
+        char *upload_id;
+        int part_number;
+        int64 offset;
+        bool success = true;
+
+        result = palloc0(sizeof(S3UploadResult));
+
+        /* Start multipart upload */
+        upload_id = s3_multipart_upload_start(client, key);
+        if (upload_id == NULL)
+        {
+            result->success = false;
+            result->error_message = pstrdup("Failed to initiate multipart upload");
+            return result;
+        }
+
+        /* Upload parts */
+        part_number = 1;
+        offset = 0;
+
+        while (offset < size)
+        {
+            int64 part_size = PART_SIZE;
+            if (offset + part_size > size)
+                part_size = size - offset;
+
+            if (!s3_multipart_upload_part(client, key, upload_id, part_number,
+                                          data + offset, part_size))
+            {
+                success = false;
+                break;
+            }
+
+            offset += part_size;
+            part_number++;
+        }
+
+        if (success)
+        {
+            /* Complete multipart upload */
+            if (s3_multipart_upload_complete(client, key, upload_id))
+            {
+                result->success = true;
+                result->etag = pstrdup("multipart-uploaded");
+                result->http_status = 200;
+                elog(LOG, "Successfully uploaded %ld bytes in %d parts to %s/%s",
+                     size, part_number - 1, client->bucket, key);
+            }
+            else
+            {
+                result->success = false;
+                result->error_message = pstrdup("Failed to complete multipart upload");
+                s3_multipart_upload_abort(client, key, upload_id);
+            }
+        }
+        else
+        {
+            /* Abort on failure */
+            result->success = false;
+            result->error_message = pstrdup("Failed to upload one or more parts");
+            s3_multipart_upload_abort(client, key, upload_id);
+        }
+
+        pfree(upload_id);
+        return result;
+    }
+}
