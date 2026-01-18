@@ -159,107 +159,149 @@ dev-autoscaler:
 	cd services/autoscaler && go run ./cmd/autoscaler
 
 # =============================================================================
-# Docker Builds
+# Docker Builds (DigitalOcean Container Registry)
 # =============================================================================
-REGISTRY ?= registry.fly.io
+DO_REGISTRY ?= registry.digitalocean.com/orochi-registry
+K8S_NAMESPACE ?= orochi-cloud
+K8S_CONTEXT ?= do-sfo3-orochi-cloud
 
+# Build dashboard image (using Node.js Dockerfile due to Bun AVX compatibility issues)
 docker-dashboard:
-	cd apps/dashboard && docker build \
-		--build-arg VITE_API_URL=https://orochi-control-plane.fly.dev \
-		-t $(REGISTRY)/orochi-dashboard:latest .
+	cd apps/dashboard && docker build --platform linux/amd64 \
+		-f Dockerfile.node \
+		-t $(DO_REGISTRY)/dashboard:latest .
 
+# Build control plane image
 docker-control-plane:
-	cd services/control-plane && docker build \
-		-t $(REGISTRY)/orochi-control-plane:latest .
+	cd services/control-plane && docker build --platform linux/amd64 \
+		-t $(DO_REGISTRY)/control-plane:latest .
 
+# Build provisioner image
 docker-provisioner:
-	cd services/provisioner && docker build \
-		-t $(REGISTRY)/orochi-provisioner:latest .
+	cd services/provisioner && docker build --platform linux/amd64 \
+		-t $(DO_REGISTRY)/provisioner:latest .
 
+# Build autoscaler image
 docker-autoscaler:
-	cd services/autoscaler && docker build \
-		-t $(REGISTRY)/orochi-autoscaler:latest .
+	cd services/autoscaler && docker build --platform linux/amd64 \
+		-t $(DO_REGISTRY)/autoscaler:latest .
 
+# Build all Docker images
 docker: docker-dashboard docker-control-plane docker-provisioner docker-autoscaler
 
 # =============================================================================
-# Fly.io Deployment
+# DigitalOcean Kubernetes Deployment
 # =============================================================================
 
-# Deploy dashboard to Fly.io
-deploy-dashboard:
-	cd apps/dashboard && fly deploy
+# Login to DigitalOcean Container Registry
+do-login:
+	doctl registry login
 
-# Deploy control plane to Fly.io
-deploy-control-plane:
-	cd services/control-plane && fly deploy
+# Push dashboard image to registry
+push-dashboard: docker-dashboard
+	docker push $(DO_REGISTRY)/dashboard:latest
 
-# Deploy all Fly.io apps (Dashboard + Control Plane)
-deploy-fly: deploy-dashboard deploy-control-plane
+# Push control plane image to registry
+push-control-plane: docker-control-plane
+	docker push $(DO_REGISTRY)/control-plane:latest
 
-# =============================================================================
-# FKS (Fly.io Kubernetes) Deployment
-# =============================================================================
+# Push all images
+push-all: push-dashboard push-control-plane
 
-# Get FKS kubeconfig
-fks-kubeconfig:
-	fly ext k8s kubeconfig --name orochi-fks > ~/.kube/orochi-fks.yaml
-	@echo "Run: export KUBECONFIG=~/.kube/orochi-fks.yaml"
+# Deploy dashboard (build, push, restart)
+deploy-dashboard: do-login push-dashboard
+	kubectl config use-context $(K8S_CONTEXT)
+	kubectl rollout restart deployment/dashboard -n $(K8S_NAMESPACE)
+	kubectl rollout status deployment/dashboard -n $(K8S_NAMESPACE)
 
-# Install CloudNativePG operator
-fks-install-cnpg:
-	kubectl apply -f https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.21/releases/cnpg-1.21.0.yaml
+# Deploy control plane (build, push, restart)
+deploy-api: do-login push-control-plane
+	kubectl config use-context $(K8S_CONTEXT)
+	kubectl rollout restart deployment/control-plane -n $(K8S_NAMESPACE)
+	kubectl rollout status deployment/control-plane -n $(K8S_NAMESPACE)
 
-# Deploy FKS namespace and secrets
-fks-init:
-	kubectl apply -f infrastructure/fks/namespace.yaml
-	@echo "IMPORTANT: Update infrastructure/fks/secrets.yaml with actual secrets before applying"
-	@echo "Run: kubectl apply -f infrastructure/fks/secrets.yaml"
+# Alias for deploy-api
+deploy-control-plane: deploy-api
 
-# Deploy Provisioner to FKS
-fks-provisioner:
-	kubectl apply -f infrastructure/fks/provisioner/
+# Deploy all services
+deploy-all: do-login push-all
+	kubectl config use-context $(K8S_CONTEXT)
+	kubectl rollout restart deployment/dashboard -n $(K8S_NAMESPACE)
+	kubectl rollout restart deployment/control-plane -n $(K8S_NAMESPACE)
+	kubectl rollout status deployment/dashboard -n $(K8S_NAMESPACE)
+	kubectl rollout status deployment/control-plane -n $(K8S_NAMESPACE)
 
-# Deploy Autoscaler to FKS
-fks-autoscaler:
-	kubectl apply -f infrastructure/fks/autoscaler/
+# Quick deploy (skip docker build, just restart with existing images)
+deploy-quick:
+	kubectl config use-context $(K8S_CONTEXT)
+	kubectl rollout restart deployment/dashboard -n $(K8S_NAMESPACE)
+	kubectl rollout restart deployment/control-plane -n $(K8S_NAMESPACE)
 
-# Deploy all FKS services
-deploy-fks: fks-provisioner fks-autoscaler
-	@echo "FKS services deployed. Check status with:"
-	@echo "  kubectl get pods -n orochi-cloud"
-
-# Full FKS setup (assumes cluster exists and kubeconfig is set)
-fks-setup: fks-install-cnpg fks-init
-	@echo "FKS setup complete. Now run: make deploy-fks"
-
-# Check FKS status
-fks-status:
-	@echo "=== Pods ==="
-	kubectl get pods -n orochi-cloud
-	@echo ""
-	@echo "=== Services ==="
-	kubectl get svc -n orochi-cloud
-	@echo ""
-	@echo "=== CloudNativePG Clusters ==="
-	kubectl get clusters.postgresql.cnpg.io -n orochi-cloud 2>/dev/null || echo "No clusters found"
-
-# View FKS logs
-fks-logs-provisioner:
-	kubectl logs -f deployment/provisioner -n orochi-cloud
-
-fks-logs-autoscaler:
-	kubectl logs -f deployment/autoscaler -n orochi-cloud
-
-# =============================================================================
-# Full Deployment (Fly.io + FKS)
-# =============================================================================
-deploy: deploy-fly deploy-fks
+# Full deployment alias
+deploy: deploy-all
 	@echo ""
 	@echo "=== Deployment Complete ==="
-	@echo "Dashboard:      https://orochi-dashboard.fly.dev"
-	@echo "Control Plane:  https://orochi-control-plane.fly.dev"
-	@echo "FKS Services:   kubectl get pods -n orochi-cloud"
+	@echo "Dashboard:      http://24.199.68.43 (dashboard.orochi.cloud)"
+	@echo "API:            http://134.199.141.125 (api.orochi.cloud)"
+	@echo "Check status:   make do-status"
+
+# =============================================================================
+# DigitalOcean Kubernetes Operations
+# =============================================================================
+
+# Set kubectl context to DigitalOcean
+do-context:
+	kubectl config use-context $(K8S_CONTEXT)
+
+# Get kubeconfig from DigitalOcean
+do-kubeconfig:
+	doctl kubernetes cluster kubeconfig save orochi-cloud
+
+# Install CloudNativePG operator
+do-install-cnpg:
+	kubectl apply -f https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.21/releases/cnpg-1.21.0.yaml
+
+# Check deployment status
+do-status:
+	@kubectl config use-context $(K8S_CONTEXT)
+	@echo "=== Pods ==="
+	@kubectl get pods -n $(K8S_NAMESPACE)
+	@echo ""
+	@echo "=== Services ==="
+	@kubectl get svc -n $(K8S_NAMESPACE)
+	@echo ""
+	@echo "=== Deployments ==="
+	@kubectl get deployments -n $(K8S_NAMESPACE)
+
+# View dashboard logs
+do-logs-dashboard:
+	kubectl config use-context $(K8S_CONTEXT)
+	kubectl logs -f deployment/dashboard -n $(K8S_NAMESPACE)
+
+# View control plane logs
+do-logs-api:
+	kubectl config use-context $(K8S_CONTEXT)
+	kubectl logs -f deployment/control-plane -n $(K8S_NAMESPACE)
+
+# Port forward dashboard for local testing
+do-forward-dashboard:
+	kubectl config use-context $(K8S_CONTEXT)
+	kubectl port-forward svc/dashboard 3000:80 -n $(K8S_NAMESPACE)
+
+# Port forward API for local testing
+do-forward-api:
+	kubectl config use-context $(K8S_CONTEXT)
+	kubectl port-forward svc/control-plane 8080:8080 -n $(K8S_NAMESPACE)
+
+# Apply Kubernetes manifests
+do-apply:
+	kubectl config use-context $(K8S_CONTEXT)
+	kubectl apply -f infrastructure/digitalocean/
+
+# Describe pods (for debugging)
+do-describe:
+	kubectl config use-context $(K8S_CONTEXT)
+	kubectl describe pods -n $(K8S_NAMESPACE)
 
 # =============================================================================
 # Help
@@ -288,38 +330,41 @@ help:
 	@echo "  make cli-test     - Run CLI tests"
 	@echo "  make cli-clean    - Clean CLI binary"
 	@echo ""
-	@echo "Dashboard (Bun):"
+	@echo "Dashboard:"
 	@echo "  make dashboard       - Build dashboard for production"
 	@echo "  make dashboard-dev   - Run dashboard in development mode"
 	@echo "  make dashboard-clean - Clean dashboard build artifacts"
 	@echo ""
 	@echo "Local Development:"
-	@echo "  make install         - Install all dependencies (Bun)"
+	@echo "  make install         - Install all dependencies"
 	@echo "  make dev             - Run dashboard dev server"
 	@echo "  make dev-all         - Show how to run all services"
 	@echo "  make dev-dashboard   - Run dashboard (port 3000)"
 	@echo "  make dev-control-plane - Run control plane (port 8080)"
 	@echo ""
-	@echo "Docker:"
-	@echo "  make docker            - Build all Docker images"
-	@echo "  make docker-dashboard  - Build dashboard image"
+	@echo "Docker (DigitalOcean Registry):"
+	@echo "  make docker              - Build all Docker images"
+	@echo "  make docker-dashboard    - Build dashboard image (Node.js)"
 	@echo "  make docker-control-plane - Build control plane image"
+	@echo "  make push-all            - Push all images to DO registry"
 	@echo ""
-	@echo "Fly.io Deployment:"
-	@echo "  make deploy-dashboard     - Deploy dashboard to Fly.io"
-	@echo "  make deploy-control-plane - Deploy control plane to Fly.io"
-	@echo "  make deploy-fly           - Deploy all Fly.io apps"
+	@echo "DigitalOcean Kubernetes Deployment:"
+	@echo "  make deploy              - Deploy all services (build, push, restart)"
+	@echo "  make deploy-dashboard    - Deploy dashboard only"
+	@echo "  make deploy-api          - Deploy control plane only"
+	@echo "  make deploy-quick        - Restart deployments (no rebuild)"
 	@echo ""
-	@echo "FKS (Fly.io Kubernetes):"
-	@echo "  make fks-kubeconfig    - Get FKS kubeconfig"
-	@echo "  make fks-setup         - Install CNPG and init namespace"
-	@echo "  make deploy-fks        - Deploy Provisioner + Autoscaler"
-	@echo "  make fks-status        - Check FKS service status"
-	@echo "  make fks-logs-provisioner - View Provisioner logs"
-	@echo "  make fks-logs-autoscaler  - View Autoscaler logs"
-	@echo ""
-	@echo "Full Deployment:"
-	@echo "  make deploy  - Deploy everything (Fly.io + FKS)"
+	@echo "DigitalOcean Operations:"
+	@echo "  make do-login            - Login to DO container registry"
+	@echo "  make do-kubeconfig       - Fetch kubeconfig from DO"
+	@echo "  make do-context          - Switch kubectl to DO context"
+	@echo "  make do-status           - Check deployment status"
+	@echo "  make do-logs-dashboard   - View dashboard logs"
+	@echo "  make do-logs-api         - View control plane logs"
+	@echo "  make do-forward-dashboard - Port forward dashboard to localhost:3000"
+	@echo "  make do-forward-api      - Port forward API to localhost:8080"
+	@echo "  make do-apply            - Apply Kubernetes manifests"
+	@echo "  make do-install-cnpg     - Install CloudNativePG operator"
 	@echo ""
 	@echo "All Components:"
 	@echo "  make build-all  - Build all components"
@@ -331,3 +376,7 @@ help:
 	@echo "Go Workspace:"
 	@echo "  make go-sync    - Sync go.work file"
 	@echo "  make go-tidy    - Run go mod tidy on all modules"
+	@echo ""
+	@echo "Production URLs:"
+	@echo "  Dashboard: http://24.199.68.43 (dashboard.orochi.cloud)"
+	@echo "  API:       http://134.199.141.125 (api.orochi.cloud)"

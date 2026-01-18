@@ -1010,6 +1010,205 @@ OROCHI_AUTH_TOKEN=<jwt-token>
 
 ---
 
+## Production Deployment (DigitalOcean Kubernetes)
+
+### Infrastructure Overview
+
+Orochi Cloud runs on DigitalOcean Kubernetes (DOKS) with the following setup:
+
+| Component | URL/IP | Notes |
+|-----------|--------|-------|
+| Dashboard | http://24.199.68.43 | LoadBalancer IP (intended: dashboard.orochi.cloud) |
+| API | http://134.199.141.125 | LoadBalancer IP (intended: api.orochi.cloud) |
+| Container Registry | registry.digitalocean.com/orochi-registry | DigitalOcean Container Registry |
+| Kubernetes Cluster | do-sfo3-orochi-cloud | SFO3 region |
+| Namespace | orochi-cloud | All resources deployed here |
+
+### Prerequisites
+
+```bash
+# Install doctl (DigitalOcean CLI)
+brew install doctl  # macOS
+# or: snap install doctl  # Linux
+
+# Authenticate with DigitalOcean
+doctl auth init
+
+# Configure kubectl context
+doctl kubernetes cluster kubeconfig save orochi-cloud
+
+# Verify connection
+kubectl config use-context do-sfo3-orochi-cloud
+kubectl get nodes
+```
+
+### Container Registry Authentication
+
+```bash
+# Login to DigitalOcean Container Registry
+doctl registry login
+
+# Verify access
+docker pull registry.digitalocean.com/orochi-registry/dashboard:latest
+```
+
+### Deployment Workflow
+
+#### 1. Build Docker Images
+
+**Dashboard** (uses Node.js due to Bun AVX compatibility issues):
+```bash
+cd apps/dashboard
+docker build --platform linux/amd64 -f Dockerfile.node \
+  -t registry.digitalocean.com/orochi-registry/dashboard:latest .
+```
+
+**Control Plane**:
+```bash
+cd services/control-plane
+docker build --platform linux/amd64 \
+  -t registry.digitalocean.com/orochi-registry/control-plane:latest .
+```
+
+#### 2. Push to Container Registry
+
+```bash
+docker push registry.digitalocean.com/orochi-registry/dashboard:latest
+docker push registry.digitalocean.com/orochi-registry/control-plane:latest
+```
+
+#### 3. Deploy to Kubernetes
+
+```bash
+# Switch to correct context
+kubectl config use-context do-sfo3-orochi-cloud
+
+# Restart deployments to pull new images
+kubectl rollout restart deployment/dashboard -n orochi-cloud
+kubectl rollout restart deployment/control-plane -n orochi-cloud
+
+# Watch rollout status
+kubectl rollout status deployment/dashboard -n orochi-cloud
+kubectl rollout status deployment/control-plane -n orochi-cloud
+```
+
+#### 4. Verify Deployment
+
+```bash
+# Check pod status
+kubectl get pods -n orochi-cloud
+
+# Check services and external IPs
+kubectl get svc -n orochi-cloud
+
+# View logs
+kubectl logs -f deployment/dashboard -n orochi-cloud
+kubectl logs -f deployment/control-plane -n orochi-cloud
+```
+
+### Quick Deploy Commands
+
+```bash
+# Full deployment (build + push + restart)
+make deploy-dashboard    # Dashboard only
+make deploy-api          # Control plane only
+make deploy-all          # Both services
+
+# Or manually:
+# Dashboard
+cd apps/dashboard && \
+  docker build --platform linux/amd64 -f Dockerfile.node -t registry.digitalocean.com/orochi-registry/dashboard:latest . && \
+  docker push registry.digitalocean.com/orochi-registry/dashboard:latest && \
+  kubectl rollout restart deployment/dashboard -n orochi-cloud
+
+# Control Plane
+cd services/control-plane && \
+  docker build --platform linux/amd64 -t registry.digitalocean.com/orochi-registry/control-plane:latest . && \
+  docker push registry.digitalocean.com/orochi-registry/control-plane:latest && \
+  kubectl rollout restart deployment/control-plane -n orochi-cloud
+```
+
+### Infrastructure Files
+
+| File | Purpose |
+|------|---------|
+| `infrastructure/digitalocean/dashboard.yaml` | Dashboard Deployment + Service |
+| `infrastructure/digitalocean/control-plane.yaml` | Control Plane Deployment + Service |
+| `infrastructure/digitalocean/secrets.yaml` | Kubernetes secrets (not in git) |
+| `apps/dashboard/Dockerfile.node` | Dashboard Docker image (Node.js) |
+| `services/control-plane/Dockerfile` | Control Plane Docker image |
+
+### Troubleshooting
+
+**Image pull errors:**
+```bash
+# Re-authenticate registry
+doctl registry login
+
+# Check registry credentials in cluster
+kubectl get secrets -n orochi-cloud
+```
+
+**Pod crash loops:**
+```bash
+# Check pod events
+kubectl describe pod <pod-name> -n orochi-cloud
+
+# Check logs
+kubectl logs <pod-name> -n orochi-cloud --previous
+```
+
+**Service not accessible:**
+```bash
+# Check service endpoints
+kubectl get endpoints -n orochi-cloud
+
+# Port forward for local testing
+kubectl port-forward svc/dashboard 3000:80 -n orochi-cloud
+kubectl port-forward svc/control-plane 8080:8080 -n orochi-cloud
+```
+
+---
+
+## Known Issues and Learnings
+
+### Bun Runtime AVX Compatibility
+
+**Issue**: Bun crashes with `SIGILL (Illegal instruction)` during Docker builds on certain cloud infrastructure.
+
+**Error message**:
+```
+CPU lacks AVX support. Please consider upgrading to a newer CPU.
+panic(main thread): Segmentation fault at address 0x7FFFB28FB800
+```
+
+**Cause**: Bun's runtime requires AVX CPU instructions which may not be available in all Docker build environments or cloud VMs.
+
+**Solution**: Use the Node.js-based Dockerfile (`Dockerfile.node`) instead of the Bun Dockerfile for the dashboard:
+```bash
+docker build -f Dockerfile.node -t registry.digitalocean.com/orochi-registry/dashboard:latest .
+```
+
+### Platform-Specific Docker Builds
+
+**Issue**: Images built on Apple Silicon (M1/M2) may not run on AMD64 cloud infrastructure.
+
+**Solution**: Always specify the target platform when building:
+```bash
+docker build --platform linux/amd64 -t <image> .
+```
+
+### TanStack Router File-Based Routing
+
+**Learning**: Route files must follow the naming convention exactly:
+- `routes/clusters/$id/index.tsx` - Cluster detail page
+- `routes/clusters/$id/settings.tsx` - Cluster settings page
+- Parameters use `$` prefix, not `:` or `[]`
+
+Run `bunx @tanstack/router-cli generate` after adding/modifying route files.
+
+---
+
 ## File Organization Rules
 
 - **Extension source**: `extensions/postgres/src/`
