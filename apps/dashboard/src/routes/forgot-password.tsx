@@ -20,10 +20,10 @@ export const Route = createFileRoute("/forgot-password")({
     meta: [
       {
         name: "description",
-        content: "Reset your Orochi Cloud password",
+        content: "Reset your HowlerOps password",
       },
     ],
-    title: "Forgot Password - Orochi Cloud",
+    title: "Forgot Password - HowlerOps",
   }),
 });
 

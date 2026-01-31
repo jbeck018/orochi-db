@@ -1,4 +1,4 @@
-// Package cmd provides the CLI commands for Orochi Cloud.
+// Package cmd provides the CLI commands for HowlerOps (OrochiDB).
 package cmd
 
 import (
@@ -18,9 +18,9 @@ var (
 // rootCmd represents the base command when called without any subcommands.
 var rootCmd = &cobra.Command{
 	Use:   "orochi",
-	Short: "Orochi Cloud CLI - Manage your Orochi Cloud clusters",
-	Long: `Orochi Cloud CLI is a command-line interface for managing
-your Orochi Cloud database clusters.
+	Short: "OrochiDB CLI - Manage your OrochiDB clusters on HowlerOps",
+	Long: `OrochiDB CLI is a command-line interface for managing
+your OrochiDB database clusters on HowlerOps.
 
 Get started by logging in:
   orochi login
@@ -28,7 +28,7 @@ Get started by logging in:
 Then create your first cluster:
   orochi cluster create my-cluster --size small --region us-east-1
 
-For more information, visit: https://docs.orochi.cloud`,
+For more information, visit: https://docs.howlerops.com`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
@@ -67,6 +67,15 @@ func init() {
 	rootCmd.AddCommand(clusterCmd)
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(versionCmd)
+
+	// Add new subcommands
+	rootCmd.AddCommand(backupCmd)
+	rootCmd.AddCommand(branchCmd)
+	rootCmd.AddCommand(orgCmd)
+	rootCmd.AddCommand(metricsCmd)
+	rootCmd.AddCommand(dataCmd)
+	rootCmd.AddCommand(settingsCmd)
+	rootCmd.AddCommand(adminCmd)
 }
 
 // getOutputFormat returns the current output format.

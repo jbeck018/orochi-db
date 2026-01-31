@@ -168,9 +168,12 @@ orochi_workload_init(void)
     if (!process_shared_preload_libraries_in_progress)
         return;
 
-    /* Request shared memory */
+#if PG_VERSION_NUM < 150000
+    /* Pre-PG15: Request shared memory directly */
     RequestAddinShmemSpace(orochi_workload_shmem_size());
     RequestNamedLWLockTranche("orochi_workload", WORKLOAD_MAX_POOLS + 1);
+#endif
+    /* Note: PG15+ shared memory is requested via main init.c shmem_request_hook */
 
     /* Install shmem startup hook */
     prev_shmem_startup_hook = shmem_startup_hook;

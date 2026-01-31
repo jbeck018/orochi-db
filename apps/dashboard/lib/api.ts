@@ -291,6 +291,58 @@ export const userApi = {
       body: JSON.stringify({ password }),
     });
   },
+
+  uploadAvatar: async (file: File): Promise<ApiResponse<User>> => {
+    const formData = new FormData();
+    formData.append("avatar", file);
+
+    const url = `${API_URL}/api/v1/users/me/avatar`;
+    const headers: Record<string, string> = {
+      ...getAuthHeader(),
+    };
+    // Don't set Content-Type for FormData - browser will set it with boundary
+
+    let response = await fetch(url, {
+      method: "POST",
+      headers,
+      body: formData,
+    });
+
+    // Handle token refresh on 401
+    if (response.status === 401) {
+      const newTokens = await refreshTokensWithLock();
+      if (newTokens) {
+        headers.Authorization = `Bearer ${newTokens.accessToken}`;
+        response = await fetch(url, {
+          method: "POST",
+          headers,
+          body: formData,
+        });
+      } else {
+        clearAuth();
+        throw new ApiError("Unauthorized", 401, "UNAUTHORIZED");
+      }
+    }
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new ApiError(
+        errorData.message ?? `Upload failed with status ${response.status}`,
+        response.status,
+        errorData.code
+      );
+    }
+
+    const data = await response.json();
+    return { data: data.user };
+  },
+
+  deleteAvatar: async (): Promise<ApiResponse<User>> => {
+    const response = await fetchWithAuth<{ user: User }>("/api/v1/users/me/avatar", {
+      method: "DELETE",
+    });
+    return { data: response.user };
+  },
 };
 
 // Providers and Tiers API
@@ -1208,6 +1260,49 @@ export const dataBrowserApi = {
       `/api/v1/clusters/${clusterId}/data/stats`
     );
     return transformInternalStats(response);
+  },
+};
+
+// Branch API
+export const branchApi = {
+  // List all branches for a cluster
+  list: async (clusterId: string): Promise<{ branches: Branch[]; totalCount: number }> => {
+    const response = await fetchWithAuth<{
+      branches: Branch[];
+      totalCount: number;
+    }>(`/api/v1/clusters/${clusterId}/branches`);
+    return {
+      branches: response.branches ?? [],
+      totalCount: response.totalCount ?? 0,
+    };
+  },
+
+  // Get a specific branch
+  get: async (clusterId: string, branchId: string): Promise<Branch> => {
+    return fetchWithAuth<Branch>(`/api/v1/clusters/${clusterId}/branches/${branchId}`);
+  },
+
+  // Create a new branch (instant database clone)
+  create: async (clusterId: string, data: CreateBranchForm): Promise<Branch> => {
+    return fetchWithAuth<Branch>(`/api/v1/clusters/${clusterId}/branches`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  // Delete a branch
+  delete: async (clusterId: string, branchId: string): Promise<void> => {
+    await fetchWithAuth<void>(`/api/v1/clusters/${clusterId}/branches/${branchId}`, {
+      method: "DELETE",
+    });
+  },
+
+  // Promote a branch to standalone cluster
+  promote: async (clusterId: string, branchId: string): Promise<Branch> => {
+    return fetchWithAuth<Branch>(
+      `/api/v1/clusters/${clusterId}/branches/${branchId}/promote`,
+      { method: "POST" }
+    );
   },
 };
 

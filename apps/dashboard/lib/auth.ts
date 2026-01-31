@@ -35,6 +35,11 @@ export function getStoredUser(): User | null {
   }
 }
 
+export function setStoredUser(user: User): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(USER_KEY, JSON.stringify(user));
+}
+
 export function storeAuth(tokens: AuthTokens, user: User): void {
   if (typeof window === "undefined") return;
 

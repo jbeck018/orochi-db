@@ -1,0 +1,34 @@
+domains:
+- domain: howlerops.com
+  type: PRIMARY
+- domain: dashboard.howlerops.com
+  type: ALIAS
+ingress:
+  rules:
+  - component:
+      name: dashboard
+    match:
+      path:
+        prefix: /
+name: howlerops-dashboard
+region: sfo
+services:
+- envs:
+  - key: NODE_ENV
+    scope: RUN_AND_BUILD_TIME
+    value: production
+  - key: PORT
+    scope: RUN_AND_BUILD_TIME
+    value: "3000"
+  - key: VITE_API_URL
+    scope: RUN_AND_BUILD_TIME
+    value: https://api.howlerops.com
+  http_port: 3000
+  image:
+    registry: orochi-registry
+    registry_type: DOCR
+    repository: dashboard
+    tag: ssr
+  instance_count: 1
+  instance_size_slug: professional-xs
+  name: dashboard

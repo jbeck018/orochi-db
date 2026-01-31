@@ -44,8 +44,8 @@ func TestBuildPostgresParameters_TieringEnabled(t *testing.T) {
 
 	params := manager.buildPostgresParameters(spec)
 
-	// Verify base parameters
-	assert.Equal(t, "orochi", params["shared_preload_libraries"], "shared_preload_libraries should be orochi")
+	// Verify base parameters (shared_preload_libraries is now set at postgresql level, not in parameters)
+	assert.Equal(t, "200", params["max_connections"], "max_connections should be set")
 
 	// Verify tiering parameters
 	assert.Equal(t, "on", params["orochi.tiering_enabled"], "tiering should be enabled")
@@ -85,8 +85,8 @@ func TestBuildPostgresParameters_TieringDisabled(t *testing.T) {
 
 	params := manager.buildPostgresParameters(spec)
 
-	// Verify base parameters are present
-	assert.Equal(t, "orochi", params["shared_preload_libraries"])
+	// Verify base parameters are present (shared_preload_libraries is now set at postgresql level)
+	assert.Equal(t, "200", params["max_connections"])
 
 	// Verify tiering parameters are NOT present
 	_, hasTieringEnabled := params["orochi.tiering_enabled"]
@@ -119,10 +119,10 @@ func TestBuildPostgresParameters_NoOrochiConfig(t *testing.T) {
 
 	params := manager.buildPostgresParameters(spec)
 
-	// Should only have base PostgreSQL parameters
-	assert.Equal(t, "orochi", params["shared_preload_libraries"])
+	// Should only have base PostgreSQL parameters (shared_preload_libraries is now set at postgresql level)
 	assert.Contains(t, params, "max_connections")
 	assert.Contains(t, params, "shared_buffers")
+	assert.Contains(t, params, "file_copy_method")
 
 	// Should not have any Orochi-specific parameters
 	_, hasShardCount := params["orochi.default_shard_count"]
@@ -476,7 +476,7 @@ func TestBuildClusterSpec_CompleteConfiguration(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, found)
 
-	assert.Equal(t, "orochi", params["shared_preload_libraries"])
+	// Note: shared_preload_libraries is now set at postgresql level, not in parameters
 	assert.Equal(t, "on", params["orochi.tiering_enabled"])
 	assert.Equal(t, "7 days", params["orochi.tiering_hot_duration"])
 	assert.Equal(t, "30 days", params["orochi.tiering_warm_duration"])
@@ -537,16 +537,17 @@ func TestBuildClusterSpec_SharedPreloadLibraries(t *testing.T) {
 
 	cluster := manager.buildClusterSpec(spec)
 
-	// Verify shared_preload_libraries in both locations
+	// Verify shared_preload_libraries is set at postgresql level (not in parameters)
 	preloadLibsArray, found, err := unstructured.NestedSlice(cluster.Object, "spec", "postgresql", "shared_preload_libraries")
 	require.NoError(t, err)
 	require.True(t, found, "shared_preload_libraries array should exist")
 	require.Len(t, preloadLibsArray, 1)
 	assert.Equal(t, "orochi", preloadLibsArray[0])
 
-	// Verify in parameters as well
+	// Verify parameters exist but do NOT include shared_preload_libraries (it's at postgresql level now)
 	params, found, err := unstructured.NestedMap(cluster.Object, "spec", "postgresql", "parameters")
 	require.NoError(t, err)
 	require.True(t, found)
-	assert.Equal(t, "orochi", params["shared_preload_libraries"])
+	_, hasPreloadLibs := params["shared_preload_libraries"]
+	assert.False(t, hasPreloadLibs, "shared_preload_libraries should not be in parameters (it's at postgresql level)")
 }

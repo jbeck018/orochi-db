@@ -9,12 +9,12 @@ export function Footer(): React.JSX.Element {
       <div className="container flex flex-col items-center justify-between gap-4 py-6 md:h-16 md:flex-row md:py-0">
         <div className="text-center text-sm text-muted-foreground md:text-left">
           <p>
-            {currentYear} Orochi Cloud. All rights reserved.
+            {currentYear} HowlerOps. All rights reserved.
           </p>
         </div>
         <div className="flex items-center gap-4 text-sm text-muted-foreground">
           <a
-            href="https://docs.orochi.cloud"
+            href="https://docs.howlerops.com"
             target="_blank"
             rel="noopener noreferrer"
             className="hover:text-foreground transition-colors"
@@ -22,7 +22,7 @@ export function Footer(): React.JSX.Element {
             Documentation
           </a>
           <a
-            href="https://support.orochi.cloud"
+            href="https://support.howlerops.com"
             target="_blank"
             rel="noopener noreferrer"
             className="hover:text-foreground transition-colors"
@@ -30,7 +30,7 @@ export function Footer(): React.JSX.Element {
             Support
           </a>
           <a
-            href="https://status.orochi.cloud"
+            href="https://status.howlerops.com"
             target="_blank"
             rel="noopener noreferrer"
             className="hover:text-foreground transition-colors"

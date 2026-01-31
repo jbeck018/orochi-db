@@ -307,12 +307,15 @@ orochi_auth_install_hooks(void)
      */
     if (process_shared_preload_libraries_in_progress)
     {
-        /* Request shared memory for auth cache */
+#if PG_VERSION_NUM < 150000
+        /* Pre-PG15: Request shared memory directly */
         RequestAddinShmemSpace(orochi_auth_shmem_size());
 
         /* Request LWLock tranche */
         RequestNamedLWLockTranche(OROCHI_AUTH_LWLOCK_TRANCHE_NAME,
                                   OROCHI_AUTH_LWLOCK_COUNT);
+#endif
+        /* Note: PG15+ shared memory is requested via main init.c shmem_request_hook */
 
         /* Install shared memory startup hook */
         prev_shmem_startup_hook = shmem_startup_hook;

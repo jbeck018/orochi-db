@@ -7,12 +7,14 @@ import {
   BarChart3,
   Layers,
   GitBranch,
+  Copy,
   ArrowRight,
   Check,
   ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import howleropsLogo from "@/src/assets/howlerops-icon.png";
 
 export const Route = createFileRoute("/landing")({
   component: LandingPage,
@@ -55,6 +57,12 @@ const features = [
     description:
       "Stream database changes to external systems in real-time with CDC support.",
   },
+  {
+    icon: Copy,
+    title: "Instant Database Branching",
+    description:
+      "Create instant copies of your database for development, testing, and staging in seconds using copy-on-write technology.",
+  },
 ];
 
 const useCases = [
@@ -84,13 +92,13 @@ function LandingPage(): React.JSX.Element {
       {/* Navigation */}
       <nav className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50">
         <div className="container mx-auto flex h-16 items-center justify-between px-4">
-          <Link to="/landing" className="flex items-center gap-2">
-            <Database className="h-8 w-8 text-primary" />
-            <span className="text-xl font-bold">Orochi Cloud</span>
+          <Link to="/" className="flex items-center gap-2">
+            <img src={howleropsLogo} alt="HowlerOps" className="h-10 w-10" />
+            <span className="text-xl font-bold">HowlerOps</span>
           </Link>
           <div className="hidden md:flex items-center gap-6">
             <Link
-              to="/landing"
+              to="/"
               className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
             >
               Features
@@ -125,18 +133,18 @@ function LandingPage(): React.JSX.Element {
           <div className="inline-flex items-center gap-2 rounded-full border px-4 py-1.5 text-sm mb-6">
             <span className="text-primary font-medium">New</span>
             <span className="text-muted-foreground">
-              PostgreSQL 17 support now available
+              Instant database branching now available
             </span>
             <ChevronRight className="h-4 w-4 text-muted-foreground" />
           </div>
           <h1 className="text-4xl md:text-6xl font-bold tracking-tight mb-6">
-            The PostgreSQL Database for{" "}
-            <span className="text-primary">Modern Workloads</span>
+            <span className="text-primary">OrochiDB</span> - PostgreSQL for{" "}
+            Modern Workloads
           </h1>
           <p className="text-xl text-muted-foreground mb-8 max-w-2xl">
-            Orochi Cloud combines OLTP and OLAP in a single PostgreSQL database.
+            OrochiDB combines OLTP and OLAP in a single PostgreSQL database.
             Automatic sharding, time-series optimization, columnar storage, and
-            vector search - all fully managed.
+            vector search - fully managed by HowlerOps.
           </p>
           <div className="flex flex-col sm:flex-row gap-4">
             <Button size="lg" asChild>
@@ -194,7 +202,7 @@ function LandingPage(): React.JSX.Element {
             </h2>
             <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
               Whether you need real-time analytics, time-series storage, or AI
-              capabilities, Orochi Cloud has you covered.
+              capabilities, OrochiDB has you covered.
             </p>
           </div>
           <div className="grid gap-8 md:grid-cols-3">
@@ -244,11 +252,12 @@ function LandingPage(): React.JSX.Element {
           <div className="grid gap-12 md:grid-cols-2 items-center">
             <div>
               <h2 className="text-3xl font-bold tracking-tight mb-6">
-                Why Choose Orochi Cloud?
+                Why Choose OrochiDB?
               </h2>
               <div className="space-y-4">
                 {[
                   "Full PostgreSQL compatibility - use your existing tools and queries",
+                  "Instant database branching for dev/test environments",
                   "Automatic scaling based on workload demands",
                   "Enterprise-grade security with encryption at rest and in transit",
                   "Multi-region deployments for global applications",
@@ -317,7 +326,7 @@ function LandingPage(): React.JSX.Element {
             Ready to Get Started?
           </h2>
           <p className="text-lg opacity-90 mb-8 max-w-2xl mx-auto">
-            Deploy your first Orochi Cloud cluster in minutes. Start with our
+            Deploy your first OrochiDB cluster in minutes. Start with our
             free tier and scale as you grow.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
@@ -345,18 +354,18 @@ function LandingPage(): React.JSX.Element {
           <div className="grid gap-8 md:grid-cols-4">
             <div>
               <div className="flex items-center gap-2 mb-4">
-                <Database className="h-6 w-6 text-primary" />
-                <span className="font-bold">Orochi Cloud</span>
+                <img src={howleropsLogo} alt="HowlerOps" className="h-8 w-8" />
+                <span className="font-bold">HowlerOps</span>
               </div>
               <p className="text-sm text-muted-foreground">
-                The PostgreSQL database platform for modern HTAP workloads.
+                OrochiDB - The PostgreSQL platform for modern HTAP workloads.
               </p>
             </div>
             <div>
               <h4 className="font-semibold mb-4">Product</h4>
               <ul className="space-y-2 text-sm text-muted-foreground">
                 <li>
-                  <Link to="/landing" className="hover:text-foreground">
+                  <Link to="/" className="hover:text-foreground">
                     Features
                   </Link>
                 </li>
@@ -409,7 +418,7 @@ function LandingPage(): React.JSX.Element {
             </div>
           </div>
           <div className="border-t mt-8 pt-8 text-center text-sm text-muted-foreground">
-            <p>&copy; {new Date().getFullYear()} Orochi Cloud. All rights reserved.</p>
+            <p>&copy; {new Date().getFullYear()} HowlerOps. All rights reserved.</p>
           </div>
         </div>
       </footer>

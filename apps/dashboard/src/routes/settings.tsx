@@ -40,7 +40,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { userApi, notificationApi, twoFactorApi, type TwoFactorSetup, type TwoFactorStatus } from "@/lib/api";
-import { getStoredUser, logout } from "@/lib/auth";
+import { getStoredUser, logout, setStoredUser } from "@/lib/auth";
 import type { User as UserType } from "@/types";
 
 export const Route = createFileRoute("/settings")({
@@ -83,6 +83,10 @@ function SettingsPage(): React.JSX.Element {
   const [backupCodes, setBackupCodes] = React.useState<string[]>([]);
   const [showBackupCodes, setShowBackupCodes] = React.useState(false);
   const [is2FALoading, setIs2FALoading] = React.useState(false);
+
+  // Avatar upload
+  const avatarInputRef = React.useRef<HTMLInputElement>(null);
+  const [isUploadingAvatar, setIsUploadingAvatar] = React.useState(false);
 
   React.useEffect(() => {
     const loadData = async (): Promise<void> => {
@@ -187,6 +191,53 @@ function SettingsPage(): React.JSX.Element {
       .join("")
       .toUpperCase()
       .slice(0, 2);
+  };
+
+  const handleAvatarChange = async (event: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Validate file size (2MB max)
+    const maxSize = 2 * 1024 * 1024; // 2MB
+    if (file.size > maxSize) {
+      toast({
+        title: "Error",
+        description: "File is too large. Maximum size is 2MB.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Validate file type
+    const allowedTypes = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+    if (!allowedTypes.includes(file.type)) {
+      toast({
+        title: "Error",
+        description: "Invalid file type. Allowed: JPG, PNG, GIF, WebP.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsUploadingAvatar(true);
+    try {
+      const response = await userApi.uploadAvatar(file);
+      setUser(response.data);
+      setStoredUser(response.data);
+      toast({ title: "Avatar updated" });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to upload avatar",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploadingAvatar(false);
+      // Reset file input
+      if (avatarInputRef.current) {
+        avatarInputRef.current.value = "";
+      }
+    }
   };
 
   const handleNotificationChange = async (
@@ -353,8 +404,27 @@ function SettingsPage(): React.JSX.Element {
                     </AvatarFallback>
                   </Avatar>
                   <div>
-                    <Button variant="outline" size="sm">
-                      Change Avatar
+                    <input
+                      ref={avatarInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/gif,image/webp"
+                      className="hidden"
+                      onChange={handleAvatarChange}
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => avatarInputRef.current?.click()}
+                      disabled={isUploadingAvatar}
+                    >
+                      {isUploadingAvatar ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Uploading...
+                        </>
+                      ) : (
+                        "Change Avatar"
+                      )}
                     </Button>
                     <p className="text-xs text-muted-foreground mt-1">
                       JPG, GIF or PNG. Max size 2MB.

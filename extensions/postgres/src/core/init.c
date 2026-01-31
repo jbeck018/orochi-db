@@ -35,6 +35,7 @@
 #include "../pipelines/pipeline.h"
 #include "../consensus/raft.h"
 #include "../consensus/raft_integration.h"
+/* Note: auth and workload modules are not currently compiled into the extension */
 
 /* Use PG_MODULE_MAGIC_EXT on PG18+ for name/version reporting */
 OROCHI_MODULE_MAGIC;
@@ -72,11 +73,37 @@ static ExecutorRun_hook_type prev_executor_run_hook = NULL;
 static ExecutorFinish_hook_type prev_executor_finish_hook = NULL;
 static ExecutorEnd_hook_type prev_executor_end_hook = NULL;
 
+/* Previous shmem_request_hook for PG15+ */
+#if PG_VERSION_NUM >= 150000
+static shmem_request_hook_type prev_shmem_request_hook = NULL;
+#endif
+
 /* Forward declarations */
 static void orochi_shmem_startup(void);
 static void orochi_register_background_workers(void);
 static void orochi_define_gucs(void);
 static Size orochi_memsize(void);
+
+#if PG_VERSION_NUM >= 150000
+/*
+ * orochi_shmem_request
+ *    Called during shmem_request_hook to request shared memory (PG15+)
+ */
+static void
+orochi_shmem_request(void)
+{
+    if (prev_shmem_request_hook)
+        prev_shmem_request_hook();
+
+    /* Request shared memory for core Orochi components */
+    RequestAddinShmemSpace(orochi_memsize());
+
+    /* Request LWLock tranches for compiled components */
+    RequestNamedLWLockTranche("orochi", 8);
+    RequestNamedLWLockTranche("orochi_pipeline", 2);
+    RequestNamedLWLockTranche("orochi_raft", 4);
+}
+#endif
 
 /*
  * _PG_init
@@ -94,15 +121,21 @@ _PG_init(void)
      */
     if (process_shared_preload_libraries_in_progress)
     {
-        /* Request shared memory */
+#if PG_VERSION_NUM >= 150000
+        /* PG15+: Use shmem_request_hook to request shared memory */
+        prev_shmem_request_hook = shmem_request_hook;
+        shmem_request_hook = orochi_shmem_request;
+#else
+        /* PG14 and earlier: Request shared memory directly */
         RequestAddinShmemSpace(orochi_memsize());
 
         /* Request LWLock tranches for all components */
         RequestNamedLWLockTranche("orochi", 8);
         RequestNamedLWLockTranche("orochi_pipeline", 2);
         RequestNamedLWLockTranche("orochi_raft", 4);
+#endif
 
-        /* Install shared memory hooks */
+        /* Install shared memory startup hooks */
         prev_shmem_startup_hook = shmem_startup_hook;
         shmem_startup_hook = orochi_shmem_startup;
 

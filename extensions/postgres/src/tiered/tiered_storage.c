@@ -166,7 +166,7 @@ url_encode(const char *str)
 }
 
 /* Generate AWS Signature V4 */
-static char *
+char *
 generate_aws_signature_v4(S3Client *client, const char *method,
                           const char *uri, const char *query_string,
                           const char *payload, size_t payload_len,

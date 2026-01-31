@@ -1688,6 +1688,108 @@ orochi_catalog_update_tiering_policy(OrochiTieringPolicy *policy)
     orochi_catalog_create_tiering_policy(policy);
 }
 
+OrochiTieringPolicy *
+orochi_catalog_get_tiering_policy(Oid table_oid)
+{
+    StringInfoData query;
+    OrochiTieringPolicy *policy = NULL;
+    int ret;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "SELECT policy_id, table_oid, "
+        "EXTRACT(EPOCH FROM hot_to_warm)::bigint, "
+        "EXTRACT(EPOCH FROM warm_to_cold)::bigint, "
+        "EXTRACT(EPOCH FROM cold_to_frozen)::bigint, "
+        "compress_on_tier, enabled "
+        "FROM orochi.orochi_tiering_policies "
+        "WHERE table_oid = %u",
+        table_oid);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 1);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0)
+    {
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        bool isnull;
+
+        policy = palloc0(sizeof(OrochiTieringPolicy));
+        policy->policy_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+        policy->table_oid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 2, &isnull));
+
+        int64 hot_secs = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 3, &isnull));
+        int64 warm_secs = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 4, &isnull));
+        int64 cold_secs = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 5, &isnull));
+
+        policy->hot_to_warm = palloc0(sizeof(Interval));
+        policy->hot_to_warm->time = hot_secs * USECS_PER_SEC;
+        policy->warm_to_cold = palloc0(sizeof(Interval));
+        policy->warm_to_cold->time = warm_secs * USECS_PER_SEC;
+        policy->cold_to_frozen = palloc0(sizeof(Interval));
+        policy->cold_to_frozen->time = cold_secs * USECS_PER_SEC;
+
+        policy->compress_on_tier = DatumGetBool(SPI_getbinval(tuple, tupdesc, 6, &isnull));
+        policy->enabled = DatumGetBool(SPI_getbinval(tuple, tupdesc, 7, &isnull));
+    }
+
+    SPI_finish();
+    pfree(query.data);
+    return policy;
+}
+
+List *
+orochi_catalog_get_active_tiering_policies(void)
+{
+    List *policies = NIL;
+    int ret;
+
+    SPI_connect();
+    ret = SPI_execute(
+        "SELECT policy_id, table_oid, "
+        "EXTRACT(EPOCH FROM hot_to_warm)::bigint, "
+        "EXTRACT(EPOCH FROM warm_to_cold)::bigint, "
+        "EXTRACT(EPOCH FROM cold_to_frozen)::bigint, "
+        "compress_on_tier, enabled "
+        "FROM orochi.orochi_tiering_policies "
+        "WHERE enabled = true",
+        true, 0);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0)
+    {
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        for (uint64 i = 0; i < SPI_processed; i++)
+        {
+            HeapTuple tuple = SPI_tuptable->vals[i];
+            bool isnull;
+            OrochiTieringPolicy *policy = palloc0(sizeof(OrochiTieringPolicy));
+
+            policy->policy_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+            policy->table_oid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 2, &isnull));
+            /* Convert seconds back to Interval (simplified - just store seconds) */
+            int64 hot_secs = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 3, &isnull));
+            int64 warm_secs = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 4, &isnull));
+            int64 cold_secs = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 5, &isnull));
+
+            policy->hot_to_warm = palloc0(sizeof(Interval));
+            policy->hot_to_warm->time = hot_secs * USECS_PER_SEC;
+            policy->warm_to_cold = palloc0(sizeof(Interval));
+            policy->warm_to_cold->time = warm_secs * USECS_PER_SEC;
+            policy->cold_to_frozen = palloc0(sizeof(Interval));
+            policy->cold_to_frozen->time = cold_secs * USECS_PER_SEC;
+
+            policy->compress_on_tier = DatumGetBool(SPI_getbinval(tuple, tupdesc, 6, &isnull));
+            policy->enabled = DatumGetBool(SPI_getbinval(tuple, tupdesc, 7, &isnull));
+
+            policies = lappend(policies, policy);
+        }
+    }
+
+    SPI_finish();
+    return policies;
+}
+
 void
 orochi_catalog_execute(const char *sql_query)
 {
@@ -1963,4 +2065,227 @@ orochi_catalog_get_table_stripes(Oid table_oid)
     pfree(query.data);
 
     return stripes;
+}
+
+/* ============================================================
+ * Missing catalog function implementations (stubs/minimal)
+ * ============================================================ */
+
+OrochiTableInfo *
+orochi_catalog_get_table_by_name(const char *schema, const char *table)
+{
+    StringInfoData query;
+    OrochiTableInfo *info = NULL;
+    int ret;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "SELECT table_oid FROM orochi.orochi_tables t "
+        "JOIN pg_class c ON t.table_oid = c.oid "
+        "JOIN pg_namespace n ON c.relnamespace = n.oid "
+        "WHERE n.nspname = '%s' AND c.relname = '%s'",
+        schema, table);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 1);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0)
+    {
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        bool isnull;
+        Oid table_oid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+        SPI_finish();
+        pfree(query.data);
+        return orochi_catalog_get_table(table_oid);
+    }
+
+    SPI_finish();
+    pfree(query.data);
+    return info;
+}
+
+List *
+orochi_catalog_list_tables(void)
+{
+    List *tables = NIL;
+    int ret;
+
+    SPI_connect();
+    ret = SPI_execute(
+        "SELECT table_oid FROM orochi.orochi_tables",
+        true, 0);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0)
+    {
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        for (uint64 i = 0; i < SPI_processed; i++)
+        {
+            HeapTuple tuple = SPI_tuptable->vals[i];
+            bool isnull;
+            Oid table_oid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+            OrochiTableInfo *info = orochi_catalog_get_table(table_oid);
+            if (info)
+                tables = lappend(tables, info);
+        }
+    }
+
+    SPI_finish();
+    return tables;
+}
+
+List *
+orochi_catalog_get_hypertable_chunks(Oid hypertable_oid)
+{
+    /* Reuse the existing get_chunks_in_range with full time range */
+    return orochi_catalog_get_chunks_in_range(hypertable_oid,
+                                               DT_NOBEGIN,
+                                               DT_NOEND);
+}
+
+List *
+orochi_catalog_get_nodes_by_role(OrochiNodeRole role)
+{
+    List *nodes = NIL;
+    StringInfoData query;
+    int ret;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "SELECT node_id FROM orochi.orochi_nodes WHERE role = %d AND is_active = true",
+        (int)role);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 0);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0)
+    {
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        for (uint64 i = 0; i < SPI_processed; i++)
+        {
+            HeapTuple tuple = SPI_tuptable->vals[i];
+            bool isnull;
+            int32 node_id = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+            OrochiNodeInfo *info = orochi_catalog_get_node(node_id);
+            if (info)
+                nodes = lappend(nodes, info);
+        }
+    }
+
+    SPI_finish();
+    pfree(query.data);
+    return nodes;
+}
+
+OrochiStripeInfo *
+orochi_catalog_get_stripe(int64 stripe_id)
+{
+    StringInfoData query;
+    OrochiStripeInfo *info = NULL;
+    int ret;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "SELECT stripe_id, table_oid, first_row_number, row_count, column_count, "
+        "data_size, metadata_size, compression, is_flushed "
+        "FROM orochi.orochi_stripes WHERE stripe_id = %ld",
+        stripe_id);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 1);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0)
+    {
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        bool isnull;
+
+        info = palloc0(sizeof(OrochiStripeInfo));
+        info->stripe_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+        info->table_oid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 2, &isnull));
+        info->first_row = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 3, &isnull));
+        info->row_count = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 4, &isnull));
+        info->column_count = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 5, &isnull));
+        info->data_size = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 6, &isnull));
+        info->metadata_size = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 7, &isnull));
+        info->compression = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 8, &isnull));
+        info->is_flushed = DatumGetBool(SPI_getbinval(tuple, tupdesc, 9, &isnull));
+    }
+
+    SPI_finish();
+    pfree(query.data);
+    return info;
+}
+
+OrochiVectorIndex *
+orochi_catalog_get_vector_index(Oid index_oid)
+{
+    StringInfoData query;
+    OrochiVectorIndex *info = NULL;
+    int ret;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "SELECT index_oid, table_oid, vector_column, dimensions, lists, probes, "
+        "distance_type, index_type "
+        "FROM orochi.orochi_vector_indexes WHERE index_oid = %u",
+        index_oid);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 1);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0)
+    {
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        bool isnull;
+
+        info = palloc0(sizeof(OrochiVectorIndex));
+        info->index_oid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+        info->table_oid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 2, &isnull));
+        info->vector_column = DatumGetInt16(SPI_getbinval(tuple, tupdesc, 3, &isnull));
+        info->dimensions = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 4, &isnull));
+        info->lists = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 5, &isnull));
+        info->probes = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 6, &isnull));
+        info->distance_type = pstrdup(TextDatumGetCString(SPI_getbinval(tuple, tupdesc, 7, &isnull)));
+        info->index_type = pstrdup(TextDatumGetCString(SPI_getbinval(tuple, tupdesc, 8, &isnull)));
+    }
+
+    SPI_finish();
+    pfree(query.data);
+    return info;
+}
+
+List *
+orochi_catalog_get_table_vector_indexes(Oid table_oid)
+{
+    List *indexes = NIL;
+    StringInfoData query;
+    int ret;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "SELECT index_oid FROM orochi.orochi_vector_indexes WHERE table_oid = %u",
+        table_oid);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 0);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0)
+    {
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        for (uint64 i = 0; i < SPI_processed; i++)
+        {
+            HeapTuple tuple = SPI_tuptable->vals[i];
+            bool isnull;
+            Oid index_oid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+            OrochiVectorIndex *info = orochi_catalog_get_vector_index(index_oid);
+            if (info)
+                indexes = lappend(indexes, info);
+        }
+    }
+
+    SPI_finish();
+    pfree(query.data);
+    return indexes;
 }

@@ -689,88 +689,10 @@ CREATE INDEX IF NOT EXISTS idx_chunk_access_last_write ON orochi.orochi_chunk_ac
 -- ============================================================
 -- Information Views
 -- ============================================================
-
-CREATE VIEW orochi.tables AS
-SELECT
-    table_oid,
-    schema_name,
-    table_name,
-    CASE storage_type
-        WHEN 0 THEN 'row'
-        WHEN 1 THEN 'columnar'
-        WHEN 2 THEN 'hybrid'
-        WHEN 3 THEN 'vector'
-    END as storage_type,
-    CASE shard_strategy
-        WHEN 0 THEN 'hash'
-        WHEN 1 THEN 'range'
-        WHEN 2 THEN 'list'
-        WHEN 3 THEN 'composite'
-        WHEN 4 THEN 'reference'
-    END as shard_strategy,
-    shard_count,
-    distribution_column,
-    is_distributed,
-    is_timeseries,
-    time_column
-FROM orochi.orochi_tables;
-
-CREATE VIEW orochi.shards AS
-SELECT
-    s.shard_id,
-    t.schema_name || '.' || t.table_name as table_name,
-    s.shard_index,
-    s.hash_min,
-    s.hash_max,
-    n.hostname || ':' || n.port as node,
-    s.row_count,
-    pg_size_pretty(s.size_bytes) as size,
-    CASE s.storage_tier
-        WHEN 0 THEN 'hot'
-        WHEN 1 THEN 'warm'
-        WHEN 2 THEN 'cold'
-        WHEN 3 THEN 'frozen'
-    END as tier,
-    s.last_accessed
-FROM orochi.orochi_shards s
-JOIN orochi.orochi_tables t ON s.table_oid = t.table_oid
-LEFT JOIN orochi.orochi_nodes n ON s.node_id = n.node_id;
-
-CREATE VIEW orochi.chunks AS
-SELECT
-    c.chunk_id,
-    t.schema_name || '.' || t.table_name as hypertable,
-    c.range_start,
-    c.range_end,
-    c.row_count,
-    pg_size_pretty(c.size_bytes) as size,
-    c.is_compressed,
-    CASE c.storage_tier
-        WHEN 0 THEN 'hot'
-        WHEN 1 THEN 'warm'
-        WHEN 2 THEN 'cold'
-        WHEN 3 THEN 'frozen'
-    END as tier
-FROM orochi.orochi_chunks c
-JOIN orochi.orochi_tables t ON c.hypertable_oid = t.table_oid;
-
-CREATE VIEW orochi.nodes AS
-SELECT
-    node_id,
-    hostname,
-    port,
-    CASE role
-        WHEN 0 THEN 'coordinator'
-        WHEN 1 THEN 'worker'
-        WHEN 2 THEN 'replica'
-    END as role,
-    is_active,
-    shard_count,
-    pg_size_pretty(total_size) as total_size,
-    round(cpu_usage::numeric, 2) as cpu_usage,
-    round(memory_usage::numeric, 2) as memory_usage,
-    last_heartbeat
-FROM orochi.orochi_nodes;
+-- Note: Views referencing internal catalog tables (orochi.orochi_*)
+-- are created dynamically by orochi_init_catalogs() after the underlying
+-- tables are created. The tables, shards, chunks, and nodes views
+-- will be available after SELECT orochi.init() is called.
 
 -- ============================================================
 -- Utility Functions
@@ -920,23 +842,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- View for continuous aggregates information
-CREATE VIEW orochi.continuous_aggregates AS
-SELECT
-    ca.agg_id,
-    ca.view_oid,
-    v.relname as view_name,
-    ns.nspname as view_schema,
-    t.schema_name || '.' || t.table_name as source_hypertable,
-    ca.materialization_table_oid,
-    ca.query_text,
-    ca.refresh_interval,
-    ca.last_refresh,
-    ca.enabled
-FROM orochi.orochi_continuous_aggregates ca
-JOIN pg_class v ON ca.view_oid = v.oid
-JOIN pg_namespace ns ON v.relnamespace = ns.oid
-LEFT JOIN orochi.orochi_tables t ON ca.source_table_oid = t.table_oid;
+-- Note: continuous_aggregates view is created dynamically by orochi_init_catalogs()
+-- after the underlying orochi_continuous_aggregates table is created
 
 -- ============================================================
 -- Shard Rebalancing Functions
@@ -1015,48 +922,8 @@ RETURNS text
     AS 'MODULE_PATHNAME', 'orochi_get_rebalance_plan_sql'
     LANGUAGE C STRICT;
 
--- View showing shard distribution across nodes
-CREATE VIEW orochi.shard_distribution AS
-SELECT
-    n.node_id,
-    n.hostname,
-    n.port,
-    CASE n.role
-        WHEN 0 THEN 'coordinator'
-        WHEN 1 THEN 'worker'
-        WHEN 2 THEN 'replica'
-    END as role,
-    n.is_active,
-    COUNT(s.shard_id) as shard_count,
-    COALESCE(SUM(s.size_bytes), 0) as total_size_bytes,
-    COALESCE(SUM(s.row_count), 0) as total_row_count
-FROM orochi.orochi_nodes n
-LEFT JOIN orochi.orochi_shards s ON n.node_id = s.node_id
-GROUP BY n.node_id, n.hostname, n.port, n.role, n.is_active
-ORDER BY n.node_id;
-
--- View showing detailed shard placements
-CREATE VIEW orochi.shard_placements AS
-SELECT
-    s.shard_id,
-    t.schema_name || '.' || t.table_name as table_name,
-    s.shard_index,
-    s.hash_min,
-    s.hash_max,
-    s.node_id,
-    n.hostname as node_hostname,
-    s.row_count,
-    s.size_bytes,
-    CASE s.storage_tier
-        WHEN 0 THEN 'hot'
-        WHEN 1 THEN 'warm'
-        WHEN 2 THEN 'cold'
-        WHEN 3 THEN 'frozen'
-    END as storage_tier
-FROM orochi.orochi_shards s
-JOIN orochi.orochi_tables t ON s.table_oid = t.table_oid
-LEFT JOIN orochi.orochi_nodes n ON s.node_id = n.node_id
-ORDER BY t.table_name, s.shard_index;
+-- Note: shard_distribution and shard_placements views are created dynamically
+-- by orochi_init_catalogs() after the underlying catalog tables are created.
 
 -- ============================================================
 -- Raft Consensus Functions
@@ -1219,22 +1086,7 @@ RETURNS boolean
     AS 'MODULE_PATHNAME', 'orochi_raft_create_snapshot_sql'
     LANGUAGE C STRICT;
 
--- View for Raft cluster members
-CREATE VIEW orochi.raft_cluster AS
-SELECT
-    node_id,
-    hostname,
-    port,
-    CASE role
-        WHEN 0 THEN 'coordinator'
-        WHEN 1 THEN 'worker'
-        WHEN 2 THEN 'replica'
-    END as role,
-    is_active,
-    last_heartbeat
-FROM orochi.orochi_nodes
-WHERE role IN (0, 1, 2)  -- Only show Raft-participating nodes
-ORDER BY node_id;
+-- Note: raft_cluster view is created dynamically after orochi_nodes table exists
 
 -- ============================================================
 -- JSON Indexing and Semi-Structured Data Support
@@ -1539,7 +1391,8 @@ CREATE FUNCTION orochi._json_enable_hybrid(
 -- ============================================================
 
 -- Execute an optimized JSON query
-CREATE FUNCTION json_query(
+-- Note: Named 'jsonb_query' to avoid conflict with SQL/JSON JSON_QUERY in PG17+
+CREATE FUNCTION jsonb_query(
     table_name regclass,
     json_column text,
     query_expr text
@@ -1557,14 +1410,14 @@ CREATE FUNCTION orochi._json_query(
 
 -- Batch extract a path from an array of JSONB values
 CREATE FUNCTION json_extract_batch(
-    values jsonb[],
+    json_values jsonb[],
     path text
 ) RETURNS text[]
     AS 'MODULE_PATHNAME', 'orochi_json_extract_batch'
     LANGUAGE C STRICT PARALLEL SAFE;
 
 -- Explain a JSON query plan
-CREATE FUNCTION json_query_explain(
+CREATE FUNCTION jsonb_query_explain(
     table_name regclass,
     json_column text,
     query_expr text
@@ -1581,7 +1434,7 @@ CREATE FUNCTION orochi._json_query_explain(
     LANGUAGE C STRICT;
 
 -- Get JSON query statistics for a column
-CREATE FUNCTION json_query_stats(
+CREATE FUNCTION jsonb_query_stats(
     table_name regclass,
     json_column text
 ) RETURNS TABLE(
@@ -1604,69 +1457,8 @@ CREATE FUNCTION orochi._json_query_stats(
 -- ============================================================
 -- JSON Views
 -- ============================================================
-
--- View for JSON path statistics
-CREATE VIEW orochi.json_paths AS
-SELECT
-    t.schema_name || '.' || t.table_name as table_name,
-    a.attname as column_name,
-    s.path,
-    CASE s.value_type
-        WHEN 0 THEN 'null'
-        WHEN 1 THEN 'string'
-        WHEN 2 THEN 'number'
-        WHEN 3 THEN 'boolean'
-        WHEN 4 THEN 'array'
-        WHEN 5 THEN 'object'
-        WHEN 6 THEN 'mixed'
-    END as value_type,
-    s.access_count,
-    s.distinct_count,
-    round(s.selectivity::numeric, 4) as selectivity,
-    s.is_indexed,
-    CASE s.recommended_index
-        WHEN 0 THEN 'gin'
-        WHEN 1 THEN 'btree'
-        WHEN 2 THEN 'hash'
-        WHEN 3 THEN 'expression'
-        WHEN 4 THEN 'partial'
-    END as recommended_index,
-    s.last_accessed
-FROM orochi.orochi_json_path_stats s
-JOIN orochi.orochi_tables t ON s.table_oid = t.table_oid
-JOIN pg_attribute a ON s.table_oid = a.attrelid AND s.column_attnum = a.attnum
-ORDER BY s.access_count DESC;
-
--- View for extracted JSON columns
-CREATE VIEW orochi.json_columns AS
-SELECT
-    t.schema_name || '.' || t.table_name as table_name,
-    a.attname as source_column,
-    c.column_id,
-    c.path,
-    format_type(c.target_type, NULL) as target_type,
-    CASE c.storage_type
-        WHEN 0 THEN 'inline'
-        WHEN 1 THEN 'dictionary'
-        WHEN 2 THEN 'delta'
-        WHEN 3 THEN 'rle'
-        WHEN 4 THEN 'raw'
-    END as storage_type,
-    c.row_count,
-    c.null_count,
-    pg_size_pretty(c.storage_size) as storage_size,
-    round(c.compression_ratio::numeric, 2) as compression_ratio,
-    CASE c.state
-        WHEN 0 THEN 'active'
-        WHEN 1 THEN 'stale'
-        WHEN 2 THEN 'deprecated'
-    END as state,
-    c.created_at,
-    c.last_refreshed
-FROM orochi.orochi_json_columns c
-JOIN orochi.orochi_tables t ON c.table_oid = t.table_oid
-JOIN pg_attribute a ON c.table_oid = a.attrelid AND c.source_attnum = a.attnum
-ORDER BY c.table_oid, c.path;
+-- Note: json_paths and json_columns views are created dynamically
+-- after orochi_tables catalog table exists.
 
 -- ============================================================
 -- Authentication Audit Logging Tables
@@ -1947,62 +1739,11 @@ $$ LANGUAGE plpgsql;
 -- ============================================================
 
 /*
- * View for recent authentication events (last 24 hours)
+ * Note: Auth audit views are created dynamically after orochi.init() is called,
+ * since they depend on the orochi_auth_audit_log table created by C code.
+ *
+ * Views that will be available after initialization:
+ * - orochi.auth_audit_recent: Recent authentication events (last 24 hours)
+ * - orochi.auth_audit_failures: Failed authentication attempts
+ * - orochi.auth_audit_suspicious: Suspicious activity alerts
  */
-CREATE VIEW orochi.auth_audit_recent AS
-SELECT
-    audit_id,
-    tenant_id,
-    user_id,
-    session_id,
-    event_type,
-    event_name,
-    ip_address,
-    CASE
-        WHEN length(user_agent) > 50 THEN substring(user_agent, 1, 50) || '...'
-        ELSE user_agent
-    END as user_agent_short,
-    resource_type,
-    resource_id,
-    created_at
-FROM orochi.orochi_auth_audit_log
-WHERE created_at >= NOW() - INTERVAL '24 hours'
-ORDER BY created_at DESC;
-
-/*
- * View for failed authentication attempts (security monitoring)
- */
-CREATE VIEW orochi.auth_audit_failures AS
-SELECT
-    audit_id,
-    tenant_id,
-    user_id,
-    ip_address,
-    event_name,
-    user_agent,
-    created_at
-FROM orochi.orochi_auth_audit_log
-WHERE event_type IN (1, 10, 18, 19)  -- LOGIN_FAILED, MFA_FAILED, PERMISSION_DENIED, RATE_LIMITED
-ORDER BY created_at DESC;
-
-/*
- * View for suspicious activity alerts
- */
-CREATE VIEW orochi.auth_audit_suspicious AS
-SELECT
-    tenant_id,
-    user_id,
-    ip_address,
-    COUNT(*) FILTER (WHERE event_type = 1) as failed_logins,
-    COUNT(*) FILTER (WHERE event_type = 10) as failed_mfa,
-    COUNT(*) FILTER (WHERE event_type = 18) as permission_denied,
-    COUNT(*) FILTER (WHERE event_type = 19) as rate_limited,
-    COUNT(*) as total_failures,
-    MIN(created_at) as first_seen,
-    MAX(created_at) as last_seen
-FROM orochi.orochi_auth_audit_log
-WHERE event_type IN (1, 10, 18, 19, 20)  -- All failure/suspicious events
-  AND created_at >= NOW() - INTERVAL '1 hour'
-GROUP BY tenant_id, user_id, ip_address
-HAVING COUNT(*) >= 5  -- Threshold for suspicious activity
-ORDER BY total_failures DESC;

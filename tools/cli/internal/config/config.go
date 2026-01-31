@@ -1,4 +1,4 @@
-// Package config provides configuration management for the Orochi Cloud CLI.
+// Package config provides configuration management for the HowlerOps CLI (OrochiDB).
 package config
 
 import (
@@ -15,8 +15,8 @@ import (
 var configMu sync.RWMutex
 
 const (
-	// DefaultAPIEndpoint is the default Orochi Cloud API endpoint.
-	DefaultAPIEndpoint = "https://api.orochi.cloud"
+	// DefaultAPIEndpoint is the default HowlerOps API endpoint.
+	DefaultAPIEndpoint = "https://api.howlerops.com"
 
 	// ConfigFileName is the name of the configuration file.
 	ConfigFileName = "config"
@@ -248,4 +248,26 @@ func GetOutputFormat() string {
 		return "table"
 	}
 	return format
+}
+
+// GetOrganization returns the current organization slug.
+func GetOrganization() string {
+	configMu.RLock()
+	defer configMu.RUnlock()
+
+	return viper.GetString("organization")
+}
+
+// SetOrganization sets the current organization slug.
+func SetOrganization(slug string) error {
+	path, err := configPath()
+	if err != nil {
+		return err
+	}
+
+	configMu.Lock()
+	defer configMu.Unlock()
+
+	viper.Set("organization", slug)
+	return saveConfigLocked(path)
 }

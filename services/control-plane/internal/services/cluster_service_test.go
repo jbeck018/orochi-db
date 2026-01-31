@@ -115,7 +115,7 @@ func TestClusterLifecycle_Create_Get_Delete(t *testing.T) {
 	defer cleanupTestUser(ctx, userID)
 
 	// Create cluster service
-	svc := services.NewClusterService(testDB, logger)
+	svc := services.NewClusterService(testDB, logger, nil)
 
 	// Test: Create cluster
 	t.Run("CreateCluster", func(t *testing.T) {
@@ -218,7 +218,7 @@ func TestClusterIsolation(t *testing.T) {
 	defer cleanupTestUser(ctx, user1ID)
 	defer cleanupTestUser(ctx, user2ID)
 
-	svc := services.NewClusterService(testDB, logger)
+	svc := services.NewClusterService(testDB, logger, nil)
 
 	// User 1 creates a cluster
 	req := &models.ClusterCreateRequest{
@@ -289,7 +289,7 @@ func TestClusterPoolerConfiguration(t *testing.T) {
 	userID := createTestUser(t, ctx, userEmail)
 	defer cleanupTestUser(ctx, userID)
 
-	svc := services.NewClusterService(testDB, logger)
+	svc := services.NewClusterService(testDB, logger, nil)
 
 	// Test: Production tier should have pooler enabled by default
 	t.Run("ProductionTierPoolerEnabled", func(t *testing.T) {
@@ -381,7 +381,7 @@ func TestClusterOrganizationIsolation(t *testing.T) {
 		testDB.Pool.Exec(ctx, "DELETE FROM organizations WHERE id = $1", orgID)
 	}()
 
-	svc := services.NewClusterService(testDB, logger)
+	svc := services.NewClusterService(testDB, logger, nil)
 
 	// Test: Create cluster with organization
 	t.Run("CreateWithOrganization", func(t *testing.T) {
@@ -430,7 +430,7 @@ func TestClusterTieringConfiguration(t *testing.T) {
 	userID := createTestUser(t, ctx, userEmail)
 	defer cleanupTestUser(ctx, userID)
 
-	svc := services.NewClusterService(testDB, logger)
+	svc := services.NewClusterService(testDB, logger, nil)
 
 	t.Run("CreateWithTiering", func(t *testing.T) {
 		req := &models.ClusterCreateRequest{
@@ -628,7 +628,7 @@ func TestClusterValidationErrors(t *testing.T) {
 	userID := createTestUser(t, ctx, userEmail)
 	defer cleanupTestUser(ctx, userID)
 
-	svc := services.NewClusterService(testDB, logger)
+	svc := services.NewClusterService(testDB, logger, nil)
 
 	t.Run("TieringEnabledWithoutHotDuration", func(t *testing.T) {
 		req := &models.ClusterCreateRequest{
@@ -749,7 +749,7 @@ func TestClusterUpdatePreservesTiering(t *testing.T) {
 	userID := createTestUser(t, ctx, userEmail)
 	defer cleanupTestUser(ctx, userID)
 
-	svc := services.NewClusterService(testDB, logger)
+	svc := services.NewClusterService(testDB, logger, nil)
 
 	// Create cluster with tiering
 	req := &models.ClusterCreateRequest{
@@ -839,7 +839,7 @@ func TestClusterShardCountConfiguration(t *testing.T) {
 	userID := createTestUser(t, ctx, userEmail)
 	defer cleanupTestUser(ctx, userID)
 
-	svc := services.NewClusterService(testDB, logger)
+	svc := services.NewClusterService(testDB, logger, nil)
 
 	tests := []struct {
 		name               string

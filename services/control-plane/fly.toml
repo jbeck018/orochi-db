@@ -1,7 +1,7 @@
-# Fly.io Configuration for Orochi Control Plane
+# Fly.io Configuration for HowlerOps Control Plane
 # Deploy with: fly deploy
 
-app = "orochi-control-plane"
+app = "howlerops-control-plane"
 primary_region = "sjc"
 
 [build]
@@ -12,16 +12,16 @@ primary_region = "sjc"
   SERVER_PORT = "8080"
   GRPC_HOST = "0.0.0.0"
   GRPC_PORT = "9090"
-  JWT_ISSUER = "orochi-cloud"
+  JWT_ISSUER = "howlerops"
   DB_SSL_MODE = "require"
-  ALLOWED_ORIGINS = "https://orochi-dashboard.fly.dev,http://localhost:3000,http://localhost:5173"
+  ALLOWED_ORIGINS = "https://dashboard.howlerops.com,https://howlerops.com,http://localhost:3000,http://localhost:5173"
 
 [http_service]
   internal_port = 8080
   force_https = true
   auto_stop_machines = "suspend"
   auto_start_machines = true
-  min_machines_running = 1
+  min_machines_running = 0
   max_machines_running = 5
   processes = ["app"]
 

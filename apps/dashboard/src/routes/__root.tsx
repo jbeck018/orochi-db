@@ -23,14 +23,18 @@ export const Route = createRootRoute({
       {
         name: "description",
         content:
-          "Managed PostgreSQL HTAP database platform with automatic sharding, time-series optimization, and columnar storage.",
+          "HowlerOps - Managed OrochiDB PostgreSQL HTAP platform with automatic sharding, time-series optimization, and columnar storage.",
       },
       {
         name: "keywords",
-        content: "PostgreSQL, HTAP, database, cloud, managed",
+        content: "PostgreSQL, HTAP, database, cloud, managed, OrochiDB, HowlerOps",
       },
     ],
-    title: "Orochi Cloud - PostgreSQL HTAP Platform",
+    links: [
+      { rel: "icon", type: "image/png", href: "/favicon.png" },
+      { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
+    ],
+    title: "HowlerOps - OrochiDB PostgreSQL HTAP Platform",
   }),
 });
 

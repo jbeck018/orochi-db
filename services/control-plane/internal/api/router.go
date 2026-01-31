@@ -118,6 +118,7 @@ func NewRouter(cfg *RouterConfig) *chi.Mux {
 	inviteHandler := handlers.NewInviteHandler(cfg.InviteService, cfg.OrganizationService, cfg.Logger)
 	dataBrowserHandler := handlers.NewDataBrowserHandler(cfg.DataBrowserService, cfg.ClusterService, cfg.Logger)
 	clusterSettingsHandler := handlers.NewClusterSettingsHandler(cfg.ClusterSettingsService, cfg.ClusterService, cfg.Logger)
+	branchHandler := handlers.NewBranchHandler(cfg.ClusterService, cfg.Logger)
 
 	// Create auth middleware
 	authMiddleware := middleware.NewAuthMiddleware(cfg.JWTManager, cfg.UserService)
@@ -200,6 +201,18 @@ func NewRouter(cfg *RouterConfig) *chi.Mux {
 					r.Get("/recommendations", clusterSettingsHandler.GetRecommendations)
 					r.Post("/recommendations/{recId}/dismiss", clusterSettingsHandler.DismissRecommendation)
 					r.Post("/recommendations/{recId}/apply", clusterSettingsHandler.ApplyRecommendation)
+
+					// Branch routes (instant database cloning)
+					r.Route("/branches", func(r chi.Router) {
+						r.Get("/", branchHandler.List)
+						r.Post("/", branchHandler.Create)
+
+						r.Route("/{branchId}", func(r chi.Router) {
+							r.Get("/", branchHandler.Get)
+							r.Delete("/", branchHandler.Delete)
+							r.Post("/promote", branchHandler.Promote)
+						})
+					})
 				})
 			})
 
@@ -230,6 +243,12 @@ func NewRouter(cfg *RouterConfig) *chi.Mux {
 			r.Route("/invites", func(r chi.Router) {
 				r.Get("/me", inviteHandler.ListMyInvites)
 				r.Post("/{token}/accept", inviteHandler.AcceptInvite)
+			})
+
+			// User profile routes
+			r.Route("/users/me", func(r chi.Router) {
+				r.Post("/avatar", authHandler.UploadAvatar)
+				r.Delete("/avatar", authHandler.DeleteAvatar)
 			})
 		})
 

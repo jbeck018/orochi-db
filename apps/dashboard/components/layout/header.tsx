@@ -4,7 +4,6 @@ import * as React from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useTheme } from "@/components/layout/theme-provider";
 import {
-  Database,
   Moon,
   Sun,
   LogOut,
@@ -12,6 +11,7 @@ import {
   User,
   Menu,
 } from "lucide-react";
+import howleropsLogo from "@/src/assets/howlerops-icon.png";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -68,9 +68,9 @@ export function Header({ onMenuClick }: HeaderProps): React.JSX.Element {
         </Button>
 
         <Link to="/" className="flex items-center space-x-2">
-          <Database className="h-6 w-6 text-primary" />
+          <img src={howleropsLogo} alt="HowlerOps" className="h-8 w-8" />
           <span className="font-bold text-xl hidden sm:inline-block">
-            Orochi Cloud
+            HowlerOps
           </span>
         </Link>
 

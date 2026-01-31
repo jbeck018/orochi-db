@@ -789,3 +789,34 @@ export interface TableDataRequest {
   orderBy?: string;
   orderDir?: "ASC" | "DESC";
 }
+
+// Database Branch Types
+export type BranchMethod = "volumeSnapshot" | "clone" | "pg_basebackup" | "pitr";
+export type BranchStatus = "creating" | "ready" | "failed" | "deleting" | "promoting";
+
+export interface Branch {
+  id: string;
+  name: string;
+  parentClusterId: string;
+  parentCluster: string;
+  status: BranchStatus;
+  method: BranchMethod;
+  connectionString?: string;
+  poolerConnection?: string;
+  createdAt: string;
+  labels?: Record<string, string>;
+}
+
+export interface CreateBranchForm {
+  name: string;
+  method?: BranchMethod;
+  pointInTime?: string;
+  lsn?: string;
+  instances?: number;
+  inherit?: boolean;
+}
+
+export interface BranchListResponse {
+  branches: Branch[];
+  totalCount: number;
+}

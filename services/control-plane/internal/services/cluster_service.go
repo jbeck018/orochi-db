@@ -10,21 +10,25 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	pb "github.com/orochi-db/orochi-db/services/control-plane/api/proto"
 	"github.com/orochi-db/orochi-db/services/control-plane/internal/db"
 	"github.com/orochi-db/orochi-db/services/control-plane/internal/models"
+	"github.com/orochi-db/orochi-db/services/control-plane/internal/provisioner"
 )
 
 // ClusterService handles cluster-related business logic.
 type ClusterService struct {
-	db     *db.DB
-	logger *slog.Logger
+	db          *db.DB
+	logger      *slog.Logger
+	provisioner *provisioner.Client
 }
 
 // NewClusterService creates a new cluster service.
-func NewClusterService(db *db.DB, logger *slog.Logger) *ClusterService {
+func NewClusterService(db *db.DB, logger *slog.Logger, provisionerClient *provisioner.Client) *ClusterService {
 	return &ClusterService{
-		db:     db,
-		logger: logger.With("service", "cluster"),
+		db:          db,
+		logger:      logger.With("service", "cluster"),
+		provisioner: provisionerClient,
 	}
 }
 
@@ -1013,37 +1017,12 @@ func (s *ClusterService) ScaleWithOwnerCheck(ctx context.Context, id, userID uui
 	return cluster, nil
 }
 
-// startProvisioning simulates the provisioning process.
-// In production, this would interact with cloud providers.
+// startProvisioning initiates the provisioning process.
+// Uses the real provisioner gRPC service when enabled, otherwise falls back to simulation.
 func (s *ClusterService) startProvisioning(ctx context.Context, clusterID uuid.UUID) {
 	s.logger.Info("starting cluster provisioning", "cluster_id", clusterID)
 
-	// Simulate provisioning time with cancellation support
-	select {
-	case <-ctx.Done():
-		s.logger.Warn("provisioning cancelled during initial phase", "cluster_id", clusterID, "error", ctx.Err())
-		return
-	case <-time.After(5 * time.Second):
-	}
-
-	// Update status to provisioning
-	if err := s.updateStatus(ctx, clusterID, models.ClusterStatusProvisioning); err != nil {
-		s.logger.Error("failed to update status to provisioning", "cluster_id", clusterID, "error", err)
-		return
-	}
-
-	// Simulate more provisioning with cancellation support
-	select {
-	case <-ctx.Done():
-		s.logger.Warn("provisioning cancelled during main phase", "cluster_id", clusterID, "error", ctx.Err())
-		if err := s.updateStatus(context.Background(), clusterID, models.ClusterStatusFailed); err != nil {
-			s.logger.Error("failed to update status to failed after cancellation", "cluster_id", clusterID, "error", err)
-		}
-		return
-	case <-time.After(10 * time.Second):
-	}
-
-	// Get cluster to check if pooler is enabled
+	// Get cluster details for provisioning
 	cluster, err := s.GetByID(ctx, clusterID)
 	if err != nil {
 		s.logger.Error("failed to get cluster for provisioning", "cluster_id", clusterID, "error", err)
@@ -1053,8 +1032,284 @@ func (s *ClusterService) startProvisioning(ctx context.Context, clusterID uuid.U
 		return
 	}
 
+	// Update status to provisioning
+	if err := s.updateStatus(ctx, clusterID, models.ClusterStatusProvisioning); err != nil {
+		s.logger.Error("failed to update status to provisioning", "cluster_id", clusterID, "error", err)
+		return
+	}
+
+	// Use real provisioner if enabled
+	if s.provisioner != nil && s.provisioner.IsEnabled() {
+		s.provisionWithRealProvisioner(ctx, cluster)
+		return
+	}
+
+	// Fallback to simulated provisioning
+	s.provisionSimulated(ctx, cluster)
+}
+
+// provisionWithRealProvisioner uses the gRPC provisioner service.
+func (s *ClusterService) provisionWithRealProvisioner(ctx context.Context, cluster *models.Cluster) {
+	s.logger.Info("using real provisioner for cluster", "cluster_id", cluster.ID, "name", cluster.Name)
+
+	// Convert cluster model to proto spec
+	spec := s.clusterToProtoSpec(cluster)
+
+	req := &pb.CreateClusterRequest{
+		Spec:         spec,
+		WaitForReady: false, // We'll poll for status
+		TimeoutSeconds: 600, // 10 minute timeout
+	}
+
+	resp, err := s.provisioner.CreateCluster(ctx, req)
+	if err != nil {
+		s.logger.Error("provisioner failed to create cluster", "cluster_id", cluster.ID, "error", err)
+		if updateErr := s.updateStatus(context.Background(), cluster.ID, models.ClusterStatusFailed); updateErr != nil {
+			s.logger.Error("failed to update status to failed", "cluster_id", cluster.ID, "error", updateErr)
+		}
+		return
+	}
+
+	s.logger.Info("provisioner accepted cluster creation",
+		"cluster_id", cluster.ID,
+		"provisioner_cluster_id", resp.ClusterId,
+		"phase", resp.Phase.String(),
+	)
+
+	// Start background polling for cluster status
+	go s.pollProvisionerStatus(context.Background(), cluster.ID, resp.ClusterId)
+}
+
+// pollProvisionerStatus polls the provisioner for cluster status updates.
+func (s *ClusterService) pollProvisionerStatus(ctx context.Context, clusterID uuid.UUID, provisionerClusterID string) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	timeout := time.After(15 * time.Minute)
+
+	for {
+		select {
+		case <-ctx.Done():
+			s.logger.Warn("status polling cancelled", "cluster_id", clusterID)
+			return
+		case <-timeout:
+			s.logger.Error("provisioning timeout", "cluster_id", clusterID)
+			if err := s.updateStatus(ctx, clusterID, models.ClusterStatusFailed); err != nil {
+				s.logger.Error("failed to update status to failed after timeout", "cluster_id", clusterID, "error", err)
+			}
+			return
+		case <-ticker.C:
+			resp, err := s.provisioner.GetClusterStatus(ctx, &pb.GetClusterStatusRequest{
+				ClusterId: provisionerClusterID,
+			})
+			if err != nil {
+				s.logger.Warn("failed to get provisioner status", "cluster_id", clusterID, "error", err)
+				continue
+			}
+
+			switch resp.Status.Phase {
+			case pb.ClusterPhase_PHASE_HEALTHY:
+				// Cluster is ready - update status and connection URL
+				s.updateClusterFromProvisionerStatus(ctx, clusterID, provisionerClusterID)
+				return
+			case pb.ClusterPhase_PHASE_SETTING_UP, pb.ClusterPhase_PHASE_UPGRADING:
+				// Still provisioning, continue polling
+				s.logger.Debug("cluster still provisioning",
+					"cluster_id", clusterID,
+					"phase", resp.Status.Phase.String(),
+					"ready", resp.Status.ReadyInstances,
+					"total", resp.Status.TotalInstances,
+				)
+			default:
+				// Check for failure
+				s.logger.Error("cluster provisioning failed",
+					"cluster_id", clusterID,
+					"phase", resp.Status.Phase.String(),
+				)
+				if err := s.updateStatus(ctx, clusterID, models.ClusterStatusFailed); err != nil {
+					s.logger.Error("failed to update status to failed", "cluster_id", clusterID, "error", err)
+				}
+				return
+			}
+		}
+	}
+}
+
+// updateClusterFromProvisionerStatus updates the cluster with connection info from provisioner.
+func (s *ClusterService) updateClusterFromProvisionerStatus(ctx context.Context, clusterID uuid.UUID, provisionerClusterID string) {
+	// Get detailed cluster info from provisioner
+	resp, err := s.provisioner.GetCluster(ctx, &pb.GetClusterRequest{
+		ClusterId: provisionerClusterID,
+	})
+	if err != nil {
+		s.logger.Error("failed to get cluster details from provisioner", "cluster_id", clusterID, "error", err)
+		return
+	}
+
+	// Extract connection info from provisioner response
+	// The provisioner will have created secrets with connection credentials
+	var connectionURL, poolerURL *string
+
+	// Connection URL is typically in format: postgresql://user:pass@host:port/dbname
+	// For CNPG clusters, this comes from the generated secrets
+	if resp.Cluster != nil && resp.Cluster.Status != nil {
+		// Build connection URL from cluster status
+		if resp.Cluster.Status.CurrentPrimary != "" {
+			connStr := fmt.Sprintf("postgresql://%s:5432/postgres", resp.Cluster.Status.CurrentPrimary)
+			connectionURL = &connStr
+		}
+	}
+
+	// Update database with connection info
+	query := `
+		UPDATE clusters
+		SET status = $2, connection_url = $3, pooler_url = $4, updated_at = NOW()
+		WHERE id = $1
+	`
+	if _, err := s.db.Pool.Exec(ctx, query, clusterID, models.ClusterStatusRunning, connectionURL, poolerURL); err != nil {
+		s.logger.Error("failed to update cluster after provisioning", "error", err)
+		return
+	}
+
+	s.logger.Info("cluster provisioning complete via real provisioner", "cluster_id", clusterID)
+}
+
+// clusterToProtoSpec converts a cluster model to a provisioner proto spec.
+func (s *ClusterService) clusterToProtoSpec(cluster *models.Cluster) *pb.ClusterSpec {
+	spec := &pb.ClusterSpec{
+		Name:            cluster.Name,
+		Namespace:       "customer-" + cluster.ID.String()[:8], // Use unique namespace per cluster
+		Instances:       int32(cluster.NodeCount),
+		PostgresVersion: "16", // Default to PG 16
+		Resources: &pb.ResourceRequirements{
+			CpuRequest:    s.nodeSizeToCPU(cluster.NodeSize),
+			CpuLimit:      s.nodeSizeToCPU(cluster.NodeSize),
+			MemoryRequest: s.nodeSizeToMemory(cluster.NodeSize),
+			MemoryLimit:   s.nodeSizeToMemory(cluster.NodeSize),
+		},
+		Storage: &pb.StorageSpec{
+			Size:                fmt.Sprintf("%dGi", cluster.StorageGB),
+			StorageClass:        "do-block-storage", // DigitalOcean block storage
+			ResizeInUseVolumes:  true,
+		},
+	}
+
+	// Add Orochi configuration
+	spec.OrochiConfig = &pb.OrochiConfig{
+		Enabled:           true,
+		DefaultShardCount: int32(cluster.DefaultShardCount),
+		ChunkInterval:     "7d", // Default chunk interval
+		EnableColumnar:    cluster.EnableColumnar,
+		DefaultCompression: pb.CompressionType_COMPRESSION_ZSTD,
+	}
+
+	// Add tiering configuration if enabled
+	if cluster.TieringEnabled {
+		spec.OrochiConfig.Tiering = &pb.TieringConfig{
+			Enabled: true,
+		}
+		if cluster.TieringHotDuration != nil {
+			spec.OrochiConfig.Tiering.HotDuration = *cluster.TieringHotDuration
+		}
+		if cluster.TieringWarmDuration != nil {
+			spec.OrochiConfig.Tiering.WarmDuration = *cluster.TieringWarmDuration
+		}
+		if cluster.TieringColdDuration != nil {
+			spec.OrochiConfig.Tiering.ColdDuration = *cluster.TieringColdDuration
+		}
+		// Add S3 config if provided
+		if cluster.S3Endpoint != nil && cluster.S3Bucket != nil {
+			spec.OrochiConfig.Tiering.S3Config = &pb.S3Config{
+				Endpoint: *cluster.S3Endpoint,
+				Bucket:   *cluster.S3Bucket,
+			}
+			if cluster.S3Region != nil {
+				spec.OrochiConfig.Tiering.S3Config.Region = *cluster.S3Region
+			}
+		}
+	}
+
+	// Add pooler configuration if enabled
+	if cluster.PoolerEnabled {
+		spec.Pooler = &pb.ConnectionPoolerSpec{
+			Enabled:   true,
+			Instances: 2,
+			Type:      pb.PoolerType_POOLER_PGBOUNCER,
+			Pgbouncer: &pb.PgBouncerConfig{
+				PoolMode:        "transaction",
+				DefaultPoolSize: 25,
+				MaxClientConn:   200,
+			},
+		}
+	}
+
+	// Add backup configuration if enabled
+	if cluster.BackupEnabled {
+		spec.BackupConfig = &pb.BackupConfiguration{
+			RetentionPolicy: fmt.Sprintf("%dd", cluster.BackupRetention),
+			ScheduledBackup: &pb.ScheduledBackup{
+				Enabled:  true,
+				Schedule: "0 2 * * *", // Daily at 2 AM
+			},
+		}
+	}
+
+	return spec
+}
+
+// nodeSizeToCPU converts node size to CPU request/limit.
+func (s *ClusterService) nodeSizeToCPU(nodeSize string) string {
+	switch nodeSize {
+	case "small":
+		return "250m"
+	case "medium":
+		return "500m"
+	case "large":
+		return "1"
+	case "xlarge":
+		return "2"
+	case "2xlarge":
+		return "4"
+	default:
+		return "500m"
+	}
+}
+
+// nodeSizeToMemory converts node size to memory request/limit.
+func (s *ClusterService) nodeSizeToMemory(nodeSize string) string {
+	switch nodeSize {
+	case "small":
+		return "512Mi"
+	case "medium":
+		return "1Gi"
+	case "large":
+		return "2Gi"
+	case "xlarge":
+		return "4Gi"
+	case "2xlarge":
+		return "8Gi"
+	default:
+		return "1Gi"
+	}
+}
+
+// provisionSimulated runs simulated provisioning (for development/testing).
+func (s *ClusterService) provisionSimulated(ctx context.Context, cluster *models.Cluster) {
+	s.logger.Info("using simulated provisioning for cluster", "cluster_id", cluster.ID)
+
+	// Simulate provisioning time with cancellation support
+	select {
+	case <-ctx.Done():
+		s.logger.Warn("provisioning cancelled during main phase", "cluster_id", cluster.ID, "error", ctx.Err())
+		if err := s.updateStatus(context.Background(), cluster.ID, models.ClusterStatusFailed); err != nil {
+			s.logger.Error("failed to update status to failed after cancellation", "cluster_id", cluster.ID, "error", err)
+		}
+		return
+	case <-time.After(10 * time.Second):
+	}
+
 	// Generate connection URL and pooler URL (if pooler is enabled)
-	clusterHost := fmt.Sprintf("cluster-%s.orochi.cloud", clusterID.String()[:8])
+	clusterHost := fmt.Sprintf("cluster-%s.orochi.cloud", cluster.ID.String()[:8])
 	password := uuid.New().String()[:8]
 	connectionURL := fmt.Sprintf("postgresql://orochi:%s@%s:5432/orochi", password, clusterHost)
 
@@ -1070,23 +1325,30 @@ func (s *ClusterService) startProvisioning(ctx context.Context, clusterID uuid.U
 		SET status = $2, connection_url = $3, pooler_url = $4, updated_at = NOW()
 		WHERE id = $1
 	`
-	if _, err := s.db.Pool.Exec(ctx, query, clusterID, models.ClusterStatusRunning, connectionURL, poolerURL); err != nil {
+	if _, err := s.db.Pool.Exec(ctx, query, cluster.ID, models.ClusterStatusRunning, connectionURL, poolerURL); err != nil {
 		s.logger.Error("failed to update cluster after provisioning", "error", err)
-		if updateErr := s.updateStatus(context.Background(), clusterID, models.ClusterStatusFailed); updateErr != nil {
-			s.logger.Error("failed to update status to failed after provisioning error", "cluster_id", clusterID, "error", updateErr)
+		if updateErr := s.updateStatus(context.Background(), cluster.ID, models.ClusterStatusFailed); updateErr != nil {
+			s.logger.Error("failed to update status to failed after provisioning error", "cluster_id", cluster.ID, "error", updateErr)
 		}
 		return
 	}
 
-	s.logger.Info("cluster provisioning complete",
-		"cluster_id", clusterID,
+	s.logger.Info("simulated cluster provisioning complete",
+		"cluster_id", cluster.ID,
 		"pooler_enabled", cluster.PoolerEnabled,
 	)
 }
 
-// startDeprovisioning simulates the deprovisioning process.
+// startDeprovisioning initiates the deprovisioning process.
+// Uses the real provisioner gRPC service when enabled, otherwise falls back to simulation.
 func (s *ClusterService) startDeprovisioning(ctx context.Context, clusterID uuid.UUID) {
 	s.logger.Info("starting cluster deprovisioning", "cluster_id", clusterID)
+
+	// Use real provisioner if enabled
+	if s.provisioner != nil && s.provisioner.IsEnabled() {
+		s.deprovisionWithRealProvisioner(ctx, clusterID)
+		return
+	}
 
 	// Simulate deprovisioning with cancellation support
 	select {
@@ -1096,12 +1358,50 @@ func (s *ClusterService) startDeprovisioning(ctx context.Context, clusterID uuid
 	case <-time.After(5 * time.Second):
 	}
 
-	s.logger.Info("cluster deprovisioning complete", "cluster_id", clusterID)
+	s.logger.Info("simulated cluster deprovisioning complete", "cluster_id", clusterID)
 }
 
-// performScaling simulates the scaling process.
+// deprovisionWithRealProvisioner uses the gRPC provisioner service.
+func (s *ClusterService) deprovisionWithRealProvisioner(ctx context.Context, clusterID uuid.UUID) {
+	s.logger.Info("using real provisioner for cluster deletion", "cluster_id", clusterID)
+
+	// Get cluster to determine namespace
+	cluster, err := s.GetByID(ctx, clusterID)
+	if err != nil {
+		s.logger.Error("failed to get cluster for deprovisioning", "cluster_id", clusterID, "error", err)
+		return
+	}
+
+	req := &pb.DeleteClusterRequest{
+		ClusterId:     cluster.Name, // Use name as cluster ID in K8s
+		Namespace:     "customer-" + clusterID.String()[:8],
+		DeleteBackups: false, // Preserve backups by default
+		DeletePvcs:    true,  // Clean up PVCs
+	}
+
+	resp, err := s.provisioner.DeleteCluster(ctx, req)
+	if err != nil {
+		s.logger.Error("provisioner failed to delete cluster", "cluster_id", clusterID, "error", err)
+		return
+	}
+
+	if resp.Success {
+		s.logger.Info("cluster deletion initiated via real provisioner", "cluster_id", clusterID)
+	} else {
+		s.logger.Warn("cluster deletion may have issues", "cluster_id", clusterID, "message", resp.Message)
+	}
+}
+
+// performScaling initiates the scaling process.
+// Uses the real provisioner gRPC service when enabled, otherwise falls back to simulation.
 func (s *ClusterService) performScaling(ctx context.Context, clusterID uuid.UUID) {
 	s.logger.Info("starting cluster scaling", "cluster_id", clusterID)
+
+	// Use real provisioner if enabled
+	if s.provisioner != nil && s.provisioner.IsEnabled() {
+		s.scaleWithRealProvisioner(ctx, clusterID)
+		return
+	}
 
 	// Simulate scaling with cancellation support
 	select {
@@ -1115,7 +1415,85 @@ func (s *ClusterService) performScaling(ctx context.Context, clusterID uuid.UUID
 		s.logger.Error("failed to update status after scaling", "cluster_id", clusterID, "error", err)
 		return
 	}
-	s.logger.Info("cluster scaling complete", "cluster_id", clusterID)
+	s.logger.Info("simulated cluster scaling complete", "cluster_id", clusterID)
+}
+
+// scaleWithRealProvisioner uses the gRPC provisioner service.
+func (s *ClusterService) scaleWithRealProvisioner(ctx context.Context, clusterID uuid.UUID) {
+	s.logger.Info("using real provisioner for cluster scaling", "cluster_id", clusterID)
+
+	// Get current cluster configuration
+	cluster, err := s.GetByID(ctx, clusterID)
+	if err != nil {
+		s.logger.Error("failed to get cluster for scaling", "cluster_id", clusterID, "error", err)
+		if updateErr := s.updateStatus(context.Background(), clusterID, models.ClusterStatusFailed); updateErr != nil {
+			s.logger.Error("failed to update status to failed", "cluster_id", clusterID, "error", updateErr)
+		}
+		return
+	}
+
+	// Build update request with new configuration
+	spec := s.clusterToProtoSpec(cluster)
+
+	req := &pb.UpdateClusterRequest{
+		ClusterId:     cluster.Name,
+		Spec:          spec,
+		RollingUpdate: true,
+	}
+
+	resp, err := s.provisioner.UpdateCluster(ctx, req)
+	if err != nil {
+		s.logger.Error("provisioner failed to scale cluster", "cluster_id", clusterID, "error", err)
+		if updateErr := s.updateStatus(context.Background(), clusterID, models.ClusterStatusFailed); updateErr != nil {
+			s.logger.Error("failed to update status to failed", "cluster_id", clusterID, "error", updateErr)
+		}
+		return
+	}
+
+	s.logger.Info("cluster scaling initiated via real provisioner",
+		"cluster_id", clusterID,
+		"phase", resp.Phase.String(),
+	)
+
+	// Start background polling for completion
+	go s.pollScalingStatus(context.Background(), clusterID, cluster.Name)
+}
+
+// pollScalingStatus polls for scaling completion.
+func (s *ClusterService) pollScalingStatus(ctx context.Context, clusterID uuid.UUID, provisionerClusterID string) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	timeout := time.After(10 * time.Minute)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timeout:
+			s.logger.Error("scaling timeout", "cluster_id", clusterID)
+			if err := s.updateStatus(ctx, clusterID, models.ClusterStatusFailed); err != nil {
+				s.logger.Error("failed to update status to failed", "cluster_id", clusterID, "error", err)
+			}
+			return
+		case <-ticker.C:
+			resp, err := s.provisioner.GetClusterStatus(ctx, &pb.GetClusterStatusRequest{
+				ClusterId: provisionerClusterID,
+			})
+			if err != nil {
+				s.logger.Warn("failed to get scaling status", "cluster_id", clusterID, "error", err)
+				continue
+			}
+
+			if resp.Status.Phase == pb.ClusterPhase_PHASE_HEALTHY {
+				if err := s.updateStatus(ctx, clusterID, models.ClusterStatusRunning); err != nil {
+					s.logger.Error("failed to update status after scaling", "cluster_id", clusterID, "error", err)
+				}
+				s.logger.Info("cluster scaling complete via real provisioner", "cluster_id", clusterID)
+				return
+			}
+		}
+	}
 }
 
 // applyUpdate simulates applying configuration updates.

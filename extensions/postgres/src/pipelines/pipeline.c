@@ -30,6 +30,7 @@
 #include "commands/copy.h"
 #include "catalog/pg_type.h"
 #include "utils/guc.h"
+#include "utils/lsyscache.h"
 
 #include "../orochi.h"
 #include "../core/catalog.h"
@@ -1395,6 +1396,91 @@ pipeline_parse_format(const char *name)
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
              errmsg("unknown pipeline format: %s", name)));
     return PIPELINE_FORMAT_JSON;
+}
+
+/* ============================================================
+ * Batch Insert Functions
+ * ============================================================ */
+
+/*
+ * pipeline_insert_batch
+ *    Insert a batch of records into the target table
+ *    Records is a List of char* (JSON strings)
+ *    Returns the number of rows successfully inserted
+ */
+int64
+pipeline_insert_batch(Pipeline *pipeline, List *records, bool use_copy)
+{
+    ListCell *lc;
+    int64 inserted = 0;
+    char *relname;
+    Oid argtypes[1] = { JSONBOID };
+    StringInfoData query;
+
+    if (pipeline == NULL || records == NIL)
+        return 0;
+
+    /*
+     * For now, use simple INSERT statements with parameterized queries.
+     * TODO: Implement COPY protocol for better performance when use_copy is true
+     */
+    if (SPI_connect() != SPI_OK_CONNECT)
+    {
+        elog(WARNING, "pipeline_insert_batch: failed to connect to SPI");
+        return 0;
+    }
+
+    relname = get_rel_name(pipeline->target_table_oid);
+    if (relname == NULL)
+    {
+        elog(WARNING, "pipeline_insert_batch: target table not found");
+        SPI_finish();
+        return 0;
+    }
+
+    /* Build parameterized INSERT query */
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "INSERT INTO %s SELECT * FROM jsonb_populate_record(NULL::%s, $1)",
+        quote_identifier(relname),
+        quote_identifier(relname));
+
+    foreach(lc, records)
+    {
+        char *record_json = (char *) lfirst(lc);
+        Datum argvals[1];
+        Jsonb *jb;
+        int ret;
+
+        if (record_json == NULL || record_json[0] == '\0')
+            continue;
+
+        /* Convert JSON string to jsonb datum */
+        PG_TRY();
+        {
+            jb = DatumGetJsonbP(DirectFunctionCall1(jsonb_in,
+                                                     CStringGetDatum(record_json)));
+            argvals[0] = JsonbPGetDatum(jb);
+
+            ret = SPI_execute_with_args(query.data, 1, argtypes, argvals, NULL, false, 0);
+            if (ret == SPI_OK_INSERT)
+                inserted++;
+            else
+                elog(DEBUG1, "pipeline_insert_batch: insert failed for record");
+        }
+        PG_CATCH();
+        {
+            /* Log and continue on error */
+            elog(DEBUG1, "pipeline_insert_batch: failed to parse/insert record");
+            FlushErrorState();
+        }
+        PG_END_TRY();
+    }
+
+    pfree(query.data);
+    SPI_finish();
+
+    return inserted;
 }
 
 /* ============================================================

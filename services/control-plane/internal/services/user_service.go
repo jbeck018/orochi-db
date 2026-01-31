@@ -139,14 +139,14 @@ func (s *UserService) Login(ctx context.Context, req *models.UserLoginRequest) (
 // GetByID retrieves a user by ID.
 func (s *UserService) GetByID(ctx context.Context, id uuid.UUID) (*models.User, error) {
 	query := `
-		SELECT id, email, password_hash, name, role, active, created_at, updated_at, last_login_at
+		SELECT id, email, password_hash, name, COALESCE(avatar, ''), role, active, created_at, updated_at, last_login_at
 		FROM users
 		WHERE id = $1
 	`
 
 	user := &models.User{}
 	err := s.db.Pool.QueryRow(ctx, query, id).Scan(
-		&user.ID, &user.Email, &user.PasswordHash, &user.Name,
+		&user.ID, &user.Email, &user.PasswordHash, &user.Name, &user.Avatar,
 		&user.Role, &user.Active, &user.CreatedAt, &user.UpdatedAt, &user.LastLoginAt,
 	)
 	if err != nil {
@@ -163,14 +163,14 @@ func (s *UserService) GetByID(ctx context.Context, id uuid.UUID) (*models.User, 
 // GetByEmail retrieves a user by email.
 func (s *UserService) GetByEmail(ctx context.Context, email string) (*models.User, error) {
 	query := `
-		SELECT id, email, password_hash, name, role, active, created_at, updated_at, last_login_at
+		SELECT id, email, password_hash, name, COALESCE(avatar, ''), role, active, created_at, updated_at, last_login_at
 		FROM users
 		WHERE email = $1
 	`
 
 	user := &models.User{}
 	err := s.db.Pool.QueryRow(ctx, query, email).Scan(
-		&user.ID, &user.Email, &user.PasswordHash, &user.Name,
+		&user.ID, &user.Email, &user.PasswordHash, &user.Name, &user.Avatar,
 		&user.Role, &user.Active, &user.CreatedAt, &user.UpdatedAt, &user.LastLoginAt,
 	)
 	if err != nil {
@@ -281,7 +281,7 @@ func (s *UserService) EnsureAdminExists(ctx context.Context, email, password, na
 	}
 
 	user.ID = insertedID
-	s.logger.Info("admin user created", "admin_id", user.ID, "email", user.Email)
+	s.logger.Info("admin user created/updated", "admin_id", user.ID, "email", user.Email)
 	return user, nil
 }
 
@@ -326,5 +326,31 @@ func (s *UserService) CreateAdmin(ctx context.Context, email, password, name str
 	}
 
 	s.logger.Info("admin user created", "admin_id", user.ID, "email", user.Email)
+	return user, nil
+}
+
+// UpdateAvatar updates a user's avatar.
+func (s *UserService) UpdateAvatar(ctx context.Context, userID uuid.UUID, avatar string) (*models.User, error) {
+	query := `
+		UPDATE users
+		SET avatar = $1, updated_at = $2
+		WHERE id = $3
+		RETURNING id, email, password_hash, name, COALESCE(avatar, ''), role, active, created_at, updated_at, last_login_at
+	`
+
+	user := &models.User{}
+	err := s.db.Pool.QueryRow(ctx, query, avatar, time.Now(), userID).Scan(
+		&user.ID, &user.Email, &user.PasswordHash, &user.Name, &user.Avatar,
+		&user.Role, &user.Active, &user.CreatedAt, &user.UpdatedAt, &user.LastLoginAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, models.ErrUserNotFound
+		}
+		s.logger.Error("failed to update user avatar", "error", err, "user_id", userID)
+		return nil, errors.New("failed to update avatar")
+	}
+
+	s.logger.Info("user avatar updated", "user_id", userID)
 	return user, nil
 }

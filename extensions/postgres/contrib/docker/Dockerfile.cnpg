@@ -29,16 +29,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy extension source
-COPY . /tmp/orochi
+COPY extensions/postgres /tmp/orochi
 WORKDIR /tmp/orochi
 
 # Build and install extension
-RUN make clean && make PG_CONFIG=/usr/bin/pg_config && make install PG_CONFIG=/usr/bin/pg_config
+RUN make clean PG_CONFIG=/usr/bin/pg_config && \
+    make PG_CONFIG=/usr/bin/pg_config && \
+    make install PG_CONFIG=/usr/bin/pg_config
 
-# Clean up build dependencies to reduce image size
-RUN apt-get purge -y --auto-remove \
+# Clean up build dependencies but keep runtime libraries
+# Mark runtime libs as manually installed to prevent auto-removal
+RUN apt-mark manual libpq5 liblz4-1 libzstd1 libcurl4 libssl1.1 librdkafka1 && \
+    apt-get purge -y --auto-remove \
     build-essential \
     postgresql-server-dev-${PG_MAJOR} \
+    libpq-dev \
     git \
     && rm -rf /var/lib/apt/lists/* \
     && rm -rf /tmp/orochi

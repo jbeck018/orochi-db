@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-01-30T19:51:46.064Z",
+  "projectRoot": "/Users/jacob/projects/orochi-db/tools/cli",
+  "structure": {
+    "hasPackageJson": false,
+    "hasTsConfig": false,
+    "hasClaudeConfig": false,
+    "hasClaudeFlow": true
+  },
+  "scannedAt": 1769802706064
+}

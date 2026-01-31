@@ -1,7 +1,8 @@
 import * as React from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { Database, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { RegisterForm } from "@/components/auth/register-form";
+import howleropsLogo from "@/src/assets/howlerops-icon.png";
 import { useInviteByToken } from "@/hooks/api";
 import {
   Card,
@@ -25,10 +26,10 @@ export const Route = createFileRoute("/register")({
     meta: [
       {
         name: "description",
-        content: "Create your Orochi Cloud account",
+        content: "Create your HowlerOps account",
       },
     ],
-    title: "Sign Up - Orochi Cloud",
+    title: "Sign Up - HowlerOps",
   }),
 });
 
@@ -54,11 +55,11 @@ function RegisterPage(): React.JSX.Element {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
       <div className="w-full max-w-md space-y-6">
         <div className="flex flex-col items-center space-y-2 text-center">
-          <div className="flex items-center space-x-2">
-            <Database className="h-10 w-10 text-primary" />
-            <span className="text-3xl font-bold">Orochi Cloud</span>
+          <div className="flex items-center space-x-3">
+            <img src={howleropsLogo} alt="HowlerOps" className="h-12 w-12" />
+            <span className="text-3xl font-bold">HowlerOps</span>
           </div>
-          <p className="text-muted-foreground">PostgreSQL HTAP Platform</p>
+          <p className="text-muted-foreground">OrochiDB - PostgreSQL HTAP Platform</p>
         </div>
 
         {inviteToken && inviteError && (
@@ -76,8 +77,8 @@ function RegisterPage(): React.JSX.Element {
             </CardTitle>
             <CardDescription className="text-center">
               {hasValidInvite
-                ? `Join ${invite.organizationName} on Orochi Cloud`
-                : "Get started with Orochi Cloud today"}
+                ? `Join ${invite.organizationName} on HowlerOps`
+                : "Get started with HowlerOps today"}
             </CardDescription>
           </CardHeader>
           <CardContent>

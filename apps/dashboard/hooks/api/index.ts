@@ -93,3 +93,13 @@ export {
   usePrefetchTableSchema,
   dataBrowserKeys,
 } from "./useDataBrowser";
+
+// Branch hooks
+export {
+  useBranches,
+  useBranch,
+  useCreateBranch,
+  useDeleteBranch,
+  usePromoteBranch,
+  branchKeys,
+} from "./useBranches";

@@ -1,10 +1,10 @@
-# Multi-stage Dockerfile for Orochi Cloud Dashboard
+# Multi-stage Dockerfile for HowlerOps Dashboard
 # Optimized for production deployment on Fly.io
 # Uses Bun runtime for improved performance
 
 # Stage 1: Build Stage
 # Installs all dependencies and builds the React application
-FROM oven/bun:1.2-alpine AS builder
+FROM oven/bun:1.2-debian AS builder
 
 # Build argument for API URL (passed from fly.toml)
 ARG VITE_API_URL
@@ -28,7 +28,7 @@ RUN bun --bun run build
 
 # Stage 2: Runtime Stage
 # Minimal production image with Bun runtime
-FROM oven/bun:1.2-alpine
+FROM oven/bun:1.2-debian
 
 WORKDIR /app
 
@@ -45,12 +45,11 @@ RUN chown -R bun:bun /app
 # Switch to non-root user
 USER bun
 
+# Set NODE_ENV for production optimizations
+ENV NODE_ENV=production
+
 # Expose the port the application listens on
 EXPOSE 3000
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD bun -e "fetch('http://localhost:3000').then(r => { if (!r.ok) throw new Error(r.status) })" || exit 1
 
 # Start the application with Bun
 CMD ["bun", "run", "server/index.ts"]

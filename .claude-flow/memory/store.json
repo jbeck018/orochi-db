@@ -167,6 +167,603 @@
       "storedAt": "2026-01-17T22:25:54.289Z",
       "accessCount": 0,
       "lastAccessed": "2026-01-17T22:25:54.289Z"
+    },
+    "deployment-preferences": {
+      "key": "deployment-preferences",
+      "value": {
+        "cloud_provider": "digitalocean",
+        "notes": "ONLY deploy to DigitalOcean unless explicitly directed otherwise. Do NOT use Fly.io.",
+        "updated": "2026-01-18"
+      },
+      "metadata": {
+        "type": "project-config",
+        "priority": "high"
+      },
+      "storedAt": "2026-01-18T08:02:22.793Z",
+      "accessCount": 0,
+      "lastAccessed": "2026-01-18T08:02:22.793Z"
+    },
+    "deployment-state-2026-01-18": {
+      "key": "deployment-state-2026-01-18",
+      "value": {
+        "control_plane": {
+          "platform": "digitalocean",
+          "url": "https://orochi-control-plane-npk4n.ondigitalocean.app",
+          "app_id": "a5501116-5eaf-4f26-ad68-436198ff7d98",
+          "registry": "registry.digitalocean.com/orochi-registry/control-plane:latest",
+          "status": "healthy"
+        },
+        "dashboard": {
+          "platform": "digitalocean",
+          "url": "https://orochi-dashboard-vrhqn.ondigitalocean.app",
+          "app_id": "718032af-1e99-4386-8bbc-4a397c1f15cf",
+          "registry": "registry.digitalocean.com/orochi-registry/dashboard:nginx",
+          "dockerfile": "Dockerfile.nginx-node",
+          "status": "healthy"
+        },
+        "database": {
+          "platform": "digitalocean",
+          "host": "orochi-metadata-do-user-32140747-0.e.db.ondigitalocean.com",
+          "port": 25060,
+          "name": "orochi_control_plane"
+        }
+      },
+      "metadata": {
+        "type": "deployment-state",
+        "date": "2026-01-18",
+        "region": "sfo"
+      },
+      "storedAt": "2026-01-18T09:00:03.869Z",
+      "accessCount": 1,
+      "lastAccessed": "2026-01-18T15:54:57.958Z"
+    },
+    "e2e-verification-2026-01-18": {
+      "key": "e2e-verification-2026-01-18",
+      "value": {
+        "verification_date": "2026-01-18T15:55:33Z",
+        "tests": {
+          "flyio_removed": {
+            "status": "PASS",
+            "detail": "No orochi apps on Fly.io (only unrelated focusflow-backend)"
+          },
+          "digitalocean_deployed": {
+            "status": "PASS",
+            "detail": "Both orochi-dashboard and orochi-control-plane running"
+          },
+          "control_plane_health": {
+            "status": "PASS",
+            "detail": "Returns healthy status"
+          },
+          "dashboard_http": {
+            "status": "PASS",
+            "detail": "HTTP 200, response time 0.31s"
+          },
+          "dashboard_spa_routing": {
+            "status": "PASS",
+            "detail": "SPA routing works (/clusters returns 200)"
+          }
+        },
+        "urls": {
+          "control_plane": "https://orochi-control-plane-npk4n.ondigitalocean.app",
+          "dashboard": "https://orochi-dashboard-vrhqn.ondigitalocean.app"
+        },
+        "all_tests_passed": true
+      },
+      "metadata": {
+        "type": "e2e-verification",
+        "date": "2026-01-18"
+      },
+      "storedAt": "2026-01-18T15:55:50.550Z",
+      "accessCount": 0,
+      "lastAccessed": "2026-01-18T15:55:50.550Z"
+    },
+    "ghcr-packages-visibility": {
+      "key": "ghcr-packages-visibility",
+      "value": {
+        "orochi-pg": {
+          "url": "https://github.com/users/jbeck018/packages/container/orochi-pg/settings",
+          "current": "private",
+          "target": "public"
+        },
+        "orochi-provisioner": {
+          "url": "https://github.com/users/jbeck018/packages/container/orochi-provisioner/settings",
+          "current": "private",
+          "target": "public"
+        }
+      },
+      "metadata": {
+        "task": "make-packages-public",
+        "status": "pending-user-action"
+      },
+      "storedAt": "2026-01-19T00:59:14.440Z",
+      "accessCount": 0,
+      "lastAccessed": "2026-01-19T00:59:14.440Z"
+    },
+    "rebrand/howlerops-context": {
+      "key": "rebrand/howlerops-context",
+      "value": {
+        "company": "HowlerOps",
+        "website": "https://howlerops.com",
+        "product": "OrochiDB",
+        "tagline": "The PostgreSQL HTAP Platform",
+        "domains": {
+          "main": "howlerops.com",
+          "dashboard": "dashboard.howlerops.com",
+          "api": "api.howlerops.com",
+          "docs": "docs.howlerops.com"
+        },
+        "oldBranding": {
+          "name": "Orochi Cloud",
+          "domains": [
+            "orochi.cloud",
+            "dashboard.orochi.cloud",
+            "api.orochi.cloud",
+            "docs.orochi.cloud"
+          ]
+        },
+        "emails": {
+          "sales": "sales@howlerops.com",
+          "support": "support@howlerops.com"
+        }
+      },
+      "metadata": {
+        "type": "rebranding",
+        "priority": "high"
+      },
+      "storedAt": "2026-01-19T19:09:50.410Z",
+      "accessCount": 0,
+      "lastAccessed": "2026-01-19T19:09:50.410Z"
+    },
+    "rebranding-completion-status": {
+      "key": "rebranding-completion-status",
+      "value": {
+        "status": "completed",
+        "timestamp": "2026-01-19",
+        "summary": "Successfully rebranded from Orochi Cloud to HowlerOps with OrochiDB as product",
+        "filesUpdated": [
+          "landing.tsx",
+          "pricing.tsx",
+          "index.tsx",
+          "footer.tsx",
+          "docs.tsx",
+          "sidebar.tsx",
+          "header.tsx",
+          "login.tsx",
+          "register.tsx",
+          "forgot-password.tsx",
+          "reset-password.tsx",
+          "privacy.tsx",
+          "terms.tsx",
+          "__root.tsx",
+          "config.go",
+          "root.go",
+          "client.go",
+          "control-plane.yaml",
+          "dashboard.yaml",
+          "loadbalancer.yaml"
+        ],
+        "domains": {
+          "main": "howlerops.com",
+          "dashboard": "dashboard.howlerops.com",
+          "api": "api.howlerops.com",
+          "docs": "docs.howlerops.com"
+        },
+        "icons": {
+          "copied": [
+            "howlerops-icon.png",
+            "howlerops-icon-dark.png",
+            "howlerops-icon-light.png"
+          ],
+          "destination": "apps/dashboard/src/assets"
+        },
+        "remainingFiles": "64 files still contain 'Orochi Cloud' references (mostly documentation, Dockerfiles, and backend services)"
+      },
+      "metadata": {
+        "type": "rebranding",
+        "project": "orochi-db"
+      },
+      "storedAt": "2026-01-19T19:17:22.212Z",
+      "accessCount": 0,
+      "lastAccessed": "2026-01-19T19:17:22.212Z"
+    },
+    "howlerops-dns-config": {
+      "key": "howlerops-dns-config",
+      "value": {
+        "cloudflare_ns_delegation": true,
+        "do_nameservers": [
+          "ns1.digitalocean.com",
+          "ns2.digitalocean.com",
+          "ns3.digitalocean.com"
+        ],
+        "apps": {
+          "control-plane": {
+            "app_id": "a5501116-5eaf-4f26-ad68-436198ff7d98",
+            "do_url": "orochi-control-plane-npk4n.ondigitalocean.app",
+            "custom_domain": "api.howlerops.com"
+          },
+          "dashboard": {
+            "app_id": "718032af-1e99-4386-8bbc-4a397c1f15cf",
+            "do_url": "orochi-dashboard-vrhqn.ondigitalocean.app",
+            "custom_domain": "dashboard.howlerops.com"
+          }
+        }
+      },
+      "metadata": {
+        "type": "dns-config",
+        "timestamp": "2026-01-19"
+      },
+      "storedAt": "2026-01-19T19:34:32.059Z",
+      "accessCount": 0,
+      "lastAccessed": "2026-01-19T19:34:32.059Z"
+    },
+    "howlerops-deployment-complete": {
+      "key": "howlerops-deployment-complete",
+      "value": {
+        "status": "complete",
+        "timestamp": "2026-01-19T19:55:00Z",
+        "services": {
+          "dashboard": {
+            "url": "https://dashboard.howlerops.com",
+            "status": "healthy",
+            "image": "registry.digitalocean.com/orochi-registry/dashboard:ssr"
+          },
+          "api": {
+            "url": "https://api.howlerops.com",
+            "status": "healthy",
+            "image": "registry.digitalocean.com/orochi-registry/control-plane:latest"
+          }
+        },
+        "branding": "HowlerOps with OrochiDB product",
+        "dns": {
+          "provider": "Cloudflare",
+          "records": [
+            {
+              "type": "CNAME",
+              "name": "dashboard",
+              "target": "orochi-dashboard-vrhqn.ondigitalocean.app"
+            },
+            {
+              "type": "CNAME",
+              "name": "api",
+              "target": "orochi-control-plane-npk4n.ondigitalocean.app"
+            }
+          ]
+        }
+      },
+      "metadata": {
+        "type": "deployment",
+        "project": "howlerops"
+      },
+      "storedAt": "2026-01-19T19:55:58.822Z",
+      "accessCount": 0,
+      "lastAccessed": "2026-01-19T19:55:58.822Z"
+    },
+    "research/orioledb-overview": {
+      "key": "research/orioledb-overview",
+      "value": {
+        "name": "OrioleDB",
+        "type": "PostgreSQL Storage Extension",
+        "status": "Public Beta",
+        "license": "Apache 2.0 / PostgreSQL License",
+        "features": [
+          "Index-organized tables",
+          "MVCC with UNDO log (no bloat)",
+          "Copy-on-write checkpoints",
+          "Row-level WAL",
+          "Block-level zstd compression",
+          "No buffer mapping (lock-less page reading)",
+          "Designed for distributed/multimaster"
+        ],
+        "performance": "3.3x speedup on TPC-C vs heap",
+        "limitations": [
+          "Only B-tree indexes supported",
+          "No pg_vector HNSW indexes yet",
+          "Requires patches to PostgreSQL core",
+          "Not production ready"
+        ],
+        "relevance_to_orochi": "Could complement our HTAP extension with better write performance and no bloat"
+      },
+      "metadata": {
+        "category": "research",
+        "topic": "storage-engines"
+      },
+      "storedAt": "2026-01-23T22:33:49.822Z",
+      "accessCount": 0,
+      "lastAccessed": "2026-01-23T22:33:49.822Z"
+    },
+    "research/database-branching": {
+      "key": "research/database-branching",
+      "value": {
+        "topic": "Instant Database Branching",
+        "approaches": {
+          "neon": {
+            "method": "Copy-on-write at storage layer",
+            "architecture": "Separated compute and storage",
+            "speed": "Milliseconds regardless of DB size",
+            "storage_efficiency": "Only stores delta/changes",
+            "technical_basis": "Custom multi-tenant storage system with CoW paging layer"
+          },
+          "supabase": {
+            "method": "Schema-only branching",
+            "architecture": "Traditional PostgreSQL",
+            "speed": "Requires provisioning new DB + running migrations",
+            "storage_efficiency": "Full copy for each branch",
+            "limitation": "Need seed script for data"
+          },
+          "xata": {
+            "method": "Copy-on-write at storage layer",
+            "speed": "Instant like Neon",
+            "storage_efficiency": "Only stores delta/changes"
+          }
+        },
+        "key_insight": "CoW requires custom storage layer that separates compute from storage"
+      },
+      "metadata": {
+        "category": "research",
+        "topic": "database-branching"
+      },
+      "storedAt": "2026-01-23T22:33:50.279Z",
+      "accessCount": 0,
+      "lastAccessed": "2026-01-23T22:33:50.279Z"
+    },
+    "research/branching-tools": {
+      "key": "research/branching-tools",
+      "value": {
+        "tools": [
+          {
+            "name": "Neon Storage Engine",
+            "repo": "github.com/neondatabase/neon",
+            "language": "Rust",
+            "approach": "Full compute/storage separation with Pageserver + Safekeeper",
+            "pros": [
+              "Production ready (GA Aug 2024)",
+              "True instant branching",
+              "Scale to zero",
+              "Time travel queries"
+            ],
+            "cons": [
+              "Complete architecture change",
+              "Network latency vs local NVMe",
+              "Complex to self-host"
+            ]
+          },
+          {
+            "name": "pg_branch",
+            "repo": "github.com/NAlexPear/pg_branch",
+            "language": "Rust (Postgres extension)",
+            "approach": "BTRFS snapshot-based branching",
+            "pros": [
+              "Simple Postgres extension",
+              "Works with existing PG",
+              "Fast on BTRFS"
+            ],
+            "cons": [
+              "Pre-alpha/experimental",
+              "Requires BTRFS filesystem",
+              "Limited to single cluster"
+            ]
+          },
+          {
+            "name": "Velo",
+            "approach": "ZFS snapshots with Docker",
+            "pros": [
+              "Git-like workflow",
+              "100GB branches in 2 seconds",
+              "Each branch is isolated"
+            ],
+            "cons": [
+              "Requires ZFS",
+              "Docker-based",
+              "Additional orchestration needed"
+            ]
+          },
+          {
+            "name": "PostgreSQL 18 CLONE Strategy",
+            "approach": "Native CREATE DATABASE with CLONE strategy",
+            "pros": [
+              "Built into PostgreSQL",
+              "No external dependencies"
+            ],
+            "cons": [
+              "Requires reflink-capable filesystem (XFS, ZFS, APFS)",
+              "Database-level only, not instance level"
+            ]
+          }
+        ]
+      },
+      "metadata": {
+        "category": "research",
+        "topic": "branching-tools"
+      },
+      "storedAt": "2026-01-23T22:35:03.512Z",
+      "accessCount": 0,
+      "lastAccessed": "2026-01-23T22:35:03.512Z"
+    },
+    "research/neon-architecture": {
+      "key": "research/neon-architecture",
+      "value": {
+        "components": {
+          "safekeeper": {
+            "role": "WAL durability layer",
+            "protocol": "Paxos",
+            "function": "Receives WAL from compute, stores until pageserver processes"
+          },
+          "pageserver": {
+            "role": "Storage engine",
+            "language": "Rust",
+            "function": "Processes WAL into custom format, serves GetPage@LSN requests, uploads to S3"
+          },
+          "compute": {
+            "role": "Query execution",
+            "base": "Standard PostgreSQL",
+            "function": "Runs queries, streams WAL to safekeepers"
+          },
+          "storage_controller": {
+            "role": "Orchestration",
+            "function": "Manages sharding and tenant placement"
+          }
+        },
+        "key_functions": {
+          "GetPage_at_LSN": "Reconstructs any page at any point in time by finding last image + applying WAL records"
+        },
+        "storage_model": {
+          "layers": [
+            "InMemory (WAL reorder buffer)",
+            "L0 DeltaLayer (flushed from memory)",
+            "ImageLayer (key snapshots)",
+            "Cloud object storage (S3)"
+          ]
+        }
+      },
+      "metadata": {
+        "category": "research",
+        "topic": "neon-architecture"
+      },
+      "storedAt": "2026-01-23T22:35:43.732Z",
+      "accessCount": 0,
+      "lastAccessed": "2026-01-23T22:35:43.732Z"
+    },
+    "research/orochi-recommendations": {
+      "key": "research/orochi-recommendations",
+      "value": {
+        "recommendations": [
+          {
+            "priority": 1,
+            "name": "PostgreSQL 18 CLONE Strategy",
+            "effort": "Low",
+            "description": "Upgrade to PG18 and use file_copy_method=clone on XFS/ZFS. Works with CloudNativePG.",
+            "benefit": "315x faster database cloning, no additional components"
+          },
+          {
+            "priority": 2,
+            "name": "ZFS-based Branching",
+            "effort": "Medium",
+            "description": "Run CNPG clusters on ZFS volumes, use ZFS snapshots for branching",
+            "benefit": "Instant cloning, works with current architecture"
+          },
+          {
+            "priority": 3,
+            "name": "OrioleDB Integration",
+            "effort": "High",
+            "description": "Offer OrioleDB as alternative table access method alongside Orochi columnar",
+            "benefit": "No VACUUM needed, better write performance"
+          },
+          {
+            "priority": 4,
+            "name": "Neon-style Architecture",
+            "effort": "Very High",
+            "description": "Build custom pageserver/safekeeper for true compute/storage separation",
+            "benefit": "Full instant branching, scale-to-zero, time travel"
+          }
+        ]
+      },
+      "metadata": {
+        "category": "research",
+        "topic": "integration-recommendations"
+      },
+      "storedAt": "2026-01-23T22:35:55.361Z",
+      "accessCount": 0,
+      "lastAccessed": "2026-01-23T22:35:55.361Z"
+    },
+    "research/cnpg-cloning-capabilities": {
+      "key": "research/cnpg-cloning-capabilities",
+      "value": {
+        "bootstrapMethods": {
+          "initdb": "Initialize fresh cluster (default)",
+          "recovery": "Restore from backup/object store with optional PITR",
+          "pg_basebackup": "Clone via streaming replication"
+        },
+        "replicaClusters": {
+          "streaming": "Continuous replication via pg_basebackup",
+          "wal_archive": "Continuous recovery from object store WAL files"
+        },
+        "volumeSnapshots": {
+          "status": "Gradually being introduced",
+          "use": "Incremental/differential backup and recovery",
+          "requirement": "Storage class must support VolumeSnapshot API"
+        },
+        "branchingApproach": "Use recovery bootstrap with recovery_target_time for branch from any point in time"
+      },
+      "metadata": {
+        "category": "research",
+        "topic": "cnpg-cloning"
+      },
+      "storedAt": "2026-01-23T22:40:04.921Z",
+      "accessCount": 0,
+      "lastAccessed": "2026-01-23T22:40:04.921Z"
+    },
+    "research/branching-implementation-plan": {
+      "key": "research/branching-implementation-plan",
+      "value": {
+        "compiledAt": "2026-01-23T22:42:00Z",
+        "summary": "Comprehensive research complete on database branching and storage engine options",
+        "recommendations": {
+          "immediate": {
+            "priority": 1,
+            "name": "PostgreSQL 18 CLONE with XFS Reflinks",
+            "effort": "2-3 weeks",
+            "impact": "316x faster database cloning",
+            "requirements": [
+              "XFS StorageClass",
+              "CNPG 1.27.1+",
+              "PG18 image"
+            ],
+            "feasibility": "HIGH"
+          },
+          "shortTerm": {
+            "priority": 2,
+            "name": "Expose Branching API in Control Plane",
+            "effort": "1-2 weeks",
+            "impact": "Enable customer-facing branching feature",
+            "requirements": [
+              "REST endpoint",
+              "Branch metadata table",
+              "CLI commands"
+            ],
+            "feasibility": "HIGH"
+          },
+          "mediumTerm": {
+            "priority": 3,
+            "name": "WAL Quorum Durability (Safekeeper Pattern)",
+            "effort": "4-6 weeks",
+            "impact": "Faster commit acknowledgment, enhanced durability",
+            "requirements": [
+              "Extend existing Raft consensus",
+              "WAL streaming"
+            ],
+            "feasibility": "MEDIUM"
+          },
+          "deferred": {
+            "priority": 4,
+            "name": "OrioleDB Integration",
+            "effort": "Dependent on upstream",
+            "impact": "Eliminates bloat, 64-bit XIDs",
+            "requirements": [
+              "Wait for PostgreSQL 19+ upstream patches"
+            ],
+            "feasibility": "LOW (currently)"
+          }
+        },
+        "existingCapabilities": {
+          "CloneCluster": "pg_basebackup streaming - already implemented",
+          "RestorePointInTime": "PITR with timestamp - already implemented",
+          "RestoreToLSN": "Recovery to specific LSN - already implemented",
+          "VolumeSnapshotSpec": "CSI snapshots supported in types"
+        },
+        "architecturalDecisions": {
+          "storageClass": "do-block-storage-xfs-reflink for XFS with reflinks",
+          "postgresVersion": "18+ for file_copy_method=clone",
+          "branchingModel": "Git-like with parent-child relationships",
+          "apiDesign": "POST /api/v1/clusters/{id}/databases/{db}/clone"
+        }
+      },
+      "metadata": {
+        "type": "implementation-plan",
+        "researchComplete": true
+      },
+      "storedAt": "2026-01-23T22:42:37.959Z",
+      "accessCount": 0,
+      "lastAccessed": "2026-01-23T22:42:37.959Z"
     }
   },
   "version": "3.0.0"

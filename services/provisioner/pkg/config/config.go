@@ -90,6 +90,24 @@ type CloudNativePGConfig struct {
 	DefaultStorageClass string `yaml:"defaultStorageClass"`
 	// DefaultBackupRetention is the default backup retention
 	DefaultBackupRetention string `yaml:"defaultBackupRetention"`
+	// BranchingConfig configures database branching support
+	BranchingConfig BranchingConfig `yaml:"branchingConfig"`
+}
+
+// BranchingConfig configures database branching (instant cloning)
+type BranchingConfig struct {
+	// Enabled enables database branching features
+	Enabled bool `yaml:"enabled"`
+	// XFSStorageClass is the XFS storage class with reflink support for instant cloning
+	XFSStorageClass string `yaml:"xfsStorageClass"`
+	// VolumeSnapshotClass is the CSI snapshot class for instant branching
+	VolumeSnapshotClass string `yaml:"volumeSnapshotClass"`
+	// DefaultMethod is the default branching method (volumeSnapshot, clone, pg_basebackup)
+	DefaultMethod string `yaml:"defaultMethod"`
+	// MaxBranchesPerCluster limits branches per source cluster (0 = unlimited)
+	MaxBranchesPerCluster int `yaml:"maxBranchesPerCluster"`
+	// BranchRetentionDays is the default retention for branches (0 = unlimited)
+	BranchRetentionDays int `yaml:"branchRetentionDays"`
 }
 
 // OrochiDefaultsConfig provides default Orochi DB configuration
@@ -157,6 +175,14 @@ func DefaultConfig() *Config {
 			ClusterReadyTimeout:    10 * time.Minute,
 			DefaultStorageClass:    "standard",
 			DefaultBackupRetention: "30d",
+			BranchingConfig: BranchingConfig{
+				Enabled:               true,
+				XFSStorageClass:       "xfs-reflink", // XFS with reflink support for instant cloning
+				VolumeSnapshotClass:   "csi-snapclass",
+				DefaultMethod:         "volumeSnapshot",
+				MaxBranchesPerCluster: 10,
+				BranchRetentionDays:   7,
+			},
 		},
 		OrochiDefaults: OrochiDefaultsConfig{
 			DefaultShardCount:       32,

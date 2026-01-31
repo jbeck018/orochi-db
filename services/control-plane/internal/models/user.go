@@ -22,6 +22,7 @@ type User struct {
 	Email        string     `json:"email"`
 	PasswordHash string     `json:"-"` // Never expose password hash in JSON
 	Name         string     `json:"name"`
+	Avatar       string     `json:"avatar,omitempty"`
 	Role         UserRole   `json:"role"`
 	Active       bool       `json:"active"`
 	CreatedAt    time.Time  `json:"created_at"`
@@ -60,6 +61,7 @@ type UserResponse struct {
 	ID          uuid.UUID  `json:"id"`
 	Email       string     `json:"email"`
 	Name        string     `json:"name"`
+	Avatar      string     `json:"avatar,omitempty"`
 	Role        UserRole   `json:"role"`
 	Active      bool       `json:"active"`
 	CreatedAt   time.Time  `json:"created_at"`
@@ -72,6 +74,7 @@ func (u *User) ToResponse() *UserResponse {
 		ID:          u.ID,
 		Email:       u.Email,
 		Name:        u.Name,
+		Avatar:      u.Avatar,
 		Role:        u.Role,
 		Active:      u.Active,
 		CreatedAt:   u.CreatedAt,

@@ -126,8 +126,8 @@ export function Sidebar({ open, onClose }: SidebarProps): React.JSX.Element {
           {/* Footer */}
           <div className="border-t p-4">
             <div className="text-xs text-muted-foreground">
-              <p>Orochi Cloud v1.0.0</p>
-              <p className="mt-1">PostgreSQL HTAP Platform</p>
+              <p>HowlerOps v1.0.0</p>
+              <p className="mt-1">OrochiDB - PostgreSQL HTAP Platform</p>
             </div>
           </div>
         </div>

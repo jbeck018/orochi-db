@@ -119,6 +119,16 @@ typedef struct AccessStats
  * ============================================================ */
 
 /*
+ * Generate AWS Signature V4 for S3 requests
+ * Used internally by S3 upload/download functions
+ */
+extern char *generate_aws_signature_v4(S3Client *client, const char *method,
+                                        const char *uri, const char *query_string,
+                                        const char *payload, size_t payload_len,
+                                        const char *date_stamp, const char *amz_date,
+                                        char **out_authorization);
+
+/*
  * Create S3 client from configuration
  */
 extern S3Client *s3_client_create(OrochiS3Config *config);

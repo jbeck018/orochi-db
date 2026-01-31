@@ -368,3 +368,127 @@ type ValidationError struct {
 func (e *ValidationError) Error() string {
 	return e.Field + ": " + e.Message
 }
+
+// BranchMethod represents the method used to create a branch
+type BranchMethod string
+
+const (
+	// BranchMethodVolumeSnapshot creates a branch via volume snapshot (instant, requires CSI)
+	BranchMethodVolumeSnapshot BranchMethod = "volumeSnapshot"
+	// BranchMethodPgBasebackup creates a branch via pg_basebackup (slower, always available)
+	BranchMethodPgBasebackup BranchMethod = "pg_basebackup"
+	// BranchMethodClone creates a branch using PG18+ file_copy_method=clone with XFS reflinks
+	BranchMethodClone BranchMethod = "clone"
+	// BranchMethodPITR creates a branch from a point-in-time recovery
+	BranchMethodPITR BranchMethod = "pitr"
+)
+
+// BranchPhase represents the current phase of a branch
+type BranchPhase string
+
+const (
+	BranchPhasePending   BranchPhase = "pending"
+	BranchPhaseCreating  BranchPhase = "creating"
+	BranchPhaseReady     BranchPhase = "ready"
+	BranchPhaseFailed    BranchPhase = "failed"
+	BranchPhaseDeleting  BranchPhase = "deleting"
+	BranchPhasePromoting BranchPhase = "promoting"
+)
+
+// BranchSpec defines the specification for creating a database branch
+type BranchSpec struct {
+	// Name is the branch name
+	Name string `json:"name"`
+	// SourceCluster is the name of the parent cluster
+	SourceCluster string `json:"sourceCluster"`
+	// SourceNamespace is the namespace of the parent cluster
+	SourceNamespace string `json:"sourceNamespace"`
+	// TargetNamespace is the namespace for the branch (optional, defaults to source namespace)
+	TargetNamespace string `json:"targetNamespace,omitempty"`
+	// Method is the branching method to use
+	Method BranchMethod `json:"method,omitempty"`
+	// PointInTime specifies a point-in-time for PITR branches (RFC3339 format)
+	PointInTime string `json:"pointInTime,omitempty"`
+	// LSN specifies a specific LSN for PITR branches
+	LSN string `json:"lsn,omitempty"`
+	// Instances overrides the instance count (defaults to 1 for branches)
+	Instances int32 `json:"instances,omitempty"`
+	// Inherit specifies whether to inherit parent cluster configuration
+	Inherit bool `json:"inherit,omitempty"`
+	// Labels are additional labels to apply
+	Labels map[string]string `json:"labels,omitempty"`
+	// Annotations are additional annotations to apply
+	Annotations map[string]string `json:"annotations,omitempty"`
+}
+
+// BranchStatus represents the current status of a branch
+type BranchStatus struct {
+	Phase              BranchPhase `json:"phase"`
+	Message            string      `json:"message,omitempty"`
+	ClusterName        string      `json:"clusterName,omitempty"`
+	ConnectionString   string      `json:"connectionString,omitempty"`
+	PoolerConnection   string      `json:"poolerConnection,omitempty"`
+	SourceLSN          string      `json:"sourceLsn,omitempty"`
+	SourceTimestamp    string      `json:"sourceTimestamp,omitempty"`
+	CreationMethod     BranchMethod `json:"creationMethod"`
+	CreationDuration   string      `json:"creationDuration,omitempty"`
+}
+
+// BranchInfo contains full branch information
+type BranchInfo struct {
+	BranchID        string            `json:"branchId"`
+	Name            string            `json:"name"`
+	ParentCluster   string            `json:"parentCluster"`
+	ParentNamespace string            `json:"parentNamespace"`
+	Namespace       string            `json:"namespace"`
+	Spec            BranchSpec        `json:"spec"`
+	Status          BranchStatus      `json:"status"`
+	CreatedAt       time.Time         `json:"createdAt"`
+	UpdatedAt       time.Time         `json:"updatedAt"`
+	Labels          map[string]string `json:"labels,omitempty"`
+}
+
+// VolumeSnapshotConfig configures volume snapshot-based branching
+type VolumeSnapshotConfig struct {
+	// Enabled enables volume snapshot branching
+	Enabled bool `json:"enabled"`
+	// SnapshotClass is the VolumeSnapshotClass to use
+	SnapshotClass string `json:"snapshotClass,omitempty"`
+	// RetentionPolicy specifies how long to retain snapshots
+	RetentionPolicy string `json:"retentionPolicy,omitempty"`
+}
+
+// ValidateBranchSpec validates a branch specification
+func (s *BranchSpec) Validate() error {
+	if s.Name == "" {
+		return &ValidationError{Field: "name", Message: "branch name is required"}
+	}
+	if s.SourceCluster == "" {
+		return &ValidationError{Field: "sourceCluster", Message: "source cluster is required"}
+	}
+	if s.SourceNamespace == "" {
+		return &ValidationError{Field: "sourceNamespace", Message: "source namespace is required"}
+	}
+	// Validate PITR options
+	if s.PointInTime != "" && s.LSN != "" {
+		return &ValidationError{Field: "pointInTime", Message: "cannot specify both pointInTime and LSN"}
+	}
+	if (s.PointInTime != "" || s.LSN != "") && s.Method != "" && s.Method != BranchMethodPITR {
+		return &ValidationError{Field: "method", Message: "pointInTime or LSN requires PITR method"}
+	}
+	return nil
+}
+
+// DefaultBranchMethod returns the recommended branch method based on environment
+func DefaultBranchMethod(hasVolumeSnapshots, hasXFSReflinks bool) BranchMethod {
+	// Prefer volume snapshots for instant branching
+	if hasVolumeSnapshots {
+		return BranchMethodVolumeSnapshot
+	}
+	// Fall back to XFS clone method if available (PG18+)
+	if hasXFSReflinks {
+		return BranchMethodClone
+	}
+	// Default to pg_basebackup (always available)
+	return BranchMethodPgBasebackup
+}

@@ -1,0 +1,64 @@
+domains:
+- domain: api.howlerops.com
+  type: PRIMARY
+  zone: howlerops.com
+ingress:
+  rules:
+  - component:
+      name: control-plane
+    match:
+      path:
+        prefix: /
+name: howlerops-control-plane
+region: sfo
+services:
+- envs:
+  - key: SERVER_HOST
+    scope: RUN_AND_BUILD_TIME
+    value: 0.0.0.0
+  - key: SERVER_PORT
+    scope: RUN_AND_BUILD_TIME
+    value: "8080"
+  - key: GRPC_HOST
+    scope: RUN_AND_BUILD_TIME
+    value: 0.0.0.0
+  - key: GRPC_PORT
+    scope: RUN_AND_BUILD_TIME
+    value: "9090"
+  - key: JWT_ISSUER
+    scope: RUN_AND_BUILD_TIME
+    value: howlerops
+  - key: DB_SSL_MODE
+    scope: RUN_AND_BUILD_TIME
+    value: require
+  - key: DATABASE_URL
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+    value: "${DATABASE_URL}"
+  - key: JWT_SECRET
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+    value: "${JWT_SECRET}"
+  - key: ALLOWED_ORIGINS
+    scope: RUN_AND_BUILD_TIME
+    value: https://dashboard.howlerops.com,https://howlerops.com,http://localhost:3000,http://localhost:5173
+  - key: ENCRYPTION_KEY
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+    value: "${ENCRYPTION_KEY}"
+  health_check:
+    failure_threshold: 3
+    http_path: /health
+    initial_delay_seconds: 10
+    period_seconds: 30
+    success_threshold: 1
+    timeout_seconds: 10
+  http_port: 8080
+  image:
+    registry: orochi-registry
+    registry_type: DOCR
+    repository: control-plane
+    tag: latest
+  instance_count: 1
+  instance_size_slug: basic-xxs
+  name: control-plane

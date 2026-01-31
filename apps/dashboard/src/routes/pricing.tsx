@@ -1,6 +1,7 @@
 import * as React from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Database, Check, HelpCircle, ArrowRight } from "lucide-react";
+import { Check, HelpCircle, ArrowRight } from "lucide-react";
+import howleropsLogo from "@/src/assets/howlerops-icon.png";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -138,13 +139,13 @@ function PricingPage(): React.JSX.Element {
         {/* Navigation */}
         <nav className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50">
           <div className="container mx-auto flex h-16 items-center justify-between px-4">
-            <Link to="/landing" className="flex items-center gap-2">
-              <Database className="h-8 w-8 text-primary" />
-              <span className="text-xl font-bold">Orochi Cloud</span>
+            <Link to="/" className="flex items-center gap-2">
+              <img src={howleropsLogo} alt="HowlerOps" className="h-10 w-10" />
+              <span className="text-xl font-bold">HowlerOps</span>
             </Link>
             <div className="hidden md:flex items-center gap-6">
               <Link
-                to="/landing"
+                to="/"
                 className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
               >
                 Features
@@ -340,7 +341,7 @@ function PricingPage(): React.JSX.Element {
                 className="bg-transparent border-primary-foreground text-primary-foreground hover:bg-primary-foreground/10"
                 asChild
               >
-                <a href="mailto:sales@orochi.cloud">Contact Sales</a>
+                <a href="mailto:sales@howlerops.com">Contact Sales</a>
               </Button>
             </div>
           </div>
@@ -352,18 +353,18 @@ function PricingPage(): React.JSX.Element {
             <div className="grid gap-8 md:grid-cols-4">
               <div>
                 <div className="flex items-center gap-2 mb-4">
-                  <Database className="h-6 w-6 text-primary" />
-                  <span className="font-bold">Orochi Cloud</span>
+                  <img src={howleropsLogo} alt="HowlerOps" className="h-8 w-8" />
+                  <span className="font-bold">HowlerOps</span>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  The PostgreSQL database platform for modern HTAP workloads.
+                  OrochiDB - The PostgreSQL platform for modern HTAP workloads.
                 </p>
               </div>
               <div>
                 <h4 className="font-semibold mb-4">Product</h4>
                 <ul className="space-y-2 text-sm text-muted-foreground">
                   <li>
-                    <Link to="/landing" className="hover:text-foreground">
+                    <Link to="/" className="hover:text-foreground">
                       Features
                     </Link>
                   </li>
@@ -417,7 +418,7 @@ function PricingPage(): React.JSX.Element {
             </div>
             <div className="border-t mt-8 pt-8 text-center text-sm text-muted-foreground">
               <p>
-                &copy; {new Date().getFullYear()} Orochi Cloud. All rights
+                &copy; {new Date().getFullYear()} HowlerOps. All rights
                 reserved.
               </p>
             </div>

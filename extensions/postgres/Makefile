@@ -24,6 +24,7 @@ OBJS = \
 	src/jit/jit_expr.o \
 	src/consensus/raft.o \
 	src/consensus/raft_log.o \
+	src/consensus/raft_stubs.o \
 	src/approx/hyperloglog.o \
 	src/approx/tdigest.o \
 	src/approx/sampling.o \
@@ -65,8 +66,8 @@ endif
 # Warnings
 PG_CFLAGS += -Wall -Wextra -Wno-unused-parameter
 
-# Link against compression libraries, OpenSSL (for S3 signing), and Kafka
-SHLIB_LINK = -llz4 -lzstd -lcurl -lssl -lcrypto -lrdkafka
+# Link against compression libraries, OpenSSL (for S3 signing), Kafka, and libpq (for distributed queries)
+SHLIB_LINK = -llz4 -lzstd -lcurl -lssl -lcrypto -lrdkafka -lpq
 
 # Regression tests
 REGRESS = basic distributed hypertable columnar vector tiering json

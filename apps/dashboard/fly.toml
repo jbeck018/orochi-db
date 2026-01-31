@@ -1,14 +1,14 @@
-# Fly.io Configuration for Orochi Cloud Dashboard
+# Fly.io Configuration for HowlerOps Dashboard
 # Production-ready deployment configuration
 # Deploy with: fly deploy
 
-app = "orochi-dashboard"
+app = "howlerops-dashboard"
 primary_region = "sjc"
 
 [build]
   dockerfile = "Dockerfile"
   [build.args]
-    VITE_API_URL = "https://orochi-control-plane.fly.dev"
+    VITE_API_URL = "https://api.howlerops.com"
 
 [env]
   NODE_ENV = "production"
@@ -19,7 +19,7 @@ primary_region = "sjc"
   force_https = true
   auto_stop_machines = "suspend"
   auto_start_machines = true
-  min_machines_running = 1
+  min_machines_running = 0
   processes = ["app"]
 
   [http_service.concurrency]

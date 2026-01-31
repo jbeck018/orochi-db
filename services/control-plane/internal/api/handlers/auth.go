@@ -2,10 +2,14 @@
 package handlers
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/orochi-db/orochi-db/services/control-plane/internal/auth"
 	"github.com/orochi-db/orochi-db/services/control-plane/internal/models"
@@ -293,6 +297,142 @@ func (h *AuthHandler) GetCurrentUser(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"user": user.ToResponse(),
+	})
+}
+
+// UploadAvatar handles avatar upload for the current user.
+// POST /api/v1/users/me/avatar
+func (h *AuthHandler) UploadAvatar(w http.ResponseWriter, r *http.Request) {
+	user, ok := auth.UserFromContext(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, models.APIError{
+			Code:    models.ErrCodeUnauthorized,
+			Message: "Not authenticated",
+		})
+		return
+	}
+
+	// Parse multipart form with 2MB limit
+	const maxSize = 2 << 20 // 2MB
+	if err := r.ParseMultipartForm(maxSize); err != nil {
+		writeJSON(w, http.StatusBadRequest, models.APIError{
+			Code:    models.ErrCodeBadRequest,
+			Message: "File too large (max 2MB)",
+		})
+		return
+	}
+
+	file, header, err := r.FormFile("avatar")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, models.APIError{
+			Code:    models.ErrCodeBadRequest,
+			Message: "No avatar file provided",
+		})
+		return
+	}
+	defer file.Close()
+
+	// Validate file type
+	contentType := header.Header.Get("Content-Type")
+	if !strings.HasPrefix(contentType, "image/") {
+		// Try to detect from file extension
+		ext := strings.ToLower(header.Filename[strings.LastIndex(header.Filename, ".")+1:])
+		switch ext {
+		case "jpg", "jpeg":
+			contentType = "image/jpeg"
+		case "png":
+			contentType = "image/png"
+		case "gif":
+			contentType = "image/gif"
+		case "webp":
+			contentType = "image/webp"
+		default:
+			writeJSON(w, http.StatusBadRequest, models.APIError{
+				Code:    models.ErrCodeValidation,
+				Message: "Invalid file type. Allowed: JPG, PNG, GIF, WebP",
+			})
+			return
+		}
+	}
+
+	// Validate allowed image types
+	allowedTypes := map[string]bool{
+		"image/jpeg": true,
+		"image/png":  true,
+		"image/gif":  true,
+		"image/webp": true,
+	}
+	if !allowedTypes[contentType] {
+		writeJSON(w, http.StatusBadRequest, models.APIError{
+			Code:    models.ErrCodeValidation,
+			Message: "Invalid file type. Allowed: JPG, PNG, GIF, WebP",
+		})
+		return
+	}
+
+	// Read file content
+	data, err := io.ReadAll(io.LimitReader(file, maxSize+1))
+	if err != nil {
+		h.logger.Error("failed to read avatar file", "error", err)
+		writeJSON(w, http.StatusInternalServerError, models.APIError{
+			Code:    models.ErrCodeInternal,
+			Message: "Failed to read file",
+		})
+		return
+	}
+
+	if int64(len(data)) > maxSize {
+		writeJSON(w, http.StatusBadRequest, models.APIError{
+			Code:    models.ErrCodeBadRequest,
+			Message: "File too large (max 2MB)",
+		})
+		return
+	}
+
+	// Convert to base64 data URL
+	avatarURL := fmt.Sprintf("data:%s;base64,%s", contentType, base64.StdEncoding.EncodeToString(data))
+
+	// Update user avatar
+	updatedUser, err := h.userService.UpdateAvatar(r.Context(), user.ID, avatarURL)
+	if err != nil {
+		h.logger.Error("failed to update avatar", "error", err, "user_id", user.ID)
+		writeJSON(w, http.StatusInternalServerError, models.APIError{
+			Code:    models.ErrCodeInternal,
+			Message: "Failed to update avatar",
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"user": updatedUser.ToResponse(),
+	})
+}
+
+// DeleteAvatar removes the avatar for the current user.
+// DELETE /api/v1/users/me/avatar
+func (h *AuthHandler) DeleteAvatar(w http.ResponseWriter, r *http.Request) {
+	user, ok := auth.UserFromContext(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, models.APIError{
+			Code:    models.ErrCodeUnauthorized,
+			Message: "Not authenticated",
+		})
+		return
+	}
+
+	// Update user avatar to empty
+	updatedUser, err := h.userService.UpdateAvatar(r.Context(), user.ID, "")
+	if err != nil {
+		h.logger.Error("failed to delete avatar", "error", err, "user_id", user.ID)
+		writeJSON(w, http.StatusInternalServerError, models.APIError{
+			Code:    models.ErrCodeInternal,
+			Message: "Failed to delete avatar",
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"user": updatedUser.ToResponse(),
 	})
 }
 

@@ -36,8 +36,9 @@ func TestBuildPostgresParameters_Tiering(t *testing.T) {
 					},
 				},
 			},
+			// Note: shared_preload_libraries is now set at postgresql level, not in parameters
 			expected: map[string]string{
-				"shared_preload_libraries": "orochi",
+				"max_connections": "200", // Just verify base params exist
 			},
 		},
 		{
@@ -60,15 +61,15 @@ func TestBuildPostgresParameters_Tiering(t *testing.T) {
 					},
 				},
 			},
+			// Note: shared_preload_libraries is now set at postgresql level, not in parameters
 			expected: map[string]string{
-				"shared_preload_libraries":       "orochi",
-				"orochi.tiering_enabled":         "on",
-				"orochi.tiering_hot_duration":    "7 days",
-				"orochi.tiering_warm_duration":   "30 days",
-				"orochi.tiering_cold_duration":   "90 days",
-				"orochi.s3_endpoint":             "s3.amazonaws.com",
-				"orochi.s3_bucket":               "test-bucket",
-				"orochi.s3_region":               "us-east-1",
+				"orochi.tiering_enabled":       "on",
+				"orochi.tiering_hot_duration":  "7 days",
+				"orochi.tiering_warm_duration": "30 days",
+				"orochi.tiering_cold_duration": "90 days",
+				"orochi.s3_endpoint":           "s3.amazonaws.com",
+				"orochi.s3_bucket":             "test-bucket",
+				"orochi.s3_region":             "us-east-1",
 			},
 		},
 		{
@@ -87,11 +88,11 @@ func TestBuildPostgresParameters_Tiering(t *testing.T) {
 					},
 				},
 			},
+			// Note: shared_preload_libraries is now set at postgresql level, not in parameters
 			expected: map[string]string{
-				"shared_preload_libraries": "orochi",
-				"orochi.tiering_enabled":   "on",
-				"orochi.s3_endpoint":       "minio.internal:9000",
-				"orochi.s3_bucket":         "orochi-cold",
+				"orochi.tiering_enabled": "on",
+				"orochi.s3_endpoint":     "minio.internal:9000",
+				"orochi.s3_bucket":       "orochi-cold",
 			},
 		},
 		{
@@ -115,8 +116,8 @@ func TestBuildPostgresParameters_Tiering(t *testing.T) {
 					},
 				},
 			},
+			// Note: shared_preload_libraries is now set at postgresql level, not in parameters
 			expected: map[string]string{
-				"shared_preload_libraries":    "orochi",
 				"orochi.tiering_enabled":      "on",
 				"orochi.tiering_hot_duration": "3 days", // Overridden
 				"orochi.s3_endpoint":          "s3.amazonaws.com",

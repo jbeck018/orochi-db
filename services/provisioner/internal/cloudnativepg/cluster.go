@@ -220,9 +220,12 @@ func (m *ClusterManager) buildClusterSpec(spec *types.ClusterSpec) *unstructured
 	imageName := spec.ImageName
 	if imageName == "" {
 		// Use custom Orochi PostgreSQL image with extension pre-installed
-		// Primary: GHCR (publicly accessible)
-		// Alternative: registry.digitalocean.com/orochi-registry/orochi-pg
-		imageName = fmt.Sprintf("ghcr.io/jbeck018/orochi-pg:%s", postgresVersion)
+		if m.cfg.DefaultImageCatalog != "" {
+			imageName = fmt.Sprintf("%s:%s", m.cfg.DefaultImageCatalog, postgresVersion)
+		} else {
+			// Use v16 - custom image with orochi extension and all stubs
+			imageName = "ghcr.io/jbeck018/orochi-pg:18-v16"
+		}
 	}
 
 	storageClass := spec.Storage.StorageClass
@@ -243,6 +246,11 @@ func (m *ClusterManager) buildClusterSpec(spec *types.ClusterSpec) *unstructured
 			"spec": map[string]interface{}{
 				"instances":             int64(spec.Instances),
 				"imageName":             imageName,
+				"imagePullSecrets": []interface{}{
+					map[string]interface{}{
+						"name": "ghcr-secret",
+					},
+				},
 				"postgresGID":           int64(26),
 				"postgresUID":           int64(26),
 				"primaryUpdateStrategy": "unsupervised",
@@ -253,7 +261,7 @@ func (m *ClusterManager) buildClusterSpec(spec *types.ClusterSpec) *unstructured
 				},
 				"resources": m.buildResourceRequirements(spec.Resources),
 				"postgresql": map[string]interface{}{
-					"parameters":              m.buildPostgresParameters(spec),
+					"parameters":               m.buildPostgresParameters(spec),
 					"shared_preload_libraries": []interface{}{"orochi"},
 				},
 				// Bootstrap configuration
@@ -261,6 +269,7 @@ func (m *ClusterManager) buildClusterSpec(spec *types.ClusterSpec) *unstructured
 					"initdb": map[string]interface{}{
 						"postInitSQL": []interface{}{
 							"CREATE EXTENSION IF NOT EXISTS orochi",
+							"SELECT orochi.initialize()",
 						},
 					},
 				},
@@ -423,9 +432,9 @@ func (m *ClusterManager) buildPostgresParameters(spec *types.ClusterSpec) map[st
 		"maintenance_work_mem": "64MB",
 
 		// WAL configuration
-		"wal_buffers":                   "16MB",
-		"max_wal_size":                  "4GB",
-		"min_wal_size":                  "1GB",
+		"wal_buffers":                  "16MB",
+		"max_wal_size":                 "4GB",
+		"min_wal_size":                 "1GB",
 		"checkpoint_completion_target": "0.9",
 
 		// Query planning
@@ -435,6 +444,10 @@ func (m *ClusterManager) buildPostgresParameters(spec *types.ClusterSpec) map[st
 		// Logging
 		"log_statement":              "ddl",
 		"log_min_duration_statement": "1000",
+
+		// PostgreSQL 18+ instant cloning via XFS reflinks (316x faster)
+		// This enables copy-on-write cloning when using XFS with reflink support
+		"file_copy_method": "clone",
 	}
 
 	// Apply Orochi-specific configuration

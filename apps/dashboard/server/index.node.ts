@@ -1,4 +1,4 @@
-// Production server entry point for Orochi Dashboard (Node.js version)
+// Production server entry point for HowlerOps Dashboard (Node.js version)
 // Compatible with Node.js runtime without Bun dependencies
 
 import { createServer, IncomingMessage, ServerResponse } from 'node:http';
@@ -210,8 +210,8 @@ function generateHtmlShell(): string {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Orochi Cloud Dashboard</title>
-  <meta name="description" content="Orochi DB Cloud Management Platform" />
+  <title>HowlerOps Dashboard</title>
+  <meta name="description" content="HowlerOps - OrochiDB Management Platform" />
   ${mainCss ? `<link rel="stylesheet" href="${mainCss}" />` : ''}
 </head>
 <body>
@@ -300,7 +300,7 @@ async function main(): Promise<void> {
   });
 
   server.listen(SERVER_PORT, '0.0.0.0', () => {
-    console.log(`Orochi Dashboard listening on http://0.0.0.0:${SERVER_PORT}`);
+    console.log(`HowlerOps Dashboard listening on http://0.0.0.0:${SERVER_PORT}`);
   });
 }
 

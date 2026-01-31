@@ -17,6 +17,7 @@ import {
   Copy,
   Check,
 } from "lucide-react";
+import howleropsLogo from "@/src/assets/howlerops-icon.png";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -116,13 +117,13 @@ function DocsPage(): React.JSX.Element {
       {/* Navigation */}
       <nav className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50">
         <div className="container mx-auto flex h-16 items-center justify-between px-4">
-          <Link to="/landing" className="flex items-center gap-2">
-            <Database className="h-8 w-8 text-primary" />
-            <span className="text-xl font-bold">Orochi Cloud</span>
+          <Link to="/" className="flex items-center gap-2">
+            <img src={howleropsLogo} alt="HowlerOps" className="h-10 w-10" />
+            <span className="text-xl font-bold">HowlerOps</span>
           </Link>
           <div className="hidden md:flex items-center gap-6">
             <Link
-              to="/landing"
+              to="/"
               className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
             >
               Features
@@ -194,10 +195,10 @@ function DocsPage(): React.JSX.Element {
             {/* Header */}
             <div className="mb-12">
               <h1 className="text-4xl font-bold tracking-tight mb-4">
-                Orochi Cloud Documentation
+                OrochiDB Documentation
               </h1>
               <p className="text-xl text-muted-foreground">
-                Learn how to use Orochi Cloud's powerful PostgreSQL HTAP features
+                Learn how to use OrochiDB's powerful PostgreSQL HTAP features
                 including automatic sharding, time-series optimization, columnar
                 storage, and more.
               </p>
@@ -266,7 +267,7 @@ function DocsPage(): React.JSX.Element {
                 Quick Start Guide
               </h2>
               <p className="text-muted-foreground mb-6">
-                Get started with Orochi Cloud in just a few steps.
+                Get started with OrochiDB on HowlerOps in just a few steps.
               </p>
 
               <div className="space-y-6">
@@ -275,9 +276,9 @@ function DocsPage(): React.JSX.Element {
                     1. Create an Account
                   </h3>
                   <p className="text-muted-foreground mb-3">
-                    Sign up for a free Orochi Cloud account at{" "}
+                    Sign up for a free HowlerOps account at{" "}
                     <Link to="/register" className="text-primary hover:underline">
-                      orochi.cloud/register
+                      howlerops.com/register
                     </Link>
                     . No credit card required.
                   </p>
@@ -307,17 +308,17 @@ function DocsPage(): React.JSX.Element {
                   </p>
                   <CodeBlock language="bash">
 {`# Using psql
-psql "postgresql://username:password@your-cluster.orochi.cloud:5432/dbname"
+psql "postgresql://username:password@your-cluster.howlerops.com:5432/dbname"
 
 # Using Node.js
 const { Pool } = require('pg');
 const pool = new Pool({
-  connectionString: 'postgresql://username:password@your-cluster.orochi.cloud:5432/dbname'
+  connectionString: 'postgresql://username:password@your-cluster.howlerops.com:5432/dbname'
 });
 
 # Using Python
 import psycopg2
-conn = psycopg2.connect("postgresql://username:password@your-cluster.orochi.cloud:5432/dbname")`}
+conn = psycopg2.connect("postgresql://username:password@your-cluster.howlerops.com:5432/dbname")`}
                   </CodeBlock>
                 </div>
               </div>
@@ -330,7 +331,7 @@ conn = psycopg2.connect("postgresql://username:password@your-cluster.orochi.clou
                 Automatic Sharding
               </h2>
               <p className="text-muted-foreground mb-6">
-                Orochi Cloud automatically distributes your data across multiple
+                OrochiDB automatically distributes your data across multiple
                 nodes using hash-based sharding. This allows you to scale
                 horizontally without changing your application code.
               </p>
@@ -421,7 +422,7 @@ SELECT orochi_move_shard(
                 Time-Series Optimization
               </h2>
               <p className="text-muted-foreground mb-6">
-                Orochi Cloud automatically partitions time-series data into chunks
+                OrochiDB automatically partitions time-series data into chunks
                 for optimal query performance and data lifecycle management.
               </p>
 
@@ -828,18 +829,18 @@ SELECT * FROM pipeline_stats();`}
           <div className="grid gap-8 md:grid-cols-4">
             <div>
               <div className="flex items-center gap-2 mb-4">
-                <Database className="h-6 w-6 text-primary" />
-                <span className="font-bold">Orochi Cloud</span>
+                <img src={howleropsLogo} alt="HowlerOps" className="h-8 w-8" />
+                <span className="font-bold">HowlerOps</span>
               </div>
               <p className="text-sm text-muted-foreground">
-                The PostgreSQL database platform for modern HTAP workloads.
+                OrochiDB - The PostgreSQL platform for modern HTAP workloads.
               </p>
             </div>
             <div>
               <h4 className="font-semibold mb-4">Product</h4>
               <ul className="space-y-2 text-sm text-muted-foreground">
                 <li>
-                  <Link to="/landing" className="hover:text-foreground">
+                  <Link to="/" className="hover:text-foreground">
                     Features
                   </Link>
                 </li>
@@ -893,7 +894,7 @@ SELECT * FROM pipeline_stats();`}
           </div>
           <div className="border-t mt-8 pt-8 text-center text-sm text-muted-foreground">
             <p>
-              &copy; {new Date().getFullYear()} Orochi Cloud. All rights
+              &copy; {new Date().getFullYear()} HowlerOps. All rights
               reserved.
             </p>
           </div>

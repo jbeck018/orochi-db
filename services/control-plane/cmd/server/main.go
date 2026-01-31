@@ -1,4 +1,4 @@
-// Package main provides the entry point for the Orochi Cloud control plane server.
+// Package main provides the entry point for the HowlerOps control plane server.
 package main
 
 import (
@@ -19,6 +19,7 @@ import (
 	"github.com/orochi-db/orochi-db/services/control-plane/internal/api"
 	"github.com/orochi-db/orochi-db/services/control-plane/internal/auth"
 	"github.com/orochi-db/orochi-db/services/control-plane/internal/db"
+	"github.com/orochi-db/orochi-db/services/control-plane/internal/provisioner"
 	"github.com/orochi-db/orochi-db/services/control-plane/internal/services"
 	"github.com/orochi-db/orochi-db/services/control-plane/pkg/config"
 )
@@ -30,7 +31,7 @@ func main() {
 	}))
 	slog.SetDefault(logger)
 
-	logger.Info("starting Orochi Cloud control plane")
+	logger.Info("starting HowlerOps control plane")
 
 	// Load configuration
 	cfg := config.Load()
@@ -112,8 +113,36 @@ func run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		}
 	}
 
+	// Initialize provisioner client
+	var provisionerClient *provisioner.Client
+	if cfg.Provisioner.Enabled {
+		logger.Info("initializing provisioner client", "addr", cfg.Provisioner.Addr)
+		var err error
+		provisionerClient, err = provisioner.NewClient(cfg.Provisioner, logger)
+		if err != nil {
+			logger.Warn("failed to initialize provisioner client, falling back to simulated provisioning", "error", err)
+		} else {
+			// Ensure provisioner client is closed on shutdown
+			defer func() {
+				logger.Info("closing provisioner client")
+				if err := provisionerClient.Close(); err != nil {
+					logger.Warn("error closing provisioner client", "error", err)
+				}
+			}()
+
+			// Health check the provisioner
+			if _, err := provisionerClient.HealthCheck(ctx); err != nil {
+				logger.Warn("provisioner health check failed, real provisioning may not work", "error", err)
+			} else {
+				logger.Info("provisioner is healthy")
+			}
+		}
+	} else {
+		logger.Info("provisioner not configured, using simulated provisioning")
+	}
+
 	// Initialize remaining services
-	clusterService := services.NewClusterService(database, logger)
+	clusterService := services.NewClusterService(database, logger, provisionerClient)
 	adminService := services.NewAdminService(database, logger)
 	organizationService := services.NewOrganizationService(database, logger)
 	inviteService := services.NewInviteService(database, logger)

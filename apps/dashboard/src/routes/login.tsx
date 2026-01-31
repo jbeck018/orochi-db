@@ -1,7 +1,7 @@
 import * as React from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { Database } from "lucide-react";
 import { LoginForm } from "@/components/auth/login-form";
+import howleropsLogo from "@/src/assets/howlerops-icon.png";
 import {
   Card,
   CardContent,
@@ -16,10 +16,10 @@ export const Route = createFileRoute("/login")({
     meta: [
       {
         name: "description",
-        content: "Sign in to your Orochi Cloud account",
+        content: "Sign in to your HowlerOps account",
       },
     ],
-    title: "Sign In - Orochi Cloud",
+    title: "Sign In - HowlerOps",
   }),
 });
 
@@ -28,11 +28,11 @@ function LoginPage(): React.JSX.Element {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
       <div className="w-full max-w-md space-y-6">
         <div className="flex flex-col items-center space-y-2 text-center">
-          <div className="flex items-center space-x-2">
-            <Database className="h-10 w-10 text-primary" />
-            <span className="text-3xl font-bold">Orochi Cloud</span>
+          <div className="flex items-center space-x-3">
+            <img src={howleropsLogo} alt="HowlerOps" className="h-12 w-12" />
+            <span className="text-3xl font-bold">HowlerOps</span>
           </div>
-          <p className="text-muted-foreground">PostgreSQL HTAP Platform</p>
+          <p className="text-muted-foreground">OrochiDB - PostgreSQL HTAP Platform</p>
         </div>
 
         <Card>

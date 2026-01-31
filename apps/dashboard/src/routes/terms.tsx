@@ -27,14 +27,14 @@ function TermsOfServicePage(): React.JSX.Element {
           <section className="mt-8">
             <h2 className="text-2xl font-semibold mb-4">1. Acceptance of Terms</h2>
             <p>
-              By accessing or using Orochi Cloud (&quot;the Service&quot;), you agree to be bound by these Terms of Service and all applicable laws and regulations. If you do not agree with any of these terms, you are prohibited from using or accessing this Service.
+              By accessing or using HowlerOps (&quot;the Service&quot;), you agree to be bound by these Terms of Service and all applicable laws and regulations. If you do not agree with any of these terms, you are prohibited from using or accessing this Service.
             </p>
           </section>
 
           <section className="mt-8">
             <h2 className="text-2xl font-semibold mb-4">2. Description of Service</h2>
             <p>
-              Orochi Cloud provides managed PostgreSQL database services with advanced features including:
+              HowlerOps provides managed OrochiDB PostgreSQL database services with advanced features including:
             </p>
             <ul className="list-disc pl-6 mt-2 space-y-1">
               <li>Automatic sharding and distributed queries</li>
@@ -97,7 +97,7 @@ function TermsOfServicePage(): React.JSX.Element {
           <section className="mt-8">
             <h2 className="text-2xl font-semibold mb-4">9. Limitation of Liability</h2>
             <p>
-              To the maximum extent permitted by law, Orochi Cloud shall not be liable for any indirect, incidental, special, consequential, or punitive damages resulting from your use of the Service.
+              To the maximum extent permitted by law, HowlerOps shall not be liable for any indirect, incidental, special, consequential, or punitive damages resulting from your use of the Service.
             </p>
           </section>
 
@@ -115,8 +115,8 @@ function TermsOfServicePage(): React.JSX.Element {
             </p>
             <p className="mt-2">
               <strong>Email:</strong>{" "}
-              <a href="mailto:legal@orochi.dev" className="text-primary hover:underline">
-                legal@orochi.dev
+              <a href="mailto:legal@howlerops.com" className="text-primary hover:underline">
+                legal@howlerops.com
               </a>
             </p>
           </section>

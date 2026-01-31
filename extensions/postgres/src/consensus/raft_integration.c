@@ -27,6 +27,7 @@
 #include "utils/builtins.h"
 #include "utils/memutils.h"
 #include "utils/timestamp.h"
+#include "utils/guc.h"
 #include "access/xact.h"
 #include "executor/spi.h"
 
@@ -74,6 +75,7 @@ static RaftTransactionEntry *transaction_tracker_find(const char *gid);
 static void transaction_tracker_update_status(const char *gid, RaftTransactionStatus status);
 static void transaction_tracker_remove_old(void);
 static uint32 command_hash(const char *data, int32 size);
+static bool transaction_tracker_verify_commit(const char *gid, RaftNode *node);
 
 /* Local Raft node instance (only used by background worker) */
 static RaftNode *local_raft_node = NULL;

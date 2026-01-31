@@ -6,7 +6,7 @@ metadata:
   labels:
     app: control-plane
   annotations:
-    service.beta.kubernetes.io/do-loadbalancer-name: "orochi-api-lb"
+    service.beta.kubernetes.io/do-loadbalancer-name: "howlerops-api-lb"
     service.beta.kubernetes.io/do-loadbalancer-protocol: "http"
     service.beta.kubernetes.io/do-loadbalancer-tls-ports: "443"
     service.beta.kubernetes.io/do-loadbalancer-certificate-id: ""
@@ -33,7 +33,7 @@ metadata:
   labels:
     app: dashboard
   annotations:
-    service.beta.kubernetes.io/do-loadbalancer-name: "orochi-dashboard-lb"
+    service.beta.kubernetes.io/do-loadbalancer-name: "howlerops-dashboard-lb"
     service.beta.kubernetes.io/do-loadbalancer-protocol: "http"
     service.beta.kubernetes.io/do-loadbalancer-tls-ports: "443"
     service.beta.kubernetes.io/do-loadbalancer-certificate-id: ""
