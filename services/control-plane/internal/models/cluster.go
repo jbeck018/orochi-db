@@ -18,6 +18,9 @@ const (
 	ClusterStatusStopped      ClusterStatus = "stopped"
 	ClusterStatusDeleting     ClusterStatus = "deleting"
 	ClusterStatusFailed       ClusterStatus = "failed"
+	ClusterStatusSuspended    ClusterStatus = "suspended"   // Scale-to-zero: cluster pods are scaled down
+	ClusterStatusSuspending   ClusterStatus = "suspending"  // Scale-to-zero: transitioning to suspended
+	ClusterStatusWaking       ClusterStatus = "waking"      // Scale-to-zero: transitioning from suspended to running
 )
 
 // ClusterTier represents the pricing tier of a cluster.
@@ -71,6 +74,12 @@ type Cluster struct {
 	S3Region            *string        `json:"s3_region,omitempty"`          // S3 region
 	EnableColumnar      bool           `json:"enable_columnar"`              // Enable columnar storage
 	DefaultShardCount   int            `json:"default_shard_count"`          // Default shard count for distributed tables
+	// Scale-to-zero configuration
+	ScaleToZeroEnabled  bool           `json:"scale_to_zero_enabled"`        // Enable automatic scale-to-zero
+	IdleTimeoutSeconds  int            `json:"idle_timeout_seconds"`         // Seconds of inactivity before suspending (default: 300)
+	WakeTimeoutSeconds  int            `json:"wake_timeout_seconds"`         // Max seconds to wait for cluster to wake (default: 60)
+	LastActivityAt      *time.Time     `json:"last_activity_at,omitempty"`   // Last connection/query activity timestamp
+	SuspendedAt         *time.Time     `json:"suspended_at,omitempty"`       // When cluster was suspended
 	CreatedAt           time.Time      `json:"created_at"`
 	UpdatedAt           time.Time      `json:"updated_at"`
 	DeletedAt           *time.Time     `json:"deleted_at,omitempty"`
@@ -133,6 +142,37 @@ type ClusterUpdateRequest struct {
 type ClusterScaleRequest struct {
 	NodeCount int    `json:"node_count"`
 	NodeSize  string `json:"node_size,omitempty"`
+}
+
+// ClusterStateResponse represents the response for cluster state queries.
+type ClusterStateResponse struct {
+	ClusterID     uuid.UUID     `json:"cluster_id"`
+	Status        ClusterStatus `json:"status"`
+	IsReady       bool          `json:"is_ready"`        // True if cluster can accept connections
+	LastActivity  *time.Time    `json:"last_activity,omitempty"`
+	SuspendedAt   *time.Time    `json:"suspended_at,omitempty"`
+	WakeStartedAt *time.Time    `json:"wake_started_at,omitempty"`
+	Message       string        `json:"message,omitempty"`
+}
+
+// SuspendClusterRequest represents a request to suspend a cluster.
+type SuspendClusterRequest struct {
+	Force          bool `json:"force"`           // Force suspend even with active connections
+	DrainTimeout   int  `json:"drain_timeout"`   // Seconds to wait for connections to drain (default: 30)
+}
+
+// WakeClusterRequest represents a request to wake a suspended cluster.
+type WakeClusterRequest struct {
+	WaitForReady bool `json:"wait_for_ready"` // Block until cluster is ready (default: false)
+	Timeout      int  `json:"timeout"`        // Timeout in seconds (default: 60)
+}
+
+// ScaleToZeroConfig represents scale-to-zero configuration for a cluster.
+type ScaleToZeroConfig struct {
+	Enabled            bool `json:"enabled"`
+	IdleTimeoutSeconds int  `json:"idle_timeout_seconds"` // Default: 300 (5 minutes)
+	WakeTimeoutSeconds int  `json:"wake_timeout_seconds"` // Default: 60
+	MaxQueuedConns     int  `json:"max_queued_connections"` // Default: 100
 }
 
 // ClusterMetrics represents metrics for a cluster.

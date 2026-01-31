@@ -30,6 +30,18 @@ var (
 	ErrClusterOperationPending = errors.New("another operation is pending on this cluster")
 )
 
+// Scale-to-zero errors.
+var (
+	ErrClusterAlreadySuspended = errors.New("cluster is already suspended")
+	ErrClusterNotSuspended     = errors.New("cluster is not suspended")
+	ErrClusterSuspending       = errors.New("cluster is currently suspending")
+	ErrClusterWaking           = errors.New("cluster is currently waking")
+	ErrWakeTimeout             = errors.New("cluster wake timeout exceeded")
+	ErrDrainTimeout            = errors.New("connection drain timeout exceeded")
+	ErrMaxQueuedConnections    = errors.New("maximum queued connections reached during wake")
+	ErrScaleToZeroDisabled     = errors.New("scale-to-zero is not enabled for this cluster")
+)
+
 // Tiering configuration errors.
 var (
 	ErrTieringHotDurationRequired  = errors.New("hot tier duration is required when tiering is enabled")

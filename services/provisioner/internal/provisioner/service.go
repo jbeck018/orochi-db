@@ -24,6 +24,7 @@ type Service struct {
 	clusterManager  *cloudnativepg.ClusterManager
 	backupManager   *cloudnativepg.BackupManager
 	restoreManager  *cloudnativepg.RestoreManager
+	poolerManager   *PoolerManager
 	templateEngine  *TemplateEngine
 	logger          *zap.Logger
 	mu              sync.RWMutex
@@ -51,6 +52,9 @@ func NewService(cfg *config.Config, logger *zap.Logger) (*Service, error) {
 		return nil, fmt.Errorf("failed to create template engine: %w", err)
 	}
 
+	// Initialize pooler manager for PgDog deployment
+	poolerManager := NewPoolerManager(k8sClient, templateEngine, logger)
+
 	return &Service{
 		cfg:             cfg,
 		k8sClient:       k8sClient,
@@ -58,6 +62,7 @@ func NewService(cfg *config.Config, logger *zap.Logger) (*Service, error) {
 		clusterManager:  clusterManager,
 		backupManager:   backupManager,
 		restoreManager:  restoreManager,
+		poolerManager:   poolerManager,
 		templateEngine:  templateEngine,
 		logger:          logger,
 	}, nil
@@ -124,6 +129,22 @@ func (s *Service) CreateCluster(ctx context.Context, spec *types.ClusterSpec, wa
 				)
 			}
 		}
+
+		// Deploy PgDog connection pooler if enabled
+		if spec.Pooler != nil && spec.Pooler.Enabled {
+			s.logger.Info("deploying PgDog connection pooler",
+				zap.String("cluster", spec.Name),
+				zap.String("namespace", spec.Namespace),
+			)
+			if err := s.poolerManager.CreatePooler(ctx, spec); err != nil {
+				s.logger.Warn("failed to create PgDog pooler",
+					zap.String("cluster", spec.Name),
+					zap.Error(err),
+				)
+				// Don't fail cluster creation if pooler deployment fails
+				// The pooler can be deployed separately later
+			}
+		}
 	}
 
 	// Create scheduled backup if configured (non-critical, no lock needed)
@@ -182,6 +203,50 @@ func (s *Service) UpdateCluster(ctx context.Context, spec *types.ClusterSpec, ro
 		return nil, err
 	}
 
+	// Handle PgDog pooler changes
+	if spec.Pooler != nil && spec.Pooler.Enabled {
+		// Check if pooler exists
+		poolerStatus, err := s.poolerManager.GetPoolerStatus(ctx, spec.Namespace, spec.Name)
+		if err != nil {
+			s.logger.Warn("failed to get pooler status during update",
+				zap.String("cluster", spec.Name),
+				zap.Error(err),
+			)
+		}
+
+		if poolerStatus != nil && poolerStatus.Enabled {
+			// Update existing pooler
+			if err := s.poolerManager.UpdatePoolerConfig(ctx, spec); err != nil {
+				s.logger.Warn("failed to update PgDog pooler",
+					zap.String("cluster", spec.Name),
+					zap.Error(err),
+				)
+			}
+		} else {
+			// Create new pooler
+			if err := s.poolerManager.CreatePooler(ctx, spec); err != nil {
+				s.logger.Warn("failed to create PgDog pooler during update",
+					zap.String("cluster", spec.Name),
+					zap.Error(err),
+				)
+			}
+		}
+	} else {
+		// Pooler disabled or not specified - check if we need to remove existing pooler
+		poolerStatus, _ := s.poolerManager.GetPoolerStatus(ctx, spec.Namespace, spec.Name)
+		if poolerStatus != nil && poolerStatus.Enabled {
+			s.logger.Info("pooler disabled in spec, removing existing pooler",
+				zap.String("cluster", spec.Name),
+			)
+			if err := s.poolerManager.DeletePooler(ctx, spec.Namespace, spec.Name); err != nil {
+				s.logger.Warn("failed to delete PgDog pooler during update",
+					zap.String("cluster", spec.Name),
+					zap.Error(err),
+				)
+			}
+		}
+	}
+
 	return s.buildClusterInfo(ctx, cluster, spec)
 }
 
@@ -196,6 +261,15 @@ func (s *Service) DeleteCluster(ctx context.Context, namespace, name string, del
 
 	// No service-level lock needed - underlying managers handle their own synchronization
 	// All operations below are independent and can proceed without blocking other service calls
+
+	// Delete PgDog connection pooler first (before PostgreSQL cluster)
+	if err := s.poolerManager.DeletePooler(ctx, namespace, name); err != nil {
+		s.logger.Warn("failed to delete PgDog pooler",
+			zap.String("cluster", name),
+			zap.Error(err),
+		)
+		// Continue with cluster deletion even if pooler deletion fails
+	}
 
 	// Delete scheduled backups
 	scheduledBackups, err := s.backupManager.ListScheduledBackups(ctx, namespace, name)
@@ -486,6 +560,19 @@ func (s *Service) buildClusterInfo(ctx context.Context, cluster interface{}, spe
 		}
 	}
 
+	// Get pooler status if pooler is configured
+	if spec.Pooler != nil && spec.Pooler.Enabled {
+		poolerStatus, err := s.poolerManager.GetPoolerStatus(ctx, spec.Namespace, spec.Name)
+		if err != nil {
+			s.logger.Warn("failed to get pooler status",
+				zap.String("cluster", spec.Name),
+				zap.Error(err),
+			)
+		} else {
+			status.Pooler = poolerStatus
+		}
+	}
+
 	return &types.ClusterInfo{
 		ClusterID: fmt.Sprintf("%s/%s", spec.Namespace, spec.Name),
 		Name:      spec.Name,
@@ -522,6 +609,12 @@ func (s *Service) buildClusterInfoFromCNPG(ctx context.Context, cluster interfac
 				}
 			}
 
+			// Get pooler status
+			poolerStatus, err := s.poolerManager.GetPoolerStatus(ctx, namespace, name)
+			if err == nil && poolerStatus != nil && poolerStatus.Enabled {
+				status.Pooler = poolerStatus
+			}
+
 			return &types.ClusterInfo{
 				ClusterID: fmt.Sprintf("%s/%s", namespace, name),
 				Name:      name,
@@ -542,6 +635,12 @@ func (s *Service) buildClusterInfoFromCNPG(ctx context.Context, cluster interfac
 		status = &types.ClusterStatus{
 			Phase: types.ClusterPhaseUnknown,
 		}
+	}
+
+	// Get pooler status
+	poolerStatus, err := s.poolerManager.GetPoolerStatus(ctx, namespace, name)
+	if err == nil && poolerStatus != nil && poolerStatus.Enabled {
+		status.Pooler = poolerStatus
 	}
 
 	return &types.ClusterInfo{

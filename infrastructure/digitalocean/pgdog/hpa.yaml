@@ -1,0 +1,81 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: pgdog-hpa
+  namespace: orochi-cloud
+  labels:
+    app: pgdog
+    app.kubernetes.io/name: pgdog
+    app.kubernetes.io/component: connection-pooler
+    app.kubernetes.io/part-of: orochi-cloud
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: pgdog
+
+  # Replica limits
+  minReplicas: 2
+  maxReplicas: 10
+
+  # Scaling metrics
+  metrics:
+    # Scale based on CPU utilization
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+
+    # Scale based on memory utilization
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+
+    # Scale based on active connections (custom metric from Prometheus)
+    # Requires prometheus-adapter to be configured
+    - type: Pods
+      pods:
+        metric:
+          name: pgdog_active_connections
+        target:
+          type: AverageValue
+          # Scale up when average connections per pod exceeds 500
+          averageValue: "500"
+
+    # Scale based on connection queue length
+    - type: Pods
+      pods:
+        metric:
+          name: pgdog_waiting_clients
+        target:
+          type: AverageValue
+          # Scale up when average waiting clients exceeds 10
+          averageValue: "10"
+
+  # Scaling behavior configuration
+  behavior:
+    scaleUp:
+      # Allow quick scale-up for connection spikes
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+        - type: Percent
+          value: 50
+          periodSeconds: 60
+      selectPolicy: Max
+
+    scaleDown:
+      # Slow scale-down to avoid connection disruption
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120
+      selectPolicy: Min

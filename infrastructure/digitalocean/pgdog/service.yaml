@@ -1,0 +1,99 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: pgdog
+  namespace: orochi-cloud
+  labels:
+    app: pgdog
+    app.kubernetes.io/name: pgdog
+    app.kubernetes.io/component: connection-pooler
+    app.kubernetes.io/part-of: orochi-cloud
+  annotations:
+    # DigitalOcean Load Balancer annotations
+    service.beta.kubernetes.io/do-loadbalancer-name: "orochi-pgdog"
+    service.beta.kubernetes.io/do-loadbalancer-protocol: "tcp"
+    service.beta.kubernetes.io/do-loadbalancer-algorithm: "least_connections"
+    service.beta.kubernetes.io/do-loadbalancer-healthcheck-port: "6432"
+    service.beta.kubernetes.io/do-loadbalancer-healthcheck-protocol: "tcp"
+    service.beta.kubernetes.io/do-loadbalancer-healthcheck-check-interval-seconds: "10"
+    service.beta.kubernetes.io/do-loadbalancer-healthcheck-response-timeout-seconds: "5"
+    service.beta.kubernetes.io/do-loadbalancer-healthcheck-unhealthy-threshold: "3"
+    service.beta.kubernetes.io/do-loadbalancer-healthcheck-healthy-threshold: "2"
+spec:
+  type: LoadBalancer
+  selector:
+    app: pgdog
+  ports:
+    # External PostgreSQL port (via JWT proxy)
+    - name: postgres
+      port: 5433
+      targetPort: 5433
+      protocol: TCP
+    # Admin port for pgdog administration
+    - name: admin
+      port: 6433
+      targetPort: 6433
+      protocol: TCP
+    # Metrics port for Prometheus scraping
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 3600
+---
+# Internal service for cluster-internal access (bypasses LoadBalancer)
+apiVersion: v1
+kind: Service
+metadata:
+  name: pgdog-internal
+  namespace: orochi-cloud
+  labels:
+    app: pgdog
+    app.kubernetes.io/name: pgdog
+    app.kubernetes.io/component: connection-pooler
+    app.kubernetes.io/part-of: orochi-cloud
+spec:
+  type: ClusterIP
+  selector:
+    app: pgdog
+  ports:
+    # Direct PgDog access (no JWT proxy)
+    - name: postgres-direct
+      port: 6432
+      targetPort: 6432
+      protocol: TCP
+    # Admin port
+    - name: admin
+      port: 6433
+      targetPort: 6433
+      protocol: TCP
+    # Metrics port
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
+---
+# Headless service for StatefulSet-like DNS entries (if needed)
+apiVersion: v1
+kind: Service
+metadata:
+  name: pgdog-headless
+  namespace: orochi-cloud
+  labels:
+    app: pgdog
+    app.kubernetes.io/name: pgdog
+    app.kubernetes.io/component: connection-pooler
+    app.kubernetes.io/part-of: orochi-cloud
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app: pgdog
+  ports:
+    - name: postgres
+      port: 6432
+      targetPort: 6432
+      protocol: TCP

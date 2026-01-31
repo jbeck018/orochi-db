@@ -1,0 +1,241 @@
+# PgDog Users Configuration Template for Orochi DB
+# =================================================
+#
+# This file defines user authentication and authorization rules.
+# Users defined here are used for client-to-PgDog authentication.
+# Backend PostgreSQL connections use the credentials specified in pgdog.toml.
+#
+# Template Variables (Go template syntax):
+#   {{.AdminPassword}}     - Admin user password (hashed)
+#   {{.AppPassword}}       - Application user password (hashed)
+#   {{.ReadOnlyPassword}}  - Read-only user password (hashed)
+#   {{.ClusterName}}       - Cluster identifier
+#
+# Password Hashing:
+#   Use SCRAM-SHA-256 for production. Generate with:
+#   echo -n 'password' | openssl dgst -sha256 -binary | base64
+#
+# Documentation: https://pgdog.dev/docs/users
+
+# ==============================================================================
+# Global User Settings
+# ==============================================================================
+[settings]
+# Default authentication method: md5, scram, trust
+default_auth_method = "scram"
+
+# Password encryption for new users
+password_encryption = "scram-sha-256"
+
+# Session idle timeout (seconds)
+session_timeout = 3600
+
+# Maximum sessions per user (0 = unlimited)
+max_sessions_per_user = 0
+
+# ==============================================================================
+# Admin User
+# ==============================================================================
+[[users]]
+# PgDog admin user for management operations
+name = "pgdog_admin"
+
+# Authentication method
+auth_method = "scram"
+
+# Password (SCRAM-SHA-256 hashed)
+# Generate: echo -n 'yourpassword' | openssl dgst -sha256
+password = "{{if .AdminPassword}}{{.AdminPassword}}{{else}}SCRAM-SHA-256$4096:salt$client_key:server_key{{end}}"
+
+# Role for this user
+role = "admin"
+
+# Maximum connections for this user
+max_connections = 10
+
+# Allowed source IP ranges (CIDR notation)
+allowed_ips = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.1/32"]
+
+# Databases this user can access
+databases = ["*"]
+
+# Pool assignment
+pool = "default"
+
+# ==============================================================================
+# Application User (Read-Write)
+# ==============================================================================
+[[users]]
+# Main application user with full read-write access
+name = "{{if .ClusterName}}{{.ClusterName}}_app{{else}}orochi_app{{end}}"
+
+auth_method = "scram"
+
+# Password (change in production!)
+password = "{{if .AppPassword}}{{.AppPassword}}{{else}}SCRAM-SHA-256$4096:salt$client_key:server_key{{end}}"
+
+role = "application"
+
+# Higher connection limit for application user
+max_connections = 1000
+
+# Allow from cluster network and load balancers
+allowed_ips = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+
+# Database access
+databases = ["{{if .DatabaseName}}{{.DatabaseName}}{{else}}postgres{{end}}"]
+
+# Connection pool assignment
+pool = "default"
+
+# Query timeout for this user (milliseconds)
+statement_timeout = 30000
+
+# ==============================================================================
+# Read-Only User
+# ==============================================================================
+[[users]]
+# Read-only user for reporting and analytics
+name = "{{if .ClusterName}}{{.ClusterName}}_readonly{{else}}orochi_readonly{{end}}"
+
+auth_method = "scram"
+
+password = "{{if .ReadOnlyPassword}}{{.ReadOnlyPassword}}{{else}}SCRAM-SHA-256$4096:salt$client_key:server_key{{end}}"
+
+role = "readonly"
+
+max_connections = 500
+
+allowed_ips = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+
+databases = ["{{if .DatabaseName}}{{.DatabaseName}}{{else}}postgres{{end}}"]
+
+pool = "default"
+
+# Longer timeout for analytical queries
+statement_timeout = 300000
+
+# Force routing to replicas
+force_replica = true
+
+# ==============================================================================
+# Replication User (Internal)
+# ==============================================================================
+[[users]]
+# Internal user for replication monitoring
+name = "replication_monitor"
+
+auth_method = "scram"
+
+password = "{{if .ReplicationPassword}}{{.ReplicationPassword}}{{else}}SCRAM-SHA-256$4096:salt$client_key:server_key{{end}}"
+
+role = "replication"
+
+max_connections = 5
+
+# Internal cluster network only
+allowed_ips = ["10.0.0.0/8"]
+
+databases = ["postgres"]
+
+pool = "default"
+
+# ==============================================================================
+# Service Account (Control Plane)
+# ==============================================================================
+[[users]]
+# Service account for control plane operations
+name = "{{if .ClusterName}}{{.ClusterName}}_controlplane{{else}}orochi_controlplane{{end}}"
+
+auth_method = "scram"
+
+password = "{{if .ControlPlanePassword}}{{.ControlPlanePassword}}{{else}}SCRAM-SHA-256$4096:salt$client_key:server_key{{end}}"
+
+role = "service"
+
+max_connections = 50
+
+# Control plane network
+allowed_ips = ["10.0.0.0/8"]
+
+databases = ["*"]
+
+pool = "default"
+
+# Elevated privileges for cluster management
+allow_superuser_commands = true
+
+# ==============================================================================
+# JWT Passthrough User
+# ==============================================================================
+{{if .JWTPassthroughEnabled}}
+[[users]]
+# Passthrough user for JWT-authenticated connections
+# Actual authentication handled by Envoy JWT gateway
+name = "jwt_user"
+
+auth_method = "passthrough"
+
+role = "application"
+
+max_connections = 5000
+
+# Accept from JWT gateway only
+allowed_ips = ["127.0.0.1/32", "10.0.0.0/8"]
+
+databases = ["{{if .DatabaseName}}{{.DatabaseName}}{{else}}postgres{{end}}"]
+
+pool = "default"
+
+# Session variables injected from JWT claims
+inject_session_vars = true
+session_var_prefix = "request.jwt.claim."
+{{end}}
+
+# ==============================================================================
+# User Groups
+# ==============================================================================
+[groups]
+# Group definitions for role-based access control
+
+[groups.admins]
+# Users with administrative access
+users = ["pgdog_admin"]
+permissions = ["admin", "reload", "show_stats"]
+
+[groups.applications]
+# Application users
+users = ["{{if .ClusterName}}{{.ClusterName}}_app{{else}}orochi_app{{end}}", "{{if .ClusterName}}{{.ClusterName}}_controlplane{{else}}orochi_controlplane{{end}}"]
+permissions = ["connect", "query"]
+
+[groups.readonly]
+# Read-only users
+users = ["{{if .ClusterName}}{{.ClusterName}}_readonly{{else}}orochi_readonly{{end}}"]
+permissions = ["connect", "query"]
+force_replica = true
+
+# ==============================================================================
+# Backend User Mapping
+# ==============================================================================
+[backend_users]
+# Mapping of PgDog users to PostgreSQL backend users
+# Format: pgdog_user = "backend_user"
+
+# All application users connect as the same backend user
+"{{if .ClusterName}}{{.ClusterName}}_app{{else}}orochi_app{{end}}" = "{{if .BackendAppUser}}{{.BackendAppUser}}{{else}}postgres{{end}}"
+"{{if .ClusterName}}{{.ClusterName}}_readonly{{else}}orochi_readonly{{end}}" = "{{if .BackendReadOnlyUser}}{{.BackendReadOnlyUser}}{{else}}postgres{{end}}"
+"{{if .ClusterName}}{{.ClusterName}}_controlplane{{else}}orochi_controlplane{{end}}" = "{{if .BackendServiceUser}}{{.BackendServiceUser}}{{else}}postgres{{end}}"
+
+# Admin uses direct mapping
+"pgdog_admin" = "{{if .BackendAdminUser}}{{.BackendAdminUser}}{{else}}postgres{{end}}"
+
+# ==============================================================================
+# Backend Passwords
+# ==============================================================================
+[backend_passwords]
+# Passwords for backend PostgreSQL connections
+# These are used when connecting to the actual PostgreSQL servers
+# Format: backend_user = "password"
+
+"{{if .BackendAppUser}}{{.BackendAppUser}}{{else}}postgres{{end}}" = "{{if .BackendAppPassword}}{{.BackendAppPassword}}{{else}}{{end}}"
+"{{if .BackendAdminUser}}{{.BackendAdminUser}}{{else}}postgres{{end}}" = "{{if .BackendAdminPassword}}{{.BackendAdminPassword}}{{else}}{{end}}"

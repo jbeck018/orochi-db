@@ -35,6 +35,7 @@ import {
   ConnectionsChart,
   QueryPerformanceChart,
 } from "@/components/clusters/metrics-chart";
+import { PoolerStatusCard } from "@/components/clusters/pooler-status-card";
 import { useToast } from "@/hooks/use-toast";
 import {
   useCluster,
@@ -321,6 +322,11 @@ function ClusterOverview(): React.JSX.Element {
                 </div>
               </CardContent>
             </Card>
+          )}
+
+          {/* Connection Pooler Status */}
+          {cluster.poolerEnabled && (
+            <PoolerStatusCard clusterId={clusterId} compact />
           )}
         </TabsContent>
 

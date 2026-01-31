@@ -1,0 +1,189 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "pgdog-router.fullname" . }}
+  labels:
+    {{- include "pgdog-router.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "pgdog-router.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "pgdog-router.podLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "pgdog-router.serviceAccountName" . }}
+      {{- if .Values.priorityClassName }}
+      priorityClassName: {{ .Values.priorityClassName }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.initContainers }}
+      initContainers:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: {{ include "pgdog-router.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - "--config"
+            - "/etc/pgdog/pgdog.toml"
+          ports:
+            - name: postgresql
+              containerPort: {{ .Values.pgdog.general.port }}
+              protocol: TCP
+            - name: admin
+              containerPort: {{ .Values.pgdog.general.adminPort }}
+              protocol: TCP
+          {{- if .Values.livenessProbe.enabled }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: admin
+            initialDelaySeconds: {{ .Values.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.livenessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.livenessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.livenessProbe.failureThreshold }}
+            successThreshold: {{ .Values.livenessProbe.successThreshold }}
+          {{- end }}
+          {{- if .Values.readinessProbe.enabled }}
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: admin
+            initialDelaySeconds: {{ .Values.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.readinessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.readinessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.readinessProbe.failureThreshold }}
+            successThreshold: {{ .Values.readinessProbe.successThreshold }}
+          {{- end }}
+          {{- if .Values.startupProbe.enabled }}
+          startupProbe:
+            httpGet:
+              path: /health
+              port: admin
+            initialDelaySeconds: {{ .Values.startupProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.startupProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.startupProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.startupProbe.failureThreshold }}
+            successThreshold: {{ .Values.startupProbe.successThreshold }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          env:
+            - name: PGDOG_ADMIN_HOST
+              value: "0.0.0.0"
+            - name: PGDOG_ADMIN_PORT
+              value: {{ .Values.pgdog.general.adminPort | quote }}
+            {{- if .Values.secrets.create }}
+            {{- range $user, $_ := .Values.secrets.credentials }}
+            - name: PGDOG_USER_{{ $user | upper | replace "-" "_" }}_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "pgdog-router.secretName" $ }}
+                  key: {{ $user }}-password
+            {{- end }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/pgdog
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            {{- if and .Values.pgdog.tls.enabled (not .Values.pgdog.tls.existingSecret) }}
+            - name: tls
+              mountPath: /etc/pgdog/tls
+              readOnly: true
+            {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+        {{- if .Values.jwtProxy.enabled }}
+        - name: jwt-proxy
+          image: {{ include "pgdog-router.jwtProxyImage" . }}
+          imagePullPolicy: {{ .Values.jwtProxy.image.pullPolicy }}
+          ports:
+            - name: jwt-proxy
+              containerPort: {{ .Values.jwtProxy.port }}
+              protocol: TCP
+          env:
+            - name: JWT_PROXY_LISTEN_PORT
+              value: {{ .Values.jwtProxy.port | quote }}
+            - name: JWT_PROXY_UPSTREAM_HOST
+              value: "127.0.0.1"
+            - name: JWT_PROXY_UPSTREAM_PORT
+              value: {{ .Values.pgdog.general.port | quote }}
+            - name: JWT_PROXY_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "pgdog-router.jwtSecretName" . }}
+                  key: {{ .Values.jwtProxy.existingSecretKey }}
+            {{- if .Values.jwtProxy.issuer }}
+            - name: JWT_PROXY_ISSUER
+              value: {{ .Values.jwtProxy.issuer | quote }}
+            {{- end }}
+            {{- if .Values.jwtProxy.audience }}
+            - name: JWT_PROXY_AUDIENCE
+              value: {{ .Values.jwtProxy.audience | quote }}
+            {{- end }}
+            - name: JWT_PROXY_ALGORITHM
+              value: {{ .Values.jwtProxy.algorithm | quote }}
+          resources:
+            {{- toYaml .Values.jwtProxy.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+        {{- end }}
+        {{- with .Values.sidecarContainers }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "pgdog-router.fullname" . }}
+        - name: tmp
+          emptyDir: {}
+        {{- if and .Values.pgdog.tls.enabled (not .Values.pgdog.tls.existingSecret) }}
+        - name: tls
+          secret:
+            secretName: {{ include "pgdog-router.tlsSecretName" . }}
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

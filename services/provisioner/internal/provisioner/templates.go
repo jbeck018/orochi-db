@@ -384,6 +384,169 @@ spec:
 		return nil, fmt.Errorf("failed to parse service monitor template: %w", err)
 	}
 
+	// PgDog deployment template
+	pgdogDeploymentTemplate := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Name }}-pgdog
+  namespace: {{ .Namespace }}
+  labels:
+    app: pgdog
+    app.kubernetes.io/name: pgdog
+    app.kubernetes.io/instance: {{ .Name }}
+    app.kubernetes.io/component: connection-pooler
+    app.kubernetes.io/part-of: orochi-db
+    app.kubernetes.io/managed-by: orochi-provisioner
+    orochi.io/cluster-name: {{ .Name }}
+spec:
+  replicas: {{ .Pooler.Replicas }}
+  selector:
+    matchLabels:
+      app: pgdog
+      orochi.io/cluster-name: {{ .Name }}
+  template:
+    metadata:
+      labels:
+        app: pgdog
+        orochi.io/cluster-name: {{ .Name }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+    spec:
+      containers:
+        - name: pgdog
+          image: {{ default "ghcr.io/pgdog/pgdog" .Pooler.Image }}:{{ default "latest" .Pooler.ImageTag }}
+          ports:
+            - containerPort: 6432
+              name: postgres
+            - containerPort: 6433
+              name: admin
+            - containerPort: 9090
+              name: metrics
+          env:
+            - name: PGDOG_CONFIG
+              value: "/etc/pgdog/pgdog.toml"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/pgdog
+              readOnly: true
+          resources:
+            requests:
+              cpu: "{{ default "250m" .Pooler.Resources.CPURequest }}"
+              memory: "{{ default "256Mi" .Pooler.Resources.MemoryRequest }}"
+            limits:
+              cpu: "{{ default "1000m" .Pooler.Resources.CPULimit }}"
+              memory: "{{ default "1Gi" .Pooler.Resources.MemoryLimit }}"
+      volumes:
+        - name: config
+          configMap:
+            name: {{ .Name }}-pgdog-config
+`
+
+	if _, err := tmpl.New("pgdog-deployment.yaml.tmpl").Parse(pgdogDeploymentTemplate); err != nil {
+		return nil, fmt.Errorf("failed to parse pgdog deployment template: %w", err)
+	}
+
+	// PgDog configmap template
+	pgdogConfigMapTemplate := `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Name }}-pgdog-config
+  namespace: {{ .Namespace }}
+  labels:
+    app: pgdog
+    orochi.io/cluster-name: {{ .Name }}
+data:
+  pgdog.toml: |
+    [general]
+    host = "0.0.0.0"
+    port = 6432
+    admin_port = 6433
+    connect_timeout = 5000
+    query_timeout = 300000
+    idle_timeout = {{ default 600 .Pooler.IdleTimeout }}000
+    tls = {{ boolToString .Pooler.TLSEnabled }}
+    prometheus_enabled = true
+    prometheus_port = 9090
+    log_level = "info"
+
+    [auth]
+    auth_type = "scram-sha-256"
+
+    [pools]
+    min_pool_size = {{ default 5 .Pooler.MinPoolSize }}
+    max_pool_size = {{ default 100 .Pooler.MaxPoolSize }}
+    pool_mode = "{{ default "transaction" .Pooler.Mode }}"
+    load_balancing = "least_connections"
+
+    [plugins.query_router]
+    enabled = true
+    read_write_splitting = {{ boolToString .Pooler.ReadWriteSplit }}
+
+    [[clusters]]
+    name = "primary"
+
+      [[clusters.databases]]
+      name = "{{ .Name }}"
+      host = "{{ .Name }}-rw.{{ .Namespace }}.svc.cluster.local"
+      port = 5432
+      database = "postgres"
+      role = "primary"
+`
+
+	if _, err := tmpl.New("pgdog-configmap.yaml.tmpl").Parse(pgdogConfigMapTemplate); err != nil {
+		return nil, fmt.Errorf("failed to parse pgdog configmap template: %w", err)
+	}
+
+	// PgDog service template
+	pgdogServiceTemplate := `apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Name }}-pgdog
+  namespace: {{ .Namespace }}
+  labels:
+    app: pgdog
+    orochi.io/cluster-name: {{ .Name }}
+spec:
+  type: ClusterIP
+  selector:
+    app: pgdog
+    orochi.io/cluster-name: {{ .Name }}
+  ports:
+    - name: postgres-direct
+      port: 6432
+      targetPort: 6432
+    - name: admin
+      port: 6433
+      targetPort: 6433
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Name }}-pgdog-headless
+  namespace: {{ .Namespace }}
+  labels:
+    app: pgdog
+    orochi.io/cluster-name: {{ .Name }}
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app: pgdog
+    orochi.io/cluster-name: {{ .Name }}
+  ports:
+    - name: postgres
+      port: 6432
+      targetPort: 6432
+`
+
+	if _, err := tmpl.New("pgdog-service.yaml.tmpl").Parse(pgdogServiceTemplate); err != nil {
+		return nil, fmt.Errorf("failed to parse pgdog service template: %w", err)
+	}
+
 	return tmpl, nil
 }
 
@@ -445,4 +608,28 @@ type ServiceMonitorTemplateData struct {
 	Name           string
 	Namespace      string
 	ScrapeInterval string
+}
+
+// PgDogTemplateData holds data for PgDog templates
+type PgDogTemplateData struct {
+	Name        string
+	Namespace   string
+	Pooler      *types.ConnectionPoolerSpec
+	Labels      map[string]string
+	Annotations map[string]string
+}
+
+// RenderPgDogDeployment renders the PgDog deployment template
+func (e *TemplateEngine) RenderPgDogDeployment(data *PgDogTemplateData) (string, error) {
+	return e.render("pgdog-deployment.yaml.tmpl", data)
+}
+
+// RenderPgDogConfigMap renders the PgDog configmap template
+func (e *TemplateEngine) RenderPgDogConfigMap(data *PgDogTemplateData) (string, error) {
+	return e.render("pgdog-configmap.yaml.tmpl", data)
+}
+
+// RenderPgDogService renders the PgDog service template
+func (e *TemplateEngine) RenderPgDogService(data *PgDogTemplateData) (string, error) {
+	return e.render("pgdog-service.yaml.tmpl", data)
 }

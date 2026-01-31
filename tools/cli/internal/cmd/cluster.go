@@ -32,6 +32,7 @@ Commands:
   delete    Delete a cluster
   scale     Scale a cluster
   connect   Get connection string
+  pooler    Manage PgDog connection pooler
 
 Examples:
   orochi cluster list
@@ -39,7 +40,8 @@ Examples:
   orochi cluster get my-cluster
   orochi cluster scale my-cluster --replicas 3
   orochi cluster connect my-cluster
-  orochi cluster delete my-cluster`,
+  orochi cluster delete my-cluster
+  orochi cluster pooler status my-cluster`,
 }
 
 var clusterListCmd = &cobra.Command{
@@ -135,6 +137,7 @@ func init() {
 	clusterCmd.AddCommand(clusterDeleteCmd)
 	clusterCmd.AddCommand(clusterScaleCmd)
 	clusterCmd.AddCommand(clusterConnectCmd)
+	clusterCmd.AddCommand(poolerCmd)
 
 	// Create command flags
 	clusterCreateCmd.Flags().StringVar(&clusterSize, "size", "small", "Cluster size (small, medium, large, xlarge)")

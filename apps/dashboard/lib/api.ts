@@ -1211,5 +1211,329 @@ export const dataBrowserApi = {
   },
 };
 
+// Pooler API Types (snake_case from backend)
+interface ApiPoolerConfig {
+  enabled: boolean;
+  mode: string;
+  max_pool_size: number;
+  min_pool_size: number;
+  idle_timeout_seconds: number;
+  read_write_split: boolean;
+  sharding_enabled: boolean;
+  shard_count?: number;
+  load_balancing_mode?: string;
+  health_check_interval_seconds?: number;
+  connection_timeout_ms?: number;
+  query_timeout_ms?: number;
+}
+
+interface ApiPoolerStats {
+  active_connections: number;
+  idle_connections: number;
+  waiting_clients: number;
+  total_queries: number;
+  queries_per_second: number;
+  avg_latency_ms: number;
+  p99_latency_ms: number;
+  pool_utilization: number;
+  server_connections?: number;
+  max_server_connections?: number;
+  transactions_per_second?: number;
+  bytes_received?: number;
+  bytes_sent?: number;
+}
+
+interface ApiPoolerStatus {
+  cluster_id: string;
+  healthy: boolean;
+  config: ApiPoolerConfig;
+  stats: ApiPoolerStats;
+  replicas: number;
+  ready_replicas: number;
+  last_updated: string;
+  version?: string;
+  uptime?: number;
+}
+
+interface ApiPoolerClient {
+  id: string;
+  database: string;
+  user: string;
+  state: string;
+  application_name?: string;
+  client_address: string;
+  connect_time: string;
+  last_query_time?: string;
+  query_duration_ms?: number;
+  transaction_duration_ms?: number;
+  wait_duration_ms?: number;
+}
+
+interface ApiPoolerPool {
+  database: string;
+  user: string;
+  mode: string;
+  client_connections: number;
+  server_connections: number;
+  pool_size: number;
+  free_servers: number;
+  used_servers: number;
+  waiting_clients: number;
+}
+
+interface ApiPoolerStatsHistory {
+  cluster_id: string;
+  period: string;
+  data_points: Array<{
+    timestamp: string;
+    active_connections: number;
+    idle_connections: number;
+    waiting_clients: number;
+    queries_per_second: number;
+    avg_latency_ms: number;
+    pool_utilization: number;
+  }>;
+}
+
+import type {
+  PoolerConfig,
+  PoolerStats,
+  PoolerStatus,
+  PoolerClient,
+  PoolerPool,
+  PoolerClientsResponse,
+  PoolerPoolsResponse,
+  PoolerStatsHistory,
+  PoolerMode,
+  UpdatePoolerConfigRequest,
+} from "@/types/pooler";
+
+function transformPoolerConfig(c: ApiPoolerConfig): PoolerConfig {
+  return {
+    enabled: c.enabled,
+    mode: c.mode as PoolerMode,
+    maxPoolSize: c.max_pool_size,
+    minPoolSize: c.min_pool_size,
+    idleTimeoutSeconds: c.idle_timeout_seconds,
+    readWriteSplit: c.read_write_split,
+    shardingEnabled: c.sharding_enabled,
+    shardCount: c.shard_count,
+    loadBalancingMode: c.load_balancing_mode as PoolerConfig["loadBalancingMode"],
+    healthCheckIntervalSeconds: c.health_check_interval_seconds,
+    connectionTimeoutMs: c.connection_timeout_ms,
+    queryTimeoutMs: c.query_timeout_ms,
+  };
+}
+
+function transformPoolerStats(s: ApiPoolerStats): PoolerStats {
+  return {
+    activeConnections: s.active_connections,
+    idleConnections: s.idle_connections,
+    waitingClients: s.waiting_clients,
+    totalQueries: s.total_queries,
+    queriesPerSecond: s.queries_per_second,
+    avgLatencyMs: s.avg_latency_ms,
+    p99LatencyMs: s.p99_latency_ms,
+    poolUtilization: s.pool_utilization,
+    serverConnections: s.server_connections,
+    maxServerConnections: s.max_server_connections,
+    transactionsPerSecond: s.transactions_per_second,
+    bytesReceived: s.bytes_received,
+    bytesSent: s.bytes_sent,
+  };
+}
+
+function transformPoolerStatus(s: ApiPoolerStatus): PoolerStatus {
+  return {
+    clusterId: s.cluster_id,
+    healthy: s.healthy,
+    config: transformPoolerConfig(s.config),
+    stats: transformPoolerStats(s.stats),
+    replicas: s.replicas,
+    readyReplicas: s.ready_replicas,
+    lastUpdated: s.last_updated,
+    version: s.version,
+    uptime: s.uptime,
+  };
+}
+
+function transformPoolerClient(c: ApiPoolerClient): PoolerClient {
+  return {
+    id: c.id,
+    database: c.database,
+    user: c.user,
+    state: c.state as PoolerClient["state"],
+    applicationName: c.application_name,
+    clientAddress: c.client_address,
+    connectTime: c.connect_time,
+    lastQueryTime: c.last_query_time,
+    queryDurationMs: c.query_duration_ms,
+    transactionDurationMs: c.transaction_duration_ms,
+    waitDurationMs: c.wait_duration_ms,
+  };
+}
+
+function transformPoolerPool(p: ApiPoolerPool): PoolerPool {
+  return {
+    database: p.database,
+    user: p.user,
+    mode: p.mode as PoolerMode,
+    clientConnections: p.client_connections,
+    serverConnections: p.server_connections,
+    poolSize: p.pool_size,
+    freeServers: p.free_servers,
+    usedServers: p.used_servers,
+    waitingClients: p.waiting_clients,
+  };
+}
+
+function transformPoolerStatsHistory(h: ApiPoolerStatsHistory): PoolerStatsHistory {
+  return {
+    clusterId: h.cluster_id,
+    period: h.period as PoolerStatsHistory["period"],
+    dataPoints: h.data_points.map((p) => ({
+      timestamp: p.timestamp,
+      activeConnections: p.active_connections,
+      idleConnections: p.idle_connections,
+      waitingClients: p.waiting_clients,
+      queriesPerSecond: p.queries_per_second,
+      avgLatencyMs: p.avg_latency_ms,
+      poolUtilization: p.pool_utilization,
+    })),
+  };
+}
+
+// Pooler API
+export const poolerApi = {
+  // Get pooler status and stats
+  getStatus: async (clusterId: string): Promise<ApiResponse<PoolerStatus>> => {
+    const response = await fetchWithAuth<{
+      data: ApiPoolerStatus;
+    }>(`/api/v1/clusters/${clusterId}/pooler/status`);
+    return { data: transformPoolerStatus(response.data) };
+  },
+
+  // Get pooler stats with real-time data
+  getStats: async (clusterId: string): Promise<ApiResponse<PoolerStats>> => {
+    const response = await fetchWithAuth<{
+      data: ApiPoolerStats;
+    }>(`/api/v1/clusters/${clusterId}/pooler/stats`);
+    return { data: transformPoolerStats(response.data) };
+  },
+
+  // Get pooler stats history
+  getStatsHistory: async (
+    clusterId: string,
+    period: "1h" | "6h" | "24h" | "7d" = "1h"
+  ): Promise<ApiResponse<PoolerStatsHistory>> => {
+    const response = await fetchWithAuth<{
+      data: ApiPoolerStatsHistory;
+    }>(`/api/v1/clusters/${clusterId}/pooler/stats/history?period=${period}`);
+    return { data: transformPoolerStatsHistory(response.data) };
+  },
+
+  // Get pooler configuration
+  getConfig: async (clusterId: string): Promise<ApiResponse<PoolerConfig>> => {
+    const response = await fetchWithAuth<{
+      data: ApiPoolerConfig;
+    }>(`/api/v1/clusters/${clusterId}/pooler/config`);
+    return { data: transformPoolerConfig(response.data) };
+  },
+
+  // Update pooler configuration
+  updateConfig: async (
+    clusterId: string,
+    config: UpdatePoolerConfigRequest
+  ): Promise<ApiResponse<PoolerConfig>> => {
+    // Transform to snake_case for API
+    const apiConfig: Partial<ApiPoolerConfig> = {};
+    if (config.enabled !== undefined) apiConfig.enabled = config.enabled;
+    if (config.mode !== undefined) apiConfig.mode = config.mode;
+    if (config.maxPoolSize !== undefined) apiConfig.max_pool_size = config.maxPoolSize;
+    if (config.minPoolSize !== undefined) apiConfig.min_pool_size = config.minPoolSize;
+    if (config.idleTimeoutSeconds !== undefined) apiConfig.idle_timeout_seconds = config.idleTimeoutSeconds;
+    if (config.readWriteSplit !== undefined) apiConfig.read_write_split = config.readWriteSplit;
+    if (config.shardingEnabled !== undefined) apiConfig.sharding_enabled = config.shardingEnabled;
+    if (config.shardCount !== undefined) apiConfig.shard_count = config.shardCount;
+    if (config.loadBalancingMode !== undefined) apiConfig.load_balancing_mode = config.loadBalancingMode;
+    if (config.healthCheckIntervalSeconds !== undefined) apiConfig.health_check_interval_seconds = config.healthCheckIntervalSeconds;
+    if (config.connectionTimeoutMs !== undefined) apiConfig.connection_timeout_ms = config.connectionTimeoutMs;
+    if (config.queryTimeoutMs !== undefined) apiConfig.query_timeout_ms = config.queryTimeoutMs;
+
+    const response = await fetchWithAuth<{
+      data: ApiPoolerConfig;
+    }>(`/api/v1/clusters/${clusterId}/pooler/config`, {
+      method: "PATCH",
+      body: JSON.stringify(apiConfig),
+    });
+    return { data: transformPoolerConfig(response.data) };
+  },
+
+  // Reload pooler configuration (hot reload)
+  reloadConfig: async (clusterId: string): Promise<ApiResponse<{ message: string }>> => {
+    return fetchWithAuth<ApiResponse<{ message: string }>>(
+      `/api/v1/clusters/${clusterId}/pooler/reload`,
+      { method: "POST" }
+    );
+  },
+
+  // Get connected clients
+  getClients: async (
+    clusterId: string,
+    page = 1,
+    pageSize = 50
+  ): Promise<PoolerClientsResponse> => {
+    const response = await fetchWithAuth<{
+      clients: ApiPoolerClient[];
+      total_count: number;
+      page: number;
+      page_size: number;
+    }>(`/api/v1/clusters/${clusterId}/pooler/clients?page=${page}&page_size=${pageSize}`);
+    return {
+      clients: (response.clients ?? []).map(transformPoolerClient),
+      totalCount: response.total_count,
+      page: response.page,
+      pageSize: response.page_size,
+    };
+  },
+
+  // Get connection pools
+  getPools: async (clusterId: string): Promise<PoolerPoolsResponse> => {
+    const response = await fetchWithAuth<{
+      pools: ApiPoolerPool[];
+    }>(`/api/v1/clusters/${clusterId}/pooler/pools`);
+    return {
+      pools: (response.pools ?? []).map(transformPoolerPool),
+    };
+  },
+
+  // Disconnect a client
+  disconnectClient: async (
+    clusterId: string,
+    clientId: string
+  ): Promise<ApiResponse<{ message: string }>> => {
+    return fetchWithAuth<ApiResponse<{ message: string }>>(
+      `/api/v1/clusters/${clusterId}/pooler/clients/${clientId}`,
+      { method: "DELETE" }
+    );
+  },
+
+  // Pause pooler (stop accepting new connections)
+  pause: async (clusterId: string): Promise<ApiResponse<{ message: string }>> => {
+    return fetchWithAuth<ApiResponse<{ message: string }>>(
+      `/api/v1/clusters/${clusterId}/pooler/pause`,
+      { method: "POST" }
+    );
+  },
+
+  // Resume pooler
+  resume: async (clusterId: string): Promise<ApiResponse<{ message: string }>> => {
+    return fetchWithAuth<ApiResponse<{ message: string }>>(
+      `/api/v1/clusters/${clusterId}/pooler/resume`,
+      { method: "POST" }
+    );
+  },
+};
+
 // Export error class
 export { ApiError };

@@ -1,0 +1,68 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "pgdog-router.fullname" . }}
+  labels:
+    {{- include "pgdog-router.labels" . | nindent 4 }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  {{- if and (eq .Values.service.type "LoadBalancer") .Values.service.loadBalancerIP }}
+  loadBalancerIP: {{ .Values.service.loadBalancerIP }}
+  {{- end }}
+  {{- if and (eq .Values.service.type "LoadBalancer") .Values.service.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml .Values.service.loadBalancerSourceRanges | nindent 4 }}
+  {{- end }}
+  {{- if .Values.service.externalTrafficPolicy }}
+  externalTrafficPolicy: {{ .Values.service.externalTrafficPolicy }}
+  {{- end }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: postgresql
+      protocol: TCP
+      name: postgresql
+      {{- if and (eq .Values.service.type "NodePort") .Values.service.nodePort }}
+      nodePort: {{ .Values.service.nodePort }}
+      {{- end }}
+    - port: {{ .Values.service.adminPort }}
+      targetPort: admin
+      protocol: TCP
+      name: admin
+      {{- if and (eq .Values.service.type "NodePort") .Values.service.adminNodePort }}
+      nodePort: {{ .Values.service.adminNodePort }}
+      {{- end }}
+    {{- if .Values.jwtProxy.enabled }}
+    - port: {{ .Values.jwtProxy.port }}
+      targetPort: jwt-proxy
+      protocol: TCP
+      name: jwt-proxy
+    {{- end }}
+  selector:
+    {{- include "pgdog-router.selectorLabels" . | nindent 4 }}
+---
+{{- if .Values.pgdog.metrics.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "pgdog-router.fullname" . }}-metrics
+  labels:
+    {{- include "pgdog-router.labels" . | nindent 4 }}
+    app.kubernetes.io/component: metrics
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: {{ .Values.service.adminPort | quote }}
+    prometheus.io/path: {{ .Values.pgdog.metrics.path | quote }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.service.adminPort }}
+      targetPort: admin
+      protocol: TCP
+      name: metrics
+  selector:
+    {{- include "pgdog-router.selectorLabels" . | nindent 4 }}
+{{- end }}

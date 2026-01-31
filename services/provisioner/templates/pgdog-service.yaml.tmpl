@@ -1,0 +1,169 @@
+# PgDog Service Template
+# This template creates Kubernetes Services for PgDog connection pooler.
+# It includes:
+#   - Main ClusterIP service for internal cluster access
+#   - Headless service for pod DNS resolution
+#
+# Variables:
+#   .Name              - Cluster name
+#   .Namespace         - Kubernetes namespace
+#   .Pooler            - ConnectionPoolerSpec configuration
+#     .JWTAuth         - JWT authentication configuration
+#   .Labels            - Additional labels
+
+# Main service for internal cluster access
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Name }}-pgdog
+  namespace: {{ .Namespace }}
+  labels:
+    app: pgdog
+    app.kubernetes.io/name: pgdog
+    app.kubernetes.io/instance: {{ .Name }}
+    app.kubernetes.io/component: connection-pooler
+    app.kubernetes.io/part-of: orochi-db
+    app.kubernetes.io/managed-by: orochi-provisioner
+    orochi.io/cluster-name: {{ .Name }}
+{{- if .Labels }}
+{{ toYaml .Labels | indent 4 }}
+{{- end }}
+spec:
+  type: ClusterIP
+  selector:
+    app: pgdog
+    orochi.io/cluster-name: {{ .Name }}
+  ports:
+    # Direct PgDog access (PostgreSQL protocol on port 6432)
+    - name: postgres-direct
+      port: 6432
+      targetPort: 6432
+      protocol: TCP
+    # Admin port for PgDog administration
+    - name: admin
+      port: 6433
+      targetPort: 6433
+      protocol: TCP
+    # Metrics port for Prometheus scraping
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
+{{- if .Pooler.JWTAuth }}
+{{- if .Pooler.JWTAuth.Enabled }}
+    # JWT-authenticated PostgreSQL access via JWT proxy
+    - name: jwt-postgres
+      port: 5433
+      targetPort: 5433
+      protocol: TCP
+{{- end }}
+{{- end }}
+---
+# Headless service for pod DNS resolution
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Name }}-pgdog-headless
+  namespace: {{ .Namespace }}
+  labels:
+    app: pgdog
+    app.kubernetes.io/name: pgdog
+    app.kubernetes.io/instance: {{ .Name }}
+    app.kubernetes.io/component: connection-pooler
+    app.kubernetes.io/part-of: orochi-db
+    app.kubernetes.io/managed-by: orochi-provisioner
+    orochi.io/cluster-name: {{ .Name }}
+{{- if .Labels }}
+{{ toYaml .Labels | indent 4 }}
+{{- end }}
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app: pgdog
+    orochi.io/cluster-name: {{ .Name }}
+  ports:
+    - name: postgres
+      port: 6432
+      targetPort: 6432
+      protocol: TCP
+---
+# Read-only alias service (points to the same pooler but can be used for routing)
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Name }}-pgdog-ro
+  namespace: {{ .Namespace }}
+  labels:
+    app: pgdog
+    app.kubernetes.io/name: pgdog
+    app.kubernetes.io/instance: {{ .Name }}
+    app.kubernetes.io/component: connection-pooler
+    app.kubernetes.io/part-of: orochi-db
+    app.kubernetes.io/managed-by: orochi-provisioner
+    orochi.io/cluster-name: {{ .Name }}
+    orochi.io/access-mode: read-only
+{{- if .Labels }}
+{{ toYaml .Labels | indent 4 }}
+{{- end }}
+  annotations:
+    # Hint that this service should route to read replicas
+    orochi.io/routing-hint: "read-only"
+spec:
+  type: ClusterIP
+  selector:
+    app: pgdog
+    orochi.io/cluster-name: {{ .Name }}
+  ports:
+    - name: postgres
+      port: 6432
+      targetPort: 6432
+      protocol: TCP
+{{- if .Pooler.JWTAuth }}
+{{- if .Pooler.JWTAuth.Enabled }}
+    - name: jwt-postgres
+      port: 5433
+      targetPort: 5433
+      protocol: TCP
+{{- end }}
+{{- end }}
+---
+# Read-write alias service (primary endpoint through pooler)
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Name }}-pgdog-rw
+  namespace: {{ .Namespace }}
+  labels:
+    app: pgdog
+    app.kubernetes.io/name: pgdog
+    app.kubernetes.io/instance: {{ .Name }}
+    app.kubernetes.io/component: connection-pooler
+    app.kubernetes.io/part-of: orochi-db
+    app.kubernetes.io/managed-by: orochi-provisioner
+    orochi.io/cluster-name: {{ .Name }}
+    orochi.io/access-mode: read-write
+{{- if .Labels }}
+{{ toYaml .Labels | indent 4 }}
+{{- end }}
+  annotations:
+    # Hint that this service should route to primary
+    orochi.io/routing-hint: "read-write"
+spec:
+  type: ClusterIP
+  selector:
+    app: pgdog
+    orochi.io/cluster-name: {{ .Name }}
+  ports:
+    - name: postgres
+      port: 6432
+      targetPort: 6432
+      protocol: TCP
+{{- if .Pooler.JWTAuth }}
+{{- if .Pooler.JWTAuth.Enabled }}
+    - name: jwt-postgres
+      port: 5433
+      targetPort: 5433
+      protocol: TCP
+{{- end }}
+{{- end }}

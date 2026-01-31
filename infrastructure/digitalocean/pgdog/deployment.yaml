@@ -1,0 +1,211 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgdog
+  namespace: orochi-cloud
+  labels:
+    app: pgdog
+    app.kubernetes.io/name: pgdog
+    app.kubernetes.io/component: connection-pooler
+    app.kubernetes.io/part-of: orochi-cloud
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: pgdog
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: pgdog
+        app.kubernetes.io/name: pgdog
+        app.kubernetes.io/component: connection-pooler
+        app.kubernetes.io/part-of: orochi-cloud
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: pgdog
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: pgdog
+                topologyKey: kubernetes.io/hostname
+            - weight: 50
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: pgdog
+                topologyKey: topology.kubernetes.io/zone
+      containers:
+        # PgDog connection pooler
+        - name: pgdog
+          image: registry.digitalocean.com/orochi-registry/pgdog:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 6432
+              name: postgres
+              protocol: TCP
+            - containerPort: 6433
+              name: admin
+              protocol: TCP
+            - containerPort: 9090
+              name: metrics
+              protocol: TCP
+          env:
+            - name: PGDOG_CONFIG
+              value: "/etc/pgdog/pgdog.toml"
+            - name: RUST_LOG
+              value: "pgdog=info,warn"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/pgdog
+              readOnly: true
+            - name: secrets
+              mountPath: /etc/pgdog/secrets
+              readOnly: true
+            - name: tls
+              mountPath: /etc/pgdog/tls
+              readOnly: true
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          livenessProbe:
+            tcpSocket:
+              port: postgres
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            tcpSocket:
+              port: postgres
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 2
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+
+        # JWT authentication proxy sidecar
+        - name: jwt-proxy
+          image: registry.digitalocean.com/orochi-registry/pgdog-jwt-proxy:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5433
+              name: jwt-postgres
+              protocol: TCP
+          env:
+            - name: UPSTREAM_HOST
+              value: "127.0.0.1"
+            - name: UPSTREAM_PORT
+              value: "6432"
+            - name: LISTEN_PORT
+              value: "5433"
+            - name: JWT_PUBLIC_KEY_PATH
+              value: "/etc/pgdog/secrets/jwt-public-key.pem"
+            - name: JWT_ISSUER
+              valueFrom:
+                secretKeyRef:
+                  name: pgdog-secrets
+                  key: JWT_ISSUER
+            - name: JWT_AUDIENCE
+              valueFrom:
+                secretKeyRef:
+                  name: pgdog-secrets
+                  key: JWT_AUDIENCE
+            - name: LOG_LEVEL
+              value: "info"
+          volumeMounts:
+            - name: secrets
+              mountPath: /etc/pgdog/secrets
+              readOnly: true
+            - name: tls
+              mountPath: /etc/pgdog/tls
+              readOnly: true
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "250m"
+          livenessProbe:
+            tcpSocket:
+              port: jwt-postgres
+            initialDelaySeconds: 5
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            tcpSocket:
+              port: jwt-postgres
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 2
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+
+      volumes:
+        - name: config
+          configMap:
+            name: pgdog-config
+        - name: secrets
+          secret:
+            secretName: pgdog-secrets
+            defaultMode: 0400
+        - name: tls
+          secret:
+            secretName: pgdog-tls
+            defaultMode: 0400
+
+      imagePullSecrets:
+        - name: registry-orochi-registry
+
+      terminationGracePeriodSeconds: 30
+
+      # Ensure pods are spread across nodes
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: pgdog
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pgdog
+  namespace: orochi-cloud
+  labels:
+    app: pgdog
+    app.kubernetes.io/name: pgdog
+    app.kubernetes.io/part-of: orochi-cloud

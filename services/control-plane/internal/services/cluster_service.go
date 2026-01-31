@@ -1146,3 +1146,476 @@ func (s *ClusterService) updateStatus(ctx context.Context, clusterID uuid.UUID, 
 	}
 	return nil
 }
+
+// SuspendCluster suspends a cluster (scale-to-zero).
+// Uses a transaction with SELECT ... FOR UPDATE to prevent TOCTOU race conditions.
+func (s *ClusterService) SuspendCluster(ctx context.Context, clusterID, userID uuid.UUID, req *models.SuspendClusterRequest) error {
+	// Set defaults
+	drainTimeout := req.DrainTimeout
+	if drainTimeout <= 0 {
+		drainTimeout = 30
+	}
+
+	// Start a transaction to ensure atomicity
+	tx, err := s.db.Pool.Begin(ctx)
+	if err != nil {
+		s.logger.Error("failed to begin transaction", "error", err)
+		return errors.New("failed to suspend cluster")
+	}
+	defer tx.Rollback(ctx)
+
+	// Lock the row for update to prevent concurrent modifications
+	selectQuery := `
+		SELECT id, owner_id, status, scale_to_zero_enabled
+		FROM clusters
+		WHERE id = $1 AND deleted_at IS NULL
+		FOR UPDATE
+	`
+
+	var id uuid.UUID
+	var ownerID uuid.UUID
+	var status models.ClusterStatus
+	var scaleToZeroEnabled bool
+	err = tx.QueryRow(ctx, selectQuery, clusterID).Scan(&id, &ownerID, &status, &scaleToZeroEnabled)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return models.ErrClusterNotFound
+		}
+		s.logger.Error("failed to get cluster for suspend", "error", err, "cluster_id", clusterID)
+		return errors.New("failed to suspend cluster")
+	}
+
+	// Check ownership
+	if ownerID != userID {
+		return models.ErrForbidden
+	}
+
+	// Check if scale-to-zero is enabled (or allow manual suspend regardless)
+	// For now, we allow manual suspend even if auto scale-to-zero is disabled
+
+	// Check current status
+	switch status {
+	case models.ClusterStatusSuspended:
+		return models.ErrClusterAlreadySuspended
+	case models.ClusterStatusSuspending:
+		return models.ErrClusterSuspending
+	case models.ClusterStatusWaking:
+		return models.ErrClusterWaking
+	case models.ClusterStatusRunning:
+		// OK to suspend
+	default:
+		return models.ErrClusterOperationPending
+	}
+
+	now := time.Now()
+	updateQuery := `
+		UPDATE clusters
+		SET status = $2, suspended_at = $3, updated_at = $3
+		WHERE id = $1
+	`
+
+	_, err = tx.Exec(ctx, updateQuery, clusterID, models.ClusterStatusSuspending, now)
+	if err != nil {
+		s.logger.Error("failed to update cluster to suspending", "error", err)
+		return errors.New("failed to suspend cluster")
+	}
+
+	// Commit the transaction
+	if err = tx.Commit(ctx); err != nil {
+		s.logger.Error("failed to commit transaction", "error", err)
+		return errors.New("failed to suspend cluster")
+	}
+
+	s.logger.Info("cluster suspend initiated",
+		"cluster_id", clusterID,
+		"drain_timeout", drainTimeout,
+		"force", req.Force,
+	)
+
+	// Trigger the suspend workflow in background
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(drainTimeout+60)*time.Second)
+		defer cancel()
+		s.performSuspend(ctx, clusterID, drainTimeout, req.Force)
+	}()
+
+	return nil
+}
+
+// WakeCluster wakes a suspended cluster.
+// Uses a transaction with SELECT ... FOR UPDATE to prevent TOCTOU race conditions.
+func (s *ClusterService) WakeCluster(ctx context.Context, clusterID, userID uuid.UUID, req *models.WakeClusterRequest) (*models.ClusterStateResponse, error) {
+	// Set defaults
+	timeout := req.Timeout
+	if timeout <= 0 {
+		timeout = 60
+	}
+
+	// Start a transaction to ensure atomicity
+	tx, err := s.db.Pool.Begin(ctx)
+	if err != nil {
+		s.logger.Error("failed to begin transaction", "error", err)
+		return nil, errors.New("failed to wake cluster")
+	}
+	defer tx.Rollback(ctx)
+
+	// Lock the row for update to prevent concurrent modifications
+	selectQuery := `
+		SELECT id, owner_id, status, suspended_at
+		FROM clusters
+		WHERE id = $1 AND deleted_at IS NULL
+		FOR UPDATE
+	`
+
+	var id uuid.UUID
+	var ownerID uuid.UUID
+	var status models.ClusterStatus
+	var suspendedAt *time.Time
+	err = tx.QueryRow(ctx, selectQuery, clusterID).Scan(&id, &ownerID, &status, &suspendedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, models.ErrClusterNotFound
+		}
+		s.logger.Error("failed to get cluster for wake", "error", err, "cluster_id", clusterID)
+		return nil, errors.New("failed to wake cluster")
+	}
+
+	// Check ownership
+	if ownerID != userID {
+		return nil, models.ErrForbidden
+	}
+
+	// Check current status
+	switch status {
+	case models.ClusterStatusSuspended:
+		// OK to wake
+	case models.ClusterStatusWaking:
+		// Already waking - return current state
+		return &models.ClusterStateResponse{
+			ClusterID:   clusterID,
+			Status:      status,
+			IsReady:     false,
+			SuspendedAt: suspendedAt,
+			Message:     "Cluster is already waking",
+		}, nil
+	case models.ClusterStatusRunning:
+		return &models.ClusterStateResponse{
+			ClusterID: clusterID,
+			Status:    status,
+			IsReady:   true,
+			Message:   "Cluster is already running",
+		}, nil
+	case models.ClusterStatusSuspending:
+		return nil, models.ErrClusterSuspending
+	default:
+		return nil, models.ErrClusterNotSuspended
+	}
+
+	now := time.Now()
+	updateQuery := `
+		UPDATE clusters
+		SET status = $2, updated_at = $3
+		WHERE id = $1
+	`
+
+	_, err = tx.Exec(ctx, updateQuery, clusterID, models.ClusterStatusWaking, now)
+	if err != nil {
+		s.logger.Error("failed to update cluster to waking", "error", err)
+		return nil, errors.New("failed to wake cluster")
+	}
+
+	// Commit the transaction
+	if err = tx.Commit(ctx); err != nil {
+		s.logger.Error("failed to commit transaction", "error", err)
+		return nil, errors.New("failed to wake cluster")
+	}
+
+	s.logger.Info("cluster wake initiated",
+		"cluster_id", clusterID,
+		"timeout", timeout,
+		"wait_for_ready", req.WaitForReady,
+	)
+
+	// Trigger the wake workflow in background
+	wakeDone := make(chan error, 1)
+	go func() {
+		wakeCtx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+		defer cancel()
+		wakeDone <- s.performWake(wakeCtx, clusterID)
+	}()
+
+	response := &models.ClusterStateResponse{
+		ClusterID:     clusterID,
+		Status:        models.ClusterStatusWaking,
+		IsReady:       false,
+		SuspendedAt:   suspendedAt,
+		WakeStartedAt: &now,
+		Message:       "Cluster wake initiated",
+	}
+
+	// If requested, wait for the cluster to be ready
+	if req.WaitForReady {
+		wakeCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
+		defer cancel()
+
+		select {
+		case err := <-wakeDone:
+			if err != nil {
+				response.Message = fmt.Sprintf("Wake failed: %v", err)
+				return response, err
+			}
+			response.Status = models.ClusterStatusRunning
+			response.IsReady = true
+			response.Message = "Cluster is ready"
+		case <-wakeCtx.Done():
+			response.Message = "Wake timeout - cluster may still be starting"
+			return response, models.ErrWakeTimeout
+		}
+	}
+
+	return response, nil
+}
+
+// GetClusterState returns the current state of a cluster for wake-on-connect.
+func (s *ClusterService) GetClusterState(ctx context.Context, clusterID uuid.UUID) (*models.ClusterStateResponse, error) {
+	query := `
+		SELECT id, status, last_activity_at, suspended_at
+		FROM clusters
+		WHERE id = $1 AND deleted_at IS NULL
+	`
+
+	var id uuid.UUID
+	var status models.ClusterStatus
+	var lastActivity *time.Time
+	var suspendedAt *time.Time
+
+	err := s.db.Pool.QueryRow(ctx, query, clusterID).Scan(&id, &status, &lastActivity, &suspendedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, models.ErrClusterNotFound
+		}
+		s.logger.Error("failed to get cluster state", "error", err, "cluster_id", clusterID)
+		return nil, errors.New("failed to get cluster state")
+	}
+
+	isReady := status == models.ClusterStatusRunning
+	var message string
+	switch status {
+	case models.ClusterStatusRunning:
+		message = "Cluster is ready"
+	case models.ClusterStatusSuspended:
+		message = "Cluster is suspended"
+	case models.ClusterStatusWaking:
+		message = "Cluster is waking up"
+	case models.ClusterStatusSuspending:
+		message = "Cluster is suspending"
+	default:
+		message = fmt.Sprintf("Cluster status: %s", status)
+	}
+
+	return &models.ClusterStateResponse{
+		ClusterID:    clusterID,
+		Status:       status,
+		IsReady:      isReady,
+		LastActivity: lastActivity,
+		SuspendedAt:  suspendedAt,
+		Message:      message,
+	}, nil
+}
+
+// UpdateLastActivity updates the last activity timestamp for a cluster.
+func (s *ClusterService) UpdateLastActivity(ctx context.Context, clusterID uuid.UUID) error {
+	query := `UPDATE clusters SET last_activity_at = NOW(), updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL`
+	_, err := s.db.Pool.Exec(ctx, query, clusterID)
+	if err != nil {
+		s.logger.Error("failed to update last activity", "error", err, "cluster_id", clusterID)
+		return fmt.Errorf("failed to update last activity: %w", err)
+	}
+	return nil
+}
+
+// performSuspend handles the actual suspend workflow.
+func (s *ClusterService) performSuspend(ctx context.Context, clusterID uuid.UUID, drainTimeout int, force bool) {
+	s.logger.Info("performing cluster suspend",
+		"cluster_id", clusterID,
+		"drain_timeout", drainTimeout,
+		"force", force,
+	)
+
+	// In production, this would:
+	// 1. Notify the provisioner to drain connections
+	// 2. Wait for connections to drain (or timeout)
+	// 3. Scale PostgreSQL pods to 0
+	// 4. Update cluster status to suspended
+
+	// Simulate drain time
+	if !force {
+		select {
+		case <-ctx.Done():
+			s.logger.Warn("suspend cancelled during drain", "cluster_id", clusterID, "error", ctx.Err())
+			if err := s.updateStatus(context.Background(), clusterID, models.ClusterStatusRunning); err != nil {
+				s.logger.Error("failed to restore running status after cancelled suspend", "cluster_id", clusterID, "error", err)
+			}
+			return
+		case <-time.After(time.Duration(drainTimeout) * time.Second / 2): // Simulated drain
+		}
+	}
+
+	// Simulate pod scale down
+	select {
+	case <-ctx.Done():
+		s.logger.Warn("suspend cancelled during scale down", "cluster_id", clusterID, "error", ctx.Err())
+		if err := s.updateStatus(context.Background(), clusterID, models.ClusterStatusRunning); err != nil {
+			s.logger.Error("failed to restore running status after cancelled suspend", "cluster_id", clusterID, "error", err)
+		}
+		return
+	case <-time.After(2 * time.Second):
+	}
+
+	// Update to suspended
+	now := time.Now()
+	query := `UPDATE clusters SET status = $2, suspended_at = $3, updated_at = $3 WHERE id = $1`
+	if _, err := s.db.Pool.Exec(ctx, query, clusterID, models.ClusterStatusSuspended, now); err != nil {
+		s.logger.Error("failed to update cluster to suspended", "error", err, "cluster_id", clusterID)
+		if err := s.updateStatus(context.Background(), clusterID, models.ClusterStatusFailed); err != nil {
+			s.logger.Error("failed to update status to failed", "cluster_id", clusterID, "error", err)
+		}
+		return
+	}
+
+	s.logger.Info("cluster suspended successfully", "cluster_id", clusterID)
+}
+
+// performWake handles the actual wake workflow.
+func (s *ClusterService) performWake(ctx context.Context, clusterID uuid.UUID) error {
+	s.logger.Info("performing cluster wake", "cluster_id", clusterID)
+
+	// In production, this would:
+	// 1. Notify the provisioner to scale PostgreSQL pods back up
+	// 2. Wait for pods to be ready
+	// 3. Update cluster status to running
+
+	// Simulate pod startup time (target < 5 seconds cold start)
+	select {
+	case <-ctx.Done():
+		s.logger.Warn("wake cancelled during startup", "cluster_id", clusterID, "error", ctx.Err())
+		if err := s.updateStatus(context.Background(), clusterID, models.ClusterStatusSuspended); err != nil {
+			s.logger.Error("failed to restore suspended status after cancelled wake", "cluster_id", clusterID, "error", err)
+		}
+		return ctx.Err()
+	case <-time.After(3 * time.Second): // Simulated quick cold start
+	}
+
+	// Update to running
+	now := time.Now()
+	query := `UPDATE clusters SET status = $2, suspended_at = NULL, last_activity_at = $3, updated_at = $3 WHERE id = $1`
+	if _, err := s.db.Pool.Exec(ctx, query, clusterID, models.ClusterStatusRunning, now); err != nil {
+		s.logger.Error("failed to update cluster to running", "error", err, "cluster_id", clusterID)
+		if err := s.updateStatus(context.Background(), clusterID, models.ClusterStatusFailed); err != nil {
+			s.logger.Error("failed to update status to failed", "cluster_id", clusterID, "error", err)
+		}
+		return fmt.Errorf("failed to update cluster status: %w", err)
+	}
+
+	s.logger.Info("cluster woke successfully", "cluster_id", clusterID)
+	return nil
+}
+
+// TriggerWakeForConnection is called by the JWT gateway to wake a suspended cluster.
+// This is an internal API that does not require user authentication.
+func (s *ClusterService) TriggerWakeForConnection(ctx context.Context, clusterID uuid.UUID) (*models.ClusterStateResponse, error) {
+	// Get current state
+	state, err := s.GetClusterState(ctx, clusterID)
+	if err != nil {
+		return nil, err
+	}
+
+	// If already running, just return
+	if state.Status == models.ClusterStatusRunning {
+		return state, nil
+	}
+
+	// If already waking, return current state
+	if state.Status == models.ClusterStatusWaking {
+		return state, nil
+	}
+
+	// If not suspended, can't wake
+	if state.Status != models.ClusterStatusSuspended {
+		return nil, fmt.Errorf("cluster cannot be woken from state: %s", state.Status)
+	}
+
+	// Start wake without ownership check (internal API)
+	now := time.Now()
+	query := `
+		UPDATE clusters
+		SET status = $2, updated_at = $3
+		WHERE id = $1 AND status = $4 AND deleted_at IS NULL
+	`
+
+	result, err := s.db.Pool.Exec(ctx, query, clusterID, models.ClusterStatusWaking, now, models.ClusterStatusSuspended)
+	if err != nil {
+		s.logger.Error("failed to update cluster to waking", "error", err, "cluster_id", clusterID)
+		return nil, errors.New("failed to wake cluster")
+	}
+
+	if result.RowsAffected() == 0 {
+		// Another request already started the wake
+		return s.GetClusterState(ctx, clusterID)
+	}
+
+	s.logger.Info("cluster wake triggered by connection", "cluster_id", clusterID)
+
+	// Trigger wake in background
+	go func() {
+		wakeCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		if err := s.performWake(wakeCtx, clusterID); err != nil {
+			s.logger.Error("wake failed", "cluster_id", clusterID, "error", err)
+		}
+	}()
+
+	return &models.ClusterStateResponse{
+		ClusterID:     clusterID,
+		Status:        models.ClusterStatusWaking,
+		IsReady:       false,
+		SuspendedAt:   state.SuspendedAt,
+		WakeStartedAt: &now,
+		Message:       "Cluster wake initiated by connection",
+	}, nil
+}
+
+// WaitForClusterReady waits for a cluster to become ready after wake.
+func (s *ClusterService) WaitForClusterReady(ctx context.Context, clusterID uuid.UUID, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			if time.Now().After(deadline) {
+				return models.ErrWakeTimeout
+			}
+
+			state, err := s.GetClusterState(ctx, clusterID)
+			if err != nil {
+				return err
+			}
+
+			if state.IsReady {
+				return nil
+			}
+
+			if state.Status == models.ClusterStatusFailed {
+				return errors.New("cluster failed to wake")
+			}
+
+			if state.Status == models.ClusterStatusSuspended {
+				return errors.New("cluster was not woken")
+			}
+		}
+	}
+}
