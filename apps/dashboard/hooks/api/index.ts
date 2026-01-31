@@ -93,3 +93,19 @@ export {
   usePrefetchTableSchema,
   dataBrowserKeys,
 } from "./useDataBrowser";
+
+// Pooler hooks
+export {
+  usePoolerStatus,
+  usePoolerStats,
+  usePoolerStatsHistory,
+  usePoolerConfig,
+  useUpdatePoolerConfig,
+  useReloadPoolerConfig,
+  usePoolerClients,
+  usePoolerPools,
+  useDisconnectPoolerClient,
+  usePausePooler,
+  useResumePooler,
+  poolerKeys,
+} from "./usePooler";

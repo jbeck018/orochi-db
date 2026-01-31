@@ -1,0 +1,389 @@
+# PgDog JWT Gateway Configuration
+# ================================
+# This file provides example configuration for the JWT validation gateway.
+# Copy to config.yaml and modify as needed.
+
+# Server Configuration
+server:
+  # Address to listen on for incoming PostgreSQL connections
+  listen_addr: ":5433"
+
+  # Maximum number of concurrent connections
+  max_connections: 1000
+
+  # Timeout for establishing new connections
+  connection_timeout: 30s
+
+  # Read timeout for client connections
+  read_timeout: 5m
+
+  # Write timeout for client connections
+  write_timeout: 5m
+
+  # Graceful shutdown timeout
+  shutdown_timeout: 30s
+
+# JWT Configuration
+jwt:
+  # RSA public key for JWT verification (PEM format)
+  # Provide either public_key_path OR public_key_url
+  public_key_path: "/app/keys/public.pem"
+
+  # Alternatively, fetch public key from URL (JWKS endpoint)
+  # public_key_url: "https://auth.example.com/.well-known/jwks.json"
+
+  # Expected token issuer (iss claim)
+  issuer: "https://auth.orochi.cloud"
+
+  # Expected token audience (aud claim)
+  audience: "orochi-db"
+
+  # Require user_id claim in token
+  require_user_id: true
+
+  # Require tenant_id claim in token (for multi-tenant deployments)
+  require_tenant_id: false
+
+  # How long to cache validated tokens
+  cache_ttl: 5m
+
+  # How often to refresh public key from URL
+  key_refresh_interval: 1h
+
+# Backend Configuration (PgDog)
+backend:
+  # PgDog host
+  host: "pgdog"
+
+  # PgDog port
+  port: 5432
+
+  # Connection timeout for backend
+  connect_timeout: 10s
+
+  # Optional: Override username for backend connections
+  # If not set, uses username from client connection
+  # username: "orochi_app"
+
+  # Optional: Password for backend authentication
+  # password: ""
+
+# Session Configuration
+session:
+  # Inject JWT claims as PostgreSQL session variables
+  inject_claims: true
+
+  # Timeout for SET commands during session setup
+  injection_timeout: 5s
+
+  # Additional custom session variables to set
+  # custom_variables:
+  #   "orochi.environment": "production"
+  #   "orochi.gateway_version": "1.0.0"
+
+# Logging Configuration
+logging:
+  # Log level: debug, info, warn, error
+  level: "info"
+
+  # Log format: text, json
+  format: "json"
+
+  # Include timestamps in logs
+  include_timestamp: true
+
+# TLS Configuration
+# Required for SNI-based multi-tenant routing
+tls:
+  # Enable TLS for client connections
+  enabled: false
+
+  # Path to TLS certificate file (PEM format)
+  # cert_file: "/app/certs/server.crt"
+
+  # Path to TLS private key file (PEM format)
+  # key_file: "/app/certs/server.key"
+
+  # Path to CA certificate for client verification (optional)
+  # ca_file: "/app/certs/ca.crt"
+
+  # Require clients to present a certificate
+  require_client_cert: false
+
+  # Minimum TLS version: "1.2" or "1.3"
+  min_version: "1.2"
+
+# SNI-Based Multi-Tenant Routing
+# Routes connections to different PgDog instances based on SNI hostname
+sni:
+  # Enable SNI-based routing
+  # Requires TLS to be enabled
+  enabled: false
+
+  # Domain pattern for parsing hostnames
+  # Placeholders: {cluster}, {branch}
+  # Pattern: my-cluster.dev.db.orochi.cloud
+  #          -> cluster: my-cluster, branch: dev
+  domain_pattern: "{cluster}.{branch}.db.orochi.cloud"
+
+  # Base domain suffix for hostname validation
+  base_domain: "db.orochi.cloud"
+
+  # Default backend when cluster not found (if allow_unknown_clusters is true)
+  # default_backend: "pgdog-default:5432"
+
+  # Allow connections to unknown clusters using default backend
+  allow_unknown_clusters: false
+
+  # Control plane API for cluster discovery
+  control_plane:
+    # Base URL of the control plane API
+    url: "http://control-plane:8080"
+
+    # API key for authentication
+    # api_key: ""
+
+    # Request timeout
+    timeout: 10s
+
+    # Number of retries for failed requests
+    retry_count: 3
+
+    # Delay between retries
+    retry_delay: 1s
+
+  # Cache configuration for cluster backend lookups
+  cache:
+    # Time-to-live for cached entries
+    ttl: 5m
+
+    # Time-to-live for negative (not found) cache entries
+    negative_ttl: 30s
+
+    # Maximum number of entries in cache
+    max_size: 10000
+
+    # Enable background refresh before TTL expiration
+    refresh_ahead: true
+
+    # Ratio of TTL at which to start background refresh (0.75 = 75%)
+    refresh_ahead_ratio: 0.75
+
+# =============================================================================
+# Environment Variable Overrides
+# =============================================================================
+# All settings can be overridden via environment variables:
+#
+# Server:
+#   JWT_GATEWAY_LISTEN_ADDR=:5433
+#   JWT_GATEWAY_MAX_CONNECTIONS=1000
+#   JWT_GATEWAY_CONNECTION_TIMEOUT=30s
+#
+# JWT:
+#   JWT_GATEWAY_PUBLIC_KEY_PATH=/path/to/public.pem
+#   JWT_GATEWAY_PUBLIC_KEY_URL=https://auth.example.com/keys
+#   JWT_GATEWAY_ISSUER=https://auth.orochi.cloud
+#   JWT_GATEWAY_AUDIENCE=orochi-db
+#   JWT_GATEWAY_REQUIRE_USER_ID=true
+#   JWT_GATEWAY_REQUIRE_TENANT_ID=false
+#   JWT_GATEWAY_CACHE_TTL=5m
+#
+# Backend:
+#   JWT_GATEWAY_BACKEND_HOST=pgdog
+#   JWT_GATEWAY_BACKEND_PORT=5432
+#   JWT_GATEWAY_BACKEND_USERNAME=orochi_app
+#   JWT_GATEWAY_BACKEND_PASSWORD=secret
+#
+# Session:
+#   JWT_GATEWAY_INJECT_CLAIMS=true
+#
+# Logging:
+#   JWT_GATEWAY_LOG_LEVEL=info
+#   JWT_GATEWAY_LOG_FORMAT=json
+#
+# TLS:
+#   JWT_GATEWAY_TLS_ENABLED=true
+#   JWT_GATEWAY_TLS_CERT_FILE=/path/to/cert.pem
+#   JWT_GATEWAY_TLS_KEY_FILE=/path/to/key.pem
+#   JWT_GATEWAY_TLS_CA_FILE=/path/to/ca.pem
+#   JWT_GATEWAY_TLS_MIN_VERSION=1.2
+#
+# SNI Routing:
+#   JWT_GATEWAY_SNI_ENABLED=true
+#   JWT_GATEWAY_SNI_DOMAIN_PATTERN={cluster}.{branch}.db.orochi.cloud
+#   JWT_GATEWAY_SNI_BASE_DOMAIN=db.orochi.cloud
+#   JWT_GATEWAY_SNI_DEFAULT_BACKEND=pgdog-default:5432
+#   JWT_GATEWAY_SNI_ALLOW_UNKNOWN=false
+#
+# SNI Control Plane:
+#   JWT_GATEWAY_CONTROL_PLANE_URL=http://control-plane:8080
+#   JWT_GATEWAY_CONTROL_PLANE_API_KEY=secret
+#   JWT_GATEWAY_CONTROL_PLANE_TIMEOUT=10s
+#
+# SNI Cache:
+#   JWT_GATEWAY_SNI_CACHE_TTL=5m
+#   JWT_GATEWAY_SNI_CACHE_NEGATIVE_TTL=30s
+#   JWT_GATEWAY_SNI_CACHE_MAX_SIZE=10000
+#
+# =============================================================================
+# JWT Token Format
+# =============================================================================
+# The gateway expects JWT tokens with the following claims:
+#
+# Required (standard):
+#   - iss: Token issuer (must match jwt.issuer)
+#   - aud: Token audience (must match jwt.audience)
+#   - exp: Expiration time
+#   - iat: Issued at time
+#
+# Required (custom, if configured):
+#   - user_id: Unique user identifier
+#   - tenant_id: Tenant/organization identifier
+#
+# Optional (custom):
+#   - branch_id: Database branch identifier
+#   - permissions: Array of permission strings
+#   - permission_level: Numeric permission level (0-3)
+#   - database: Target database name
+#   - pool_mode: Connection pool mode
+#   - max_connections: Connection limit for this user
+#   - read_only: Force read-only mode
+#   - metadata: Additional key-value pairs
+#
+# Example token payload:
+# {
+#   "iss": "https://auth.orochi.cloud",
+#   "aud": "orochi-db",
+#   "exp": 1735689600,
+#   "iat": 1735603200,
+#   "user_id": "usr_abc123",
+#   "tenant_id": "tenant_xyz",
+#   "branch_id": "main",
+#   "permissions": ["read", "write"],
+#   "permission_level": 2,
+#   "metadata": {
+#     "team": "engineering"
+#   }
+# }
+#
+# =============================================================================
+# Session Variables
+# =============================================================================
+# After successful authentication, the following PostgreSQL session variables
+# are set (if corresponding claims are present):
+#
+#   orochi.user_id         - User identifier
+#   orochi.tenant_id       - Tenant identifier
+#   orochi.branch_id       - Branch identifier
+#   orochi.permission_level - Permission level (0-3)
+#   orochi.read_only       - Read-only flag
+#   orochi.<key>           - Custom metadata keys
+#
+# These can be accessed in queries and policies:
+#   SELECT current_setting('orochi.tenant_id', true);
+#
+# =============================================================================
+# Kubernetes Deployment Example
+# =============================================================================
+# apiVersion: apps/v1
+# kind: Deployment
+# metadata:
+#   name: pgdog-jwt-gateway
+# spec:
+#   replicas: 2
+#   template:
+#     spec:
+#       containers:
+#       - name: jwt-gateway
+#         image: orochi/pgdog-jwt-gateway:latest
+#         ports:
+#         - containerPort: 5433
+#         env:
+#         - name: JWT_GATEWAY_BACKEND_HOST
+#           value: "pgdog-service"
+#         - name: JWT_GATEWAY_PUBLIC_KEY_PATH
+#           value: "/keys/public.pem"
+#         - name: JWT_GATEWAY_ISSUER
+#           valueFrom:
+#             secretKeyRef:
+#               name: jwt-config
+#               key: issuer
+#         volumeMounts:
+#         - name: jwt-keys
+#           mountPath: /keys
+#           readOnly: true
+#       volumes:
+#       - name: jwt-keys
+#         secret:
+#           secretName: jwt-public-key
+#
+# =============================================================================
+# SNI Multi-Tenant Routing Example
+# =============================================================================
+# With SNI routing enabled, clients connect using hostnames like:
+#   my-cluster.main.db.orochi.cloud
+#   my-cluster.dev.db.orochi.cloud
+#   another-cluster.staging.db.orochi.cloud
+#
+# The gateway extracts the cluster ID and branch from the hostname,
+# looks up the backend PgDog address from the control plane, and
+# routes the connection accordingly.
+#
+# Control Plane API Response Format:
+# GET /api/v1/clusters/{cluster-id}
+# {
+#   "id": "my-cluster",
+#   "name": "My Cluster",
+#   "status": "running",
+#   "pgdog_host": "pgdog-my-cluster.internal",
+#   "pgdog_port": 5432,
+#   "branches": {
+#     "main": {"name": "main", "status": "active"},
+#     "dev": {"name": "dev", "host": "pgdog-my-cluster-dev.internal", "port": 5433}
+#   }
+# }
+#
+# Kubernetes Deployment with SNI:
+# apiVersion: apps/v1
+# kind: Deployment
+# metadata:
+#   name: pgdog-jwt-gateway
+# spec:
+#   replicas: 3
+#   template:
+#     spec:
+#       containers:
+#       - name: jwt-gateway
+#         image: orochi/pgdog-jwt-gateway:latest
+#         ports:
+#         - containerPort: 5433
+#         env:
+#         - name: JWT_GATEWAY_TLS_ENABLED
+#           value: "true"
+#         - name: JWT_GATEWAY_SNI_ENABLED
+#           value: "true"
+#         - name: JWT_GATEWAY_CONTROL_PLANE_URL
+#           value: "http://control-plane.orochi-system:8080"
+#         - name: JWT_GATEWAY_CONTROL_PLANE_API_KEY
+#           valueFrom:
+#             secretKeyRef:
+#               name: jwt-gateway-secrets
+#               key: control-plane-api-key
+#         - name: JWT_GATEWAY_TLS_CERT_FILE
+#           value: "/certs/tls.crt"
+#         - name: JWT_GATEWAY_TLS_KEY_FILE
+#           value: "/certs/tls.key"
+#         volumeMounts:
+#         - name: tls-certs
+#           mountPath: /certs
+#           readOnly: true
+#         - name: jwt-keys
+#           mountPath: /keys
+#           readOnly: true
+#       volumes:
+#       - name: tls-certs
+#         secret:
+#           secretName: jwt-gateway-tls
+#       - name: jwt-keys
+#         secret:
+#           secretName: jwt-public-key

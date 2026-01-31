@@ -1,0 +1,343 @@
+# PgDog Configuration Template for Orochi DB
+# ============================================
+#
+# Template Variables (Go template syntax):
+#   {{.ClusterName}}   - Name of the Orochi DB cluster
+#   {{.Namespace}}     - Kubernetes namespace
+#   {{.DatabaseName}}  - Default database name
+#   {{.ShardCount}}    - Number of shards (1-1024)
+#   {{.PoolMode}}      - Connection pool mode (transaction, session, statement)
+#   {{.MaxPoolSize}}   - Maximum connections per pool
+#   {{.TLSEnabled}}    - Whether TLS is enabled
+#   {{.MetricsPrefix}} - Prefix for Prometheus metrics
+#
+# Environment Variable Overrides:
+#   PGDOG_HOST, PGDOG_PORT, PGDOG_ADMIN_PORT, PGDOG_METRICS_PORT
+#   PGDOG_LOG_LEVEL, PGDOG_WORKER_THREADS
+#   DATABASE_HOST, DATABASE_PORT, DATABASE_USER, DATABASE_PASSWORD
+#
+# Documentation: https://pgdog.dev/docs/configuration
+
+# ==============================================================================
+# General Settings
+# ==============================================================================
+[general]
+# Bind address for client connections
+host = "{{if .Host}}{{.Host}}{{else}}0.0.0.0{{end}}"
+port = {{if .Port}}{{.Port}}{{else}}5432{{end}}
+
+# Admin interface port
+admin_port = {{if .AdminPort}}{{.AdminPort}}{{else}}6432{{end}}
+
+# Connection timeouts (milliseconds)
+connect_timeout = 5000
+idle_timeout = 30000
+query_timeout = 300000
+shutdown_timeout = 10000
+
+# Worker configuration
+worker_threads = {{if .WorkerThreads}}{{.WorkerThreads}}{{else}}4{{end}}
+
+# Logging
+log_level = "{{if .LogLevel}}{{.LogLevel}}{{else}}info{{end}}"
+log_format = "json"
+
+# Authentication mode
+# Options: md5, scram, trust, passthrough
+auth_type = "scram"
+
+# Passthrough authentication (delegates to PostgreSQL)
+# Enable when using external JWT validation (Envoy gateway)
+passthrough_auth = "{{if .PassthroughAuth}}enabled{{else}}disabled{{end}}"
+
+# ==============================================================================
+# TLS Configuration
+# ==============================================================================
+[general.tls]
+enabled = {{if .TLSEnabled}}true{{else}}false{{end}}
+certificate = "/etc/pgdog/certs/tls.crt"
+private_key = "/etc/pgdog/certs/tls.key"
+ca_file = "/etc/pgdog/certs/ca.crt"
+
+# Minimum TLS version (1.2 recommended)
+min_version = "1.2"
+
+# Require client certificates (mTLS)
+require_client_cert = false
+
+# ==============================================================================
+# Prometheus Metrics
+# ==============================================================================
+[metrics]
+prometheus_enabled = true
+prometheus_port = {{if .MetricsPort}}{{.MetricsPort}}{{else}}9090{{end}}
+prometheus_path = "/metrics"
+
+# Metric prefix for all exposed metrics
+metric_prefix = "{{if .MetricsPrefix}}{{.MetricsPrefix}}{{else}}orochi_pgdog{{end}}"
+
+# Include these labels on all metrics
+include_labels = ["cluster_id", "database", "pool_name", "user"]
+
+# Histogram buckets for latency metrics (seconds)
+latency_buckets = [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]
+
+# ==============================================================================
+# Admin Interface
+# ==============================================================================
+[admin]
+enabled = true
+port = {{if .AdminPort}}{{.AdminPort}}{{else}}6432{{end}}
+
+# Admin authentication
+# Note: Use strong credentials in production
+admin_users = ["pgdog_admin"]
+
+# Enable SHOW commands
+show_commands = true
+
+# Enable reload command
+allow_reload = true
+
+# ==============================================================================
+# Connection Pool Configuration
+# ==============================================================================
+[pools.default]
+# Pool mode: transaction, session, or statement
+# - transaction: Connection returned after each transaction (recommended)
+# - session: Connection held for entire session
+# - statement: Connection returned after each statement
+pool_mode = "{{if .PoolMode}}{{.PoolMode}}{{else}}transaction{{end}}"
+
+# Pool size limits
+min_pool_size = {{if .MinPoolSize}}{{.MinPoolSize}}{{else}}2{{end}}
+max_pool_size = {{if .MaxPoolSize}}{{.MaxPoolSize}}{{else}}100{{end}}
+reserve_pool_size = {{if .ReservePoolSize}}{{.ReservePoolSize}}{{else}}5{{end}}
+
+# Connection lifetime settings (milliseconds)
+server_idle_timeout = 600000
+server_lifetime = 3600000
+server_connect_timeout = 5000
+
+# Client settings
+client_idle_timeout = 0
+default_pool_size = {{if .DefaultPoolSize}}{{.DefaultPoolSize}}{{else}}20{{end}}
+
+# Statement timeout for queries (milliseconds)
+statement_timeout = 30000
+
+# Query queue settings
+max_client_conn = {{if .MaxClientConnections}}{{.MaxClientConnections}}{{else}}10000{{end}}
+query_wait_timeout = 120000
+
+# Prepared statement caching
+prepared_statements_cache_size = 1000
+
+# ==============================================================================
+# Database Configuration
+# ==============================================================================
+
+# Primary database (read-write)
+[[databases]]
+name = "{{if .DatabaseName}}{{.DatabaseName}}{{else}}postgres{{end}}"
+host = "{{if .ClusterName}}{{.ClusterName}}-rw.{{.Namespace}}.svc.cluster.local{{else}}localhost{{end}}"
+port = 5432
+role = "primary"
+
+# Pool overrides for this database (optional)
+pool_size = {{if .PrimaryPoolSize}}{{.PrimaryPoolSize}}{{else}}50{{end}}
+pool_mode = "{{if .PoolMode}}{{.PoolMode}}{{else}}transaction{{end}}"
+
+# Connection parameters
+connect_timeout = 5000
+application_name = "pgdog-{{if .ClusterName}}{{.ClusterName}}{{else}}default{{end}}"
+
+# SSL mode for backend connections
+ssl_mode = "{{if .BackendSSLMode}}{{.BackendSSLMode}}{{else}}prefer{{end}}"
+
+# Replica database (read-only)
+[[databases]]
+name = "{{if .DatabaseName}}{{.DatabaseName}}{{else}}postgres{{end}}"
+host = "{{if .ClusterName}}{{.ClusterName}}-ro.{{.Namespace}}.svc.cluster.local{{else}}localhost{{end}}"
+port = 5432
+role = "replica"
+
+# Smaller pool for read replicas
+pool_size = {{if .ReplicaPoolSize}}{{.ReplicaPoolSize}}{{else}}30{{end}}
+pool_mode = "{{if .PoolMode}}{{.PoolMode}}{{else}}transaction{{end}}"
+
+# ==============================================================================
+# Query Routing Configuration
+# ==============================================================================
+[query_routing]
+# Enable read/write splitting
+read_write_split = true
+
+# Keywords that indicate read-only queries
+read_query_keywords = ["SELECT", "SHOW", "EXPLAIN", "ANALYZE", "WITH"]
+
+# Sticky connections for transactions
+# Ensures all queries in a transaction go to the same backend
+sticky_transactions = true
+
+# Session stickiness for temporary tables, prepared statements
+session_sticky = true
+
+# Maximum acceptable replica lag (milliseconds)
+# Replicas with higher lag will be excluded from routing
+max_replica_lag = {{if .MaxReplicaLag}}{{.MaxReplicaLag}}{{else}}1000{{end}}
+
+# Load balancing strategy: round_robin, least_connections, random
+load_balance_strategy = "{{if .LoadBalanceStrategy}}{{.LoadBalanceStrategy}}{{else}}least_connections{{end}}"
+
+# ==============================================================================
+# Sharding Configuration
+# ==============================================================================
+[sharding]
+# Enable distributed query routing
+enabled = {{if .ShardingEnabled}}true{{else}}false{{end}}
+
+# Default shard count for new tables
+default_shard_count = {{if .ShardCount}}{{.ShardCount}}{{else}}32{{end}}
+
+# Hash function for shard routing
+# postgres_hash is compatible with orochi_hash()
+sharding_function = "postgres_hash"
+
+# Shard key extraction mode
+# - query_parse: Extract from WHERE clause
+# - session_variable: Use session variable
+# - jwt_claim: Extract from JWT claims (requires auth plugin)
+shard_key_mode = "{{if .ShardKeyMode}}{{.ShardKeyMode}}{{else}}query_parse{{end}}"
+
+# Session variable for shard key (when shard_key_mode = session_variable)
+shard_key_variable = "orochi.shard_key"
+
+# ==============================================================================
+# Sharded Tables Configuration
+# ==============================================================================
+{{if .ShardedTables}}
+{{range .ShardedTables}}
+[[sharding.tables]]
+name = "{{.Name}}"
+column = "{{.Column}}"
+shards = {{.ShardCount}}
+{{if .ColocatedWith}}colocated_with = "{{.ColocatedWith}}"{{end}}
+{{end}}
+{{else}}
+# Example sharded table configuration:
+# [[sharding.tables]]
+# name = "users"
+# column = "tenant_id"
+# shards = 32
+#
+# [[sharding.tables]]
+# name = "orders"
+# column = "tenant_id"
+# shards = 32
+# colocated_with = "users"
+{{end}}
+
+# ==============================================================================
+# Two-Phase Commit (2PC) Configuration
+# ==============================================================================
+[sharding.two_phase_commit]
+# Enable 2PC for cross-shard transactions
+enabled = {{if .TwoPhaseCommitEnabled}}true{{else}}false{{end}}
+
+# Transaction ID prefix for prepared transactions
+transaction_id_prefix = "__orochi_2pc_"
+
+# Timeout for prepared transactions (seconds)
+timeout_seconds = 30
+
+# Interval for cleaning up orphaned prepared transactions (seconds)
+cleanup_interval_seconds = 60
+
+# Maximum concurrent 2PC transactions
+max_concurrent = 1000
+
+# ==============================================================================
+# Health Check Configuration
+# ==============================================================================
+[health_check]
+# Query to execute for health checks
+query = "SELECT 1"
+
+# Interval between health checks (milliseconds)
+interval = {{if .HealthCheckInterval}}{{.HealthCheckInterval}}{{else}}10000{{end}}
+
+# Timeout for health check queries (milliseconds)
+timeout = 5000
+
+# Number of retries before marking server unhealthy
+retries = 3
+
+# Delay between retries (milliseconds)
+retry_delay = 1000
+
+# Ban duration for unhealthy servers (milliseconds)
+ban_duration = 60000
+
+# ==============================================================================
+# Branch-Aware Routing (Orochi-specific)
+# ==============================================================================
+[query_routing.branch]
+# Enable branch-aware query routing
+enabled = {{if .BranchRoutingEnabled}}true{{else}}false{{end}}
+
+# Session variable containing the branch ID
+session_variable = "orochi.branch_id"
+
+# Default branch when none specified
+default_branch = "main"
+
+# Branch metadata cache TTL (seconds)
+cache_ttl = 300
+
+# ==============================================================================
+# Rate Limiting
+# ==============================================================================
+[rate_limiting]
+# Enable connection rate limiting
+enabled = {{if .RateLimitEnabled}}true{{else}}false{{end}}
+
+# Maximum new connections per second (global)
+global_rate = {{if .GlobalConnectionRate}}{{.GlobalConnectionRate}}{{else}}1000{{end}}
+
+# Maximum new connections per second (per IP)
+per_ip_rate = {{if .PerIPConnectionRate}}{{.PerIPConnectionRate}}{{else}}100{{end}}
+
+# Maximum new connections per second (per user)
+per_user_rate = {{if .PerUserConnectionRate}}{{.PerUserConnectionRate}}{{else}}50{{end}}
+
+# Burst allowance
+burst_size = {{if .RateLimitBurst}}{{.RateLimitBurst}}{{else}}10{{end}}
+
+# ==============================================================================
+# Logging Configuration
+# ==============================================================================
+[logging]
+# Log level: trace, debug, info, warn, error
+level = "{{if .LogLevel}}{{.LogLevel}}{{else}}info{{end}}"
+
+# Log format: json, text
+format = "json"
+
+# Log file path (empty for stdout)
+file = ""
+
+# Enable query logging (performance impact)
+log_queries = {{if .LogQueries}}true{{else}}false{{end}}
+
+# Minimum query duration to log (milliseconds)
+log_slow_queries_threshold = {{if .SlowQueryThreshold}}{{.SlowQueryThreshold}}{{else}}1000{{end}}
+
+# Log client connections/disconnections
+log_connections = true
+
+# Log authentication events
+log_auth_events = true
+
+# Mask sensitive data in logs
+mask_passwords = true

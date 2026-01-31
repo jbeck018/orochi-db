@@ -1,0 +1,164 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pgdog-ingress
+  namespace: orochi-cloud
+  labels:
+    app: pgdog
+    app.kubernetes.io/name: pgdog
+    app.kubernetes.io/component: connection-pooler
+    app.kubernetes.io/part-of: orochi-cloud
+spec:
+  podSelector:
+    matchLabels:
+      app: pgdog
+  policyTypes:
+    - Ingress
+  ingress:
+    # Allow ingress from dashboard pods
+    - from:
+        - podSelector:
+            matchLabels:
+              app: dashboard
+      ports:
+        - protocol: TCP
+          port: 5433  # JWT-authenticated postgres port
+
+    # Allow ingress from control-plane pods
+    - from:
+        - podSelector:
+            matchLabels:
+              app: control-plane
+      ports:
+        - protocol: TCP
+          port: 5433  # JWT-authenticated postgres port
+        - protocol: TCP
+          port: 6432  # Direct postgres port (internal)
+        - protocol: TCP
+          port: 6433  # Admin port
+
+    # Allow ingress from provisioner pods
+    - from:
+        - podSelector:
+            matchLabels:
+              app: provisioner
+      ports:
+        - protocol: TCP
+          port: 6432  # Direct postgres port
+        - protocol: TCP
+          port: 6433  # Admin port
+
+    # Allow Prometheus to scrape metrics
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: monitoring
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 9090  # Metrics port
+
+    # Allow ingress from LoadBalancer (external clients)
+    # This allows the DigitalOcean LoadBalancer to route traffic
+    - from: []
+      ports:
+        - protocol: TCP
+          port: 5433  # Only expose JWT-authenticated port externally
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pgdog-egress
+  namespace: orochi-cloud
+  labels:
+    app: pgdog
+    app.kubernetes.io/name: pgdog
+    app.kubernetes.io/component: connection-pooler
+    app.kubernetes.io/part-of: orochi-cloud
+spec:
+  podSelector:
+    matchLabels:
+      app: pgdog
+  policyTypes:
+    - Egress
+  egress:
+    # Allow egress to PostgreSQL clusters (CloudNativePG)
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: orochi-primary
+      ports:
+        - protocol: TCP
+          port: 5432
+
+    # Allow egress to all PostgreSQL pods in the namespace
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgresql
+      ports:
+        - protocol: TCP
+          port: 5432
+
+    # Allow egress to CloudNativePG managed clusters
+    - to:
+        - podSelector:
+            matchExpressions:
+              - key: cnpg.io/cluster
+                operator: Exists
+      ports:
+        - protocol: TCP
+          port: 5432
+
+    # Allow DNS resolution
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+    # Allow egress to external PostgreSQL endpoints (DigitalOcean managed databases)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 25060  # DigitalOcean managed database port
+
+---
+# Default deny policy for pgdog pods (defense in depth)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pgdog-default-deny
+  namespace: orochi-cloud
+  labels:
+    app: pgdog
+    app.kubernetes.io/name: pgdog
+    app.kubernetes.io/component: connection-pooler
+    app.kubernetes.io/part-of: orochi-cloud
+spec:
+  podSelector:
+    matchLabels:
+      app: pgdog
+  policyTypes:
+    - Ingress
+    - Egress
+  # Empty ingress/egress blocks = deny all by default
+  # Other NetworkPolicies above whitelist specific traffic
+  ingress: []
+  egress: []

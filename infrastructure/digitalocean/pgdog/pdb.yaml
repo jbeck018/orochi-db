@@ -1,0 +1,17 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pgdog-pdb
+  namespace: orochi-cloud
+  labels:
+    app: pgdog
+    app.kubernetes.io/name: pgdog
+    app.kubernetes.io/component: connection-pooler
+    app.kubernetes.io/part-of: orochi-cloud
+spec:
+  # Ensure at least 1 pod is always available during voluntary disruptions
+  # This is critical for maintaining database connectivity during updates
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: pgdog

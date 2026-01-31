@@ -789,3 +789,6 @@ export interface TableDataRequest {
   orderBy?: string;
   orderDir?: "ASC" | "DESC";
 }
+
+// Re-export pooler types
+export * from "./pooler";

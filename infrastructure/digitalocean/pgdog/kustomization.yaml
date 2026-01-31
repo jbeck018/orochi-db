@@ -1,0 +1,69 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: pgdog
+  namespace: orochi-cloud
+
+# Common labels applied to all resources
+commonLabels:
+  app.kubernetes.io/name: pgdog
+  app.kubernetes.io/component: connection-pooler
+  app.kubernetes.io/part-of: orochi-cloud
+  app.kubernetes.io/managed-by: kustomize
+
+# Common annotations
+commonAnnotations:
+  orochi.cloud/component: pgdog
+
+# Namespace for all resources
+namespace: orochi-cloud
+
+# Resources to include
+resources:
+  - deployment.yaml
+  - service.yaml
+  - configmap.yaml
+  - secret.yaml
+  - pdb.yaml
+  - hpa.yaml
+  - networkpolicy.yaml
+  - servicemonitor.yaml
+
+# Image configuration for easy version updates
+images:
+  - name: registry.digitalocean.com/orochi-registry/pgdog
+    newTag: latest
+  - name: registry.digitalocean.com/orochi-registry/pgdog-jwt-proxy
+    newTag: latest
+
+# ConfigMap generator for environment-specific overrides
+configMapGenerator:
+  - name: pgdog-env
+    literals:
+      - ENVIRONMENT=production
+      - LOG_LEVEL=info
+
+# Patches for environment-specific modifications
+patches:
+  # Production replica count
+  - target:
+      kind: Deployment
+      name: pgdog
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+
+# Replacements for dynamic value substitution
+replacements:
+  - source:
+      kind: ConfigMap
+      name: pgdog-env
+      fieldPath: data.ENVIRONMENT
+    targets:
+      - select:
+          kind: Deployment
+          name: pgdog
+        fieldPaths:
+          - spec.template.metadata.annotations.[environment]

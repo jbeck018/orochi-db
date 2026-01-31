@@ -1,0 +1,139 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: pgdog
+  namespace: orochi-cloud
+  labels:
+    app: pgdog
+    app.kubernetes.io/name: pgdog
+    app.kubernetes.io/component: connection-pooler
+    app.kubernetes.io/part-of: orochi-cloud
+    # Label for Prometheus Operator to discover this ServiceMonitor
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: pgdog
+  namespaceSelector:
+    matchNames:
+      - orochi-cloud
+  endpoints:
+    - port: metrics
+      interval: 15s
+      scrapeTimeout: 10s
+      path: /metrics
+      scheme: http
+      honorLabels: true
+      relabelings:
+        # Add cluster label for multi-cluster setups
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
+        - sourceLabels: [__meta_kubernetes_namespace]
+          targetLabel: namespace
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node
+      metricRelabelings:
+        # Drop high-cardinality metrics if needed
+        - sourceLabels: [__name__]
+          regex: 'pgdog_query_duration_bucket'
+          action: drop
+---
+# PrometheusRule for PgDog alerting
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: pgdog-alerts
+  namespace: orochi-cloud
+  labels:
+    app: pgdog
+    app.kubernetes.io/name: pgdog
+    app.kubernetes.io/component: connection-pooler
+    app.kubernetes.io/part-of: orochi-cloud
+    release: prometheus
+spec:
+  groups:
+    - name: pgdog.rules
+      interval: 30s
+      rules:
+        # Alert if PgDog is down
+        - alert: PgDogDown
+          expr: up{job="pgdog"} == 0
+          for: 1m
+          labels:
+            severity: critical
+            service: pgdog
+          annotations:
+            summary: "PgDog instance is down"
+            description: "PgDog instance {{ $labels.pod }} has been down for more than 1 minute."
+
+        # Alert on high connection pool saturation
+        - alert: PgDogPoolSaturation
+          expr: |
+            (pgdog_pool_active_connections / pgdog_pool_size) > 0.9
+          for: 5m
+          labels:
+            severity: warning
+            service: pgdog
+          annotations:
+            summary: "PgDog connection pool near saturation"
+            description: "PgDog pool {{ $labels.pool }} is at {{ $value | humanizePercentage }} capacity."
+
+        # Alert on high waiting client count
+        - alert: PgDogHighWaitingClients
+          expr: pgdog_waiting_clients > 50
+          for: 2m
+          labels:
+            severity: warning
+            service: pgdog
+          annotations:
+            summary: "High number of waiting clients"
+            description: "{{ $value }} clients are waiting for connections in PgDog."
+
+        # Alert on connection errors
+        - alert: PgDogConnectionErrors
+          expr: |
+            rate(pgdog_connection_errors_total[5m]) > 1
+          for: 5m
+          labels:
+            severity: warning
+            service: pgdog
+          annotations:
+            summary: "PgDog experiencing connection errors"
+            description: "PgDog is experiencing {{ $value | humanize }} connection errors per second."
+
+        # Alert on query timeouts
+        - alert: PgDogQueryTimeouts
+          expr: |
+            rate(pgdog_query_timeouts_total[5m]) > 0.1
+          for: 5m
+          labels:
+            severity: warning
+            service: pgdog
+          annotations:
+            summary: "PgDog query timeouts detected"
+            description: "PgDog is experiencing {{ $value | humanize }} query timeouts per second."
+
+        # Alert if no replicas available
+        - alert: PgDogNoReplicas
+          expr: |
+            kube_deployment_status_replicas_available{deployment="pgdog"} == 0
+          for: 1m
+          labels:
+            severity: critical
+            service: pgdog
+          annotations:
+            summary: "No PgDog replicas available"
+            description: "All PgDog replicas are unavailable."
+
+        # Alert on memory pressure
+        - alert: PgDogHighMemoryUsage
+          expr: |
+            (container_memory_working_set_bytes{container="pgdog"} /
+             container_spec_memory_limit_bytes{container="pgdog"}) > 0.85
+          for: 5m
+          labels:
+            severity: warning
+            service: pgdog
+          annotations:
+            summary: "PgDog high memory usage"
+            description: "PgDog container {{ $labels.pod }} is using {{ $value | humanizePercentage }} of its memory limit."

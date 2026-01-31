@@ -29,6 +29,7 @@ type RouterConfig struct {
 	InviteService           *services.InviteService
 	DataBrowserService      *services.DataBrowserService
 	ClusterSettingsService  *services.ClusterSettingsService
+	PoolerService           *services.PoolerService
 	Logger                  *slog.Logger
 
 	// AllowedOrigins specifies CORS allowed origins.
@@ -118,6 +119,7 @@ func NewRouter(cfg *RouterConfig) *chi.Mux {
 	inviteHandler := handlers.NewInviteHandler(cfg.InviteService, cfg.OrganizationService, cfg.Logger)
 	dataBrowserHandler := handlers.NewDataBrowserHandler(cfg.DataBrowserService, cfg.ClusterService, cfg.Logger)
 	clusterSettingsHandler := handlers.NewClusterSettingsHandler(cfg.ClusterSettingsService, cfg.ClusterService, cfg.Logger)
+	poolerHandler := handlers.NewPoolerHandler(cfg.PoolerService, cfg.ClusterService, cfg.Logger)
 
 	// Create auth middleware
 	authMiddleware := middleware.NewAuthMiddleware(cfg.JWTManager, cfg.UserService)
@@ -180,6 +182,11 @@ func NewRouter(cfg *RouterConfig) *chi.Mux {
 					r.Delete("/", clusterHandler.Delete)
 					r.Post("/scale", clusterHandler.Scale)
 
+					// Scale-to-zero routes
+					r.Post("/suspend", clusterHandler.Suspend)
+					r.Post("/wake", clusterHandler.Wake)
+					r.Get("/state", clusterHandler.GetState)
+
 					// Metrics routes
 					r.Get("/metrics", metricsHandler.GetClusterMetrics)
 					r.Get("/metrics/latest", metricsHandler.GetLatestMetrics)
@@ -200,6 +207,16 @@ func NewRouter(cfg *RouterConfig) *chi.Mux {
 					r.Get("/recommendations", clusterSettingsHandler.GetRecommendations)
 					r.Post("/recommendations/{recId}/dismiss", clusterSettingsHandler.DismissRecommendation)
 					r.Post("/recommendations/{recId}/apply", clusterSettingsHandler.ApplyRecommendation)
+
+					// Pooler routes (PgDog connection pooler management)
+					r.Route("/pooler", func(r chi.Router) {
+						r.Get("/", poolerHandler.GetPoolerStatus)
+						r.Patch("/", poolerHandler.UpdatePoolerConfig)
+						r.Post("/reload", poolerHandler.ReloadPoolerConfig)
+						r.Get("/stats", poolerHandler.GetPoolerStats)
+						r.Get("/clients", poolerHandler.GetPoolerClients)
+						r.Get("/pools", poolerHandler.GetPoolerPools)
+					})
 				})
 			})
 
@@ -230,6 +247,16 @@ func NewRouter(cfg *RouterConfig) *chi.Mux {
 			r.Route("/invites", func(r chi.Router) {
 				r.Get("/me", inviteHandler.ListMyInvites)
 				r.Post("/{token}/accept", inviteHandler.AcceptInvite)
+			})
+		})
+
+		// Internal API routes (for service-to-service communication)
+		// These routes use API key authentication instead of JWT
+		r.Route("/internal", func(r chi.Router) {
+			// Cluster state endpoints for JWT gateway wake-on-connect
+			r.Route("/clusters/{id}", func(r chi.Router) {
+				r.Get("/state", clusterHandler.GetStateInternal)
+				r.Post("/wake", clusterHandler.WakeInternal)
 			})
 		})
 
