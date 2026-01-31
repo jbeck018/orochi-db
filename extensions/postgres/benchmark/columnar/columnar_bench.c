@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <inttypes.h>
 #include "bench_common.h"
 
 /* Benchmark modes */
@@ -60,7 +61,7 @@ static void populate_integers(PGconn *conn, int64_t num_rows)
         "  (random() * 100)::smallint, "
         "  random() > 0.5, "
         "  CASE WHEN random() > 0.2 THEN (random() * 1000)::int ELSE NULL END "
-        "FROM generate_series(1, %ld)", num_rows);
+        "FROM generate_series(1, %" PRId64 ")", num_rows);
 
     Timer timer;
     timer_start(&timer);
@@ -85,7 +86,7 @@ static void populate_floats(PGconn *conn, int64_t num_rows)
         "  -20.0 + random() * 60.0, "
         "  random(), "
         "  CASE WHEN random() > 0.3 THEN random() * 100.0 ELSE NULL END "
-        "FROM generate_series(1, %ld)", num_rows);
+        "FROM generate_series(1, %" PRId64 ")", num_rows);
 
     Timer timer;
     timer_start(&timer);
@@ -109,7 +110,7 @@ static void populate_timestamps(PGconn *conn, int64_t num_rows)
         "  NOW() - (random() * INTERVAL '365 days'), "
         "  CURRENT_DATE - (random() * 365)::int, "
         "  TIME '00:00:00' + (random() * INTERVAL '24 hours') "
-        "FROM generate_series(1, %ld)", num_rows);
+        "FROM generate_series(1, %" PRId64 ")", num_rows);
 
     Timer timer;
     timer_start(&timer);
@@ -143,7 +144,7 @@ static void populate_strings(PGconn *conn, int64_t num_rows)
         "  'Description for item ' || generate_series || ' with random text ' || md5(random()::text), "
         "  gen_random_uuid(), "
         "  CASE WHEN random() > 0.5 THEN 'optional_' || (random() * 1000)::int ELSE NULL END "
-        "FROM generate_series(1, %ld)",
+        "FROM generate_series(1, %" PRId64 ")",
         categories[0], categories[1], categories[2], categories[3], categories[4],
         categories[5], categories[6], categories[7], categories[8], categories[9],
         statuses[0], statuses[1], statuses[2], statuses[3], statuses[4],
@@ -175,7 +176,7 @@ static void populate_mixed(PGconn *conn, int64_t num_rows, bool row_store)
         "  jsonb_build_object('host', 'server-' || (random() * 100)::int, 'region', "
         "    (ARRAY['us-east','us-west','eu-west','ap-south'])[1 + (random() * 3)::int]), "
         "  decode(md5(random()::text), 'hex') "
-        "FROM generate_series(1, %ld)",
+        "FROM generate_series(1, %" PRId64 ")",
         table, num_rows);
 
     Timer timer;
@@ -272,7 +273,7 @@ static void run_compression_benchmark(ColumnarBenchmark *bench, BenchSuite *suit
         char size_str[32];
         format_bytes(size, size_str, sizeof(size_str));
 
-        printf("  %-20s %12ld %12s %10.2f\n",
+        printf("  %-20s %12" PRId64 " %12s %10.2f\n",
                tables[i].name, count, size_str, bytes_per_row);
 
         /* Track baseline for ratio calculation */
@@ -499,7 +500,7 @@ static void run_filter_benchmark(ColumnarBenchmark *bench, BenchSuite *suite)
         double avg_time = total_time / iterations;
         double selectivity = total_rows > 0 ? (double)result_rows / total_rows : 0;
 
-        printf("  %-25s %10.2fms %12ld %11.2f%%\n",
+        printf("  %-25s %10.2fms %12" PRId64 " %11.2f%%\n",
                filters[q].name, avg_time, result_rows, selectivity * 100);
 
         /* Create result */
@@ -583,7 +584,7 @@ int main(int argc, char *argv[])
     printf("==========================================\n\n");
 
     bench_config_print(&bench.config);
-    printf("Rows per table: %ld\n\n", bench.rows_per_table);
+    printf("Rows per table: %" PRId64 "\n\n", bench.rows_per_table);
 
     /* Create benchmark suite */
     BenchSuite *suite = bench_suite_create("Columnar", 30);

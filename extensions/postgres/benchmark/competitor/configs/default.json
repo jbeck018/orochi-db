@@ -1,0 +1,77 @@
+{
+  "orochi": {
+    "host": "localhost",
+    "port": 5432,
+    "database": "orochi_bench",
+    "user": "postgres",
+    "password": "",
+    "extension": "orochi",
+    "description": "Orochi DB - PostgreSQL with Orochi HTAP extension"
+  },
+  "vanilla-postgres": {
+    "host": "localhost",
+    "port": 5433,
+    "database": "vanilla_bench",
+    "user": "postgres",
+    "password": "",
+    "extension": null,
+    "description": "Vanilla PostgreSQL - baseline comparison"
+  },
+  "timescaledb": {
+    "host": "localhost",
+    "port": 5434,
+    "database": "timescale_bench",
+    "user": "postgres",
+    "password": "",
+    "extension": "timescaledb",
+    "description": "TimescaleDB - time-series focused extension"
+  },
+  "citus": {
+    "host": "localhost",
+    "port": 5435,
+    "database": "citus_bench",
+    "user": "postgres",
+    "password": "",
+    "extension": "citus",
+    "description": "Citus - distributed PostgreSQL"
+  },
+  "questdb": {
+    "host": "localhost",
+    "port": 8812,
+    "database": "qdb",
+    "user": "admin",
+    "password": "quest",
+    "extension": null,
+    "description": "QuestDB - high-performance time-series database"
+  },
+  "benchmark_settings": {
+    "tpcc": {
+      "warehouses": [10, 100, 1000],
+      "terminals": 10,
+      "duration_minutes": 10,
+      "rampup_minutes": 2
+    },
+    "tsbs": {
+      "scales": [100, 1000, 10000],
+      "workloads": ["devops", "iot"],
+      "duration": "3d",
+      "workers": 8
+    },
+    "clickbench": {
+      "runs_per_query": 3,
+      "include_cold_cache": true
+    },
+    "tpch": {
+      "scale_factors": [1, 10, 100],
+      "parallel_queries": 4
+    }
+  },
+  "transparency": {
+    "collect_hardware_info": true,
+    "collect_software_versions": true,
+    "export_raw_results": true,
+    "export_configurations": true,
+    "statistical_runs": 3,
+    "outlier_removal": "iqr"
+  }
+}

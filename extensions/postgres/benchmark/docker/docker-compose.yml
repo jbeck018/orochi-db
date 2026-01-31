@@ -1,0 +1,343 @@
+# Orochi DB Benchmark Infrastructure
+# Docker Compose orchestration for database and benchmark services
+#
+# Usage:
+#   docker-compose up -d orochi-db          # Start database only
+#   docker-compose run benchmark            # Run benchmarks
+#   docker-compose --profile poolers up     # Include connection poolers
+#
+# Profiles:
+#   default:  orochi-db + benchmark-runner
+#   poolers:  Includes pgbouncer, pgcat, pgdog for comparison
+#   full:     All services including monitoring
+
+version: "3.9"
+
+x-common-envs: &common-envs
+  PGHOST: orochi-db
+  PGPORT: "5432"
+  PGUSER: postgres
+  PGPASSWORD: ${POSTGRES_PASSWORD:-orochi_bench_secret}
+  PGDATABASE: ${POSTGRES_DB:-orochi_bench}
+
+x-healthcheck-pg: &healthcheck-pg
+  test: ["CMD-SHELL", "pg_isready -U postgres"]
+  interval: 10s
+  timeout: 5s
+  retries: 5
+  start_period: 30s
+
+services:
+  # ===========================================================================
+  # Orochi DB - Primary database under test
+  # ===========================================================================
+  orochi-db:
+    build:
+      context: ../../../..
+      dockerfile: extensions/postgres/benchmark/docker/Dockerfile.benchmark
+      target: builder
+      args:
+        PG_MAJOR: ${PG_MAJOR:-16}
+    image: orochi-db:benchmark
+    container_name: orochi-db
+    hostname: orochi-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-orochi_bench_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-orochi_bench}
+      # PostgreSQL tuning for benchmarks
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      - orochi-data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d:ro
+      - ./postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    ports:
+      - "${PGPORT:-5432}:5432"
+    networks:
+      - benchmark-net
+    healthcheck: *healthcheck-pg
+    shm_size: "2gb"
+    deploy:
+      resources:
+        limits:
+          cpus: "${DB_CPU_LIMIT:-4}"
+          memory: "${DB_MEMORY_LIMIT:-8G}"
+        reservations:
+          cpus: "1"
+          memory: "2G"
+    command: >
+      postgres
+      -c shared_preload_libraries=orochi
+      -c max_connections=500
+      -c shared_buffers=2GB
+      -c effective_cache_size=6GB
+      -c maintenance_work_mem=512MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=64MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=64MB
+      -c min_wal_size=1GB
+      -c max_wal_size=4GB
+      -c max_worker_processes=8
+      -c max_parallel_workers_per_gather=4
+      -c max_parallel_workers=8
+      -c max_parallel_maintenance_workers=4
+      -c jit=on
+      -c log_min_duration_statement=1000
+      -c log_checkpoints=on
+      -c log_connections=off
+      -c log_disconnections=off
+
+  # ===========================================================================
+  # Benchmark Runner - Executes benchmark suites
+  # ===========================================================================
+  benchmark-runner:
+    build:
+      context: ../../../..
+      dockerfile: extensions/postgres/benchmark/docker/Dockerfile.benchmark
+      args:
+        PG_MAJOR: ${PG_MAJOR:-16}
+    image: orochi-benchmark:latest
+    container_name: benchmark-runner
+    environment:
+      <<: *common-envs
+      BENCHMARK_SUITE: ${BENCHMARK_SUITE:-all}
+      SCALE_FACTOR: ${SCALE_FACTOR:-1}
+      NUM_CLIENTS: ${NUM_CLIENTS:-auto}
+      NUM_THREADS: ${NUM_THREADS:-auto}
+      DURATION: ${DURATION:-60}
+      WARMUP: ${WARMUP:-10}
+      OUTPUT_FORMAT: ${OUTPUT_FORMAT:-json}
+      AUTO_DETECT_HARDWARE: "true"
+      VERBOSE: ${VERBOSE:-false}
+      # Pooler comparison settings
+      COMPARE_POOLERS: ${COMPARE_POOLERS:-false}
+      PGBOUNCER_HOST: pgbouncer
+      PGCAT_HOST: pgcat
+      PGDOG_HOST: pgdog
+    volumes:
+      - benchmark-results:/results
+      - benchmark-data:/data
+      - ./reports:/opt/orochi-benchmark/reports
+    networks:
+      - benchmark-net
+    depends_on:
+      orochi-db:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "${BENCH_CPU_LIMIT:-2}"
+          memory: "${BENCH_MEMORY_LIMIT:-4G}"
+        reservations:
+          cpus: "0.5"
+          memory: "512M"
+
+  # ===========================================================================
+  # Connection Poolers (optional - enabled with --profile poolers)
+  # ===========================================================================
+
+  # PgBouncer - Traditional lightweight pooler
+  pgbouncer:
+    image: bitnami/pgbouncer:latest
+    container_name: pgbouncer
+    profiles: ["poolers", "full"]
+    environment:
+      PGBOUNCER_DATABASE: ${POSTGRES_DB:-orochi_bench}
+      POSTGRESQL_HOST: orochi-db
+      POSTGRESQL_PORT: "5432"
+      POSTGRESQL_USERNAME: postgres
+      POSTGRESQL_PASSWORD: ${POSTGRES_PASSWORD:-orochi_bench_secret}
+      PGBOUNCER_PORT: "6432"
+      PGBOUNCER_POOL_MODE: transaction
+      PGBOUNCER_MAX_CLIENT_CONN: "1000"
+      PGBOUNCER_DEFAULT_POOL_SIZE: "50"
+      PGBOUNCER_MIN_POOL_SIZE: "10"
+      PGBOUNCER_RESERVE_POOL_SIZE: "25"
+      PGBOUNCER_SERVER_RESET_QUERY: "DISCARD ALL"
+      PGBOUNCER_IGNORE_STARTUP_PARAMETERS: "extra_float_digits"
+    ports:
+      - "${PGBOUNCER_PORT:-6432}:6432"
+    networks:
+      - benchmark-net
+    depends_on:
+      orochi-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "localhost", "-p", "6432"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: "512M"
+
+  # PgCat - Modern pooler with query routing
+  pgcat:
+    image: ghcr.io/postgresml/pgcat:latest
+    container_name: pgcat
+    profiles: ["poolers", "full"]
+    environment:
+      PGCAT_CONFIG: |
+        [general]
+        host = "0.0.0.0"
+        port = 6433
+        admin_username = "pgcat"
+        admin_password = "pgcat"
+
+        [pools.orochi_bench]
+        pool_mode = "transaction"
+        default_role = "primary"
+        load_balancing_mode = "random"
+
+        [pools.orochi_bench.users.postgres]
+        password = "${POSTGRES_PASSWORD:-orochi_bench_secret}"
+        pool_size = 50
+
+        [pools.orochi_bench.shards.0]
+        servers = [["orochi-db", 5432, "primary"]]
+        database = "${POSTGRES_DB:-orochi_bench}"
+    ports:
+      - "${PGCAT_PORT:-6433}:6433"
+    networks:
+      - benchmark-net
+    depends_on:
+      orochi-db:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: "512M"
+
+  # PgDog - Alternative lightweight pooler
+  pgdog:
+    image: pgdog/pgdog:latest
+    container_name: pgdog
+    profiles: ["poolers", "full"]
+    environment:
+      PGDOG_HOST: orochi-db
+      PGDOG_PORT: "5432"
+      PGDOG_USER: postgres
+      PGDOG_PASSWORD: ${POSTGRES_PASSWORD:-orochi_bench_secret}
+      PGDOG_DATABASE: ${POSTGRES_DB:-orochi_bench}
+      PGDOG_LISTEN_PORT: "6434"
+      PGDOG_POOL_SIZE: "50"
+      PGDOG_POOL_MODE: "transaction"
+    ports:
+      - "${PGDOG_PORT:-6434}:6434"
+    networks:
+      - benchmark-net
+    depends_on:
+      orochi-db:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: "512M"
+
+  # ===========================================================================
+  # Monitoring (optional - enabled with --profile full)
+  # ===========================================================================
+
+  # Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    profiles: ["full"]
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - benchmark-net
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=7d'
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: "512M"
+
+  # Grafana for visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    profiles: ["full"]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    networks:
+      - benchmark-net
+    depends_on:
+      - prometheus
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: "512M"
+
+  # PostgreSQL Exporter for Prometheus
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    container_name: postgres-exporter
+    profiles: ["full"]
+    environment:
+      DATA_SOURCE_NAME: "postgresql://postgres:${POSTGRES_PASSWORD:-orochi_bench_secret}@orochi-db:5432/${POSTGRES_DB:-orochi_bench}?sslmode=disable"
+    ports:
+      - "9187:9187"
+    networks:
+      - benchmark-net
+    depends_on:
+      orochi-db:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: "128M"
+
+# ===========================================================================
+# Networks
+# ===========================================================================
+networks:
+  benchmark-net:
+    name: orochi-benchmark
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+# ===========================================================================
+# Volumes
+# ===========================================================================
+volumes:
+  orochi-data:
+    name: orochi-benchmark-data
+    driver: local
+  benchmark-results:
+    name: orochi-benchmark-results
+    driver: local
+  benchmark-data:
+    name: orochi-benchmark-workload-data
+    driver: local
+  prometheus-data:
+    name: orochi-prometheus-data
+    driver: local
+  grafana-data:
+    name: orochi-grafana-data
+    driver: local

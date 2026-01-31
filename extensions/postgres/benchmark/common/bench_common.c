@@ -8,7 +8,7 @@
 #include <unistd.h>
 #include <sys/utsname.h>
 #include <getopt.h>
-#include <errno.h>
+#include <inttypes.h>
 
 /* Global verbose flag */
 bool g_verbose = false;
@@ -461,9 +461,9 @@ static void print_json_result(const BenchResult *result, FILE *fp)
     fprintf(fp, "    {\n");
     fprintf(fp, "      \"name\": \"%s\",\n", result->name);
     fprintf(fp, "      \"success\": %s,\n", result->success ? "true" : "false");
-    fprintf(fp, "      \"total_queries\": %ld,\n", result->total_queries);
-    fprintf(fp, "      \"failed_queries\": %ld,\n", result->failed_queries);
-    fprintf(fp, "      \"total_rows\": %ld,\n", result->total_rows);
+    fprintf(fp, "      \"total_queries\": %" PRId64 ",\n", result->total_queries);
+    fprintf(fp, "      \"failed_queries\": %" PRId64 ",\n", result->failed_queries);
+    fprintf(fp, "      \"total_rows\": %" PRId64 ",\n", result->total_rows);
     fprintf(fp, "      \"latency\": {\n");
     fprintf(fp, "        \"min_us\": %.2f,\n", result->latency.min_us);
     fprintf(fp, "        \"max_us\": %.2f,\n", result->latency.max_us);
@@ -491,7 +491,7 @@ void bench_result_print(const BenchResult *result, OutputFormat format, FILE *fp
             break;
 
         case OUTPUT_CSV:
-            fprintf(fp, "%s,%ld,%ld,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n",
+            fprintf(fp, "%s,%" PRId64 ",%" PRId64 ",%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n",
                     result->name, result->total_queries, result->total_rows,
                     result->latency.min_us, result->latency.max_us,
                     result->latency.avg_us, result->latency.p50_us,
@@ -503,8 +503,8 @@ void bench_result_print(const BenchResult *result, OutputFormat format, FILE *fp
         case OUTPUT_TEXT:
         default:
             printf("\n=== %s ===\n", result->name);
-            printf("Queries: %ld (failed: %ld)\n", result->total_queries, result->failed_queries);
-            printf("Rows:    %ld\n", result->total_rows);
+            printf("Queries: %" PRId64 " (failed: %" PRId64 ")\n", result->total_queries, result->failed_queries);
+            printf("Rows:    %" PRId64 "\n", result->total_rows);
             printf("Latency (us): min=%.0f, avg=%.0f, p50=%.0f, p95=%.0f, p99=%.0f, max=%.0f\n",
                    result->latency.min_us, result->latency.avg_us,
                    result->latency.p50_us, result->latency.p95_us,
@@ -756,7 +756,7 @@ char *format_duration(double seconds, char *buffer, size_t buflen)
 char *format_number(int64_t number, char *buffer, size_t buflen)
 {
     if (number < 1000) {
-        snprintf(buffer, buflen, "%ld", number);
+        snprintf(buffer, buflen, "%" PRId64, number);
     } else if (number < 1000000) {
         snprintf(buffer, buflen, "%.1fK", number / 1000.0);
     } else if (number < 1000000000) {

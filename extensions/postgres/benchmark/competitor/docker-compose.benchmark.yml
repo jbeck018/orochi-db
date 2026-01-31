@@ -1,0 +1,123 @@
+# Docker Compose for Orochi DB Competitor Benchmarking
+#
+# Usage:
+#   docker-compose -f docker-compose.benchmark.yml up -d
+#   ./run_comparison.sh --competitor=all
+#   docker-compose -f docker-compose.benchmark.yml down -v
+#
+version: '3.8'
+
+services:
+  # Orochi DB (PostgreSQL with Orochi extension)
+  orochi:
+    image: postgres:16
+    container_name: bench_orochi
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: orochi_bench
+    volumes:
+      - orochi_data:/var/lib/postgresql/data
+      - ./configs/postgresql-orochi.conf:/etc/postgresql/postgresql.conf:ro
+    command: postgres -c 'config_file=/etc/postgresql/postgresql.conf'
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - benchmark
+
+  # Vanilla PostgreSQL (baseline)
+  vanilla:
+    image: postgres:16
+    container_name: bench_vanilla
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: vanilla_bench
+    volumes:
+      - vanilla_data:/var/lib/postgresql/data
+      - ./configs/postgresql-vanilla.conf:/etc/postgresql/postgresql.conf:ro
+    command: postgres -c 'config_file=/etc/postgresql/postgresql.conf'
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - benchmark
+
+  # TimescaleDB
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: bench_timescaledb
+    ports:
+      - "5434:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: timescale_bench
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - benchmark
+
+  # Citus (Distributed PostgreSQL)
+  citus:
+    image: citusdata/citus:12.1
+    container_name: bench_citus
+    ports:
+      - "5435:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: citus_bench
+    volumes:
+      - citus_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - benchmark
+
+  # QuestDB (Time-series database)
+  questdb:
+    image: questdb/questdb:latest
+    container_name: bench_questdb
+    ports:
+      - "9000:9000"   # Web Console
+      - "9009:9009"   # InfluxDB Line Protocol
+      - "8812:8812"   # PostgreSQL wire protocol
+      - "9003:9003"   # Health endpoint
+    volumes:
+      - questdb_data:/var/lib/questdb
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9003"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - benchmark
+
+volumes:
+  orochi_data:
+  vanilla_data:
+  timescale_data:
+  citus_data:
+  questdb_data:
+
+networks:
+  benchmark:
+    driver: bridge

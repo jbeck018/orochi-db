@@ -11,6 +11,7 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <math.h>
+#include <inttypes.h>
 #include "bench_common.h"
 
 /* Benchmark modes */
@@ -183,7 +184,7 @@ static void run_insert_benchmark(TsBenchmark *bench, BenchSuite *suite)
         double elapsed = timer_elapsed_secs(&total_timer);
         double rate = (current_total - last_total);
 
-        printf("\r  Progress: %ld / %ld points (%.0f points/sec)   ",
+        printf("\r  Progress: %" PRId64 " / %" PRId64 " points (%.0f points/sec)   ",
                current_total, bench->total_points, rate);
         fflush(stdout);
 
@@ -231,8 +232,8 @@ static void run_insert_benchmark(TsBenchmark *bench, BenchSuite *suite)
                               total_points, 0, duration);
 
     printf("\n  Results:\n");
-    printf("    Total Points:     %ld\n", total_points);
-    printf("    Total Batches:    %ld\n", total_batches);
+    printf("    Total Points:     %" PRId64 "\n", total_points);
+    printf("    Total Batches:    %" PRId64 "\n", total_batches);
     printf("    Duration:         %.2f seconds\n", duration);
     printf("    Throughput:       %.0f points/sec\n", total_points / duration);
     printf("    Batch Latency:    avg=%.2fms, p95=%.2fms, p99=%.2fms\n",
@@ -373,7 +374,7 @@ static void run_query_benchmark(TsBenchmark *bench, BenchSuite *suite)
                                   result->total_rows, 0,
                                   stats->avg_us * iterations / 1000000.0);
 
-        printf("avg=%.2fms, p95=%.2fms, rows=%ld\n",
+        printf("avg=%.2fms, p95=%.2fms, rows=%" PRId64 "\n",
                result->latency.avg_us / 1000.0,
                result->latency.p95_us / 1000.0,
                result->total_rows / iterations);
@@ -478,7 +479,7 @@ static void run_chunk_benchmark(TsBenchmark *bench, BenchSuite *suite)
         latency_stats_compute(stats);
         result->latency = *stats;
 
-        printf("    Cross-chunk query: avg=%.2fms, rows=%ld\n",
+        printf("    Cross-chunk query: avg=%.2fms, rows=%" PRId64 "\n",
                result->latency.avg_us / 1000.0,
                result->total_rows / 10);
 

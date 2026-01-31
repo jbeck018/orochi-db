@@ -36,7 +36,8 @@ ifdef DEBUG
 endif
 
 # Subdirectories
-SUBDIRS := tpch timeseries columnar distributed vectorized
+# NOTE: vectorized is excluded until source files are implemented
+SUBDIRS := tpch timeseries columnar distributed multitenant sharding connection competitor
 
 # Build artifacts
 COMMON_SRCS := $(wildcard common/*.c)
@@ -44,8 +45,8 @@ COMMON_OBJS := $(COMMON_SRCS:.c=.o)
 COMMON_LIB := common/libbench_common.a
 
 .PHONY: all clean clean-results setup teardown help
-.PHONY: $(SUBDIRS) run-all run-tpch run-timeseries run-columnar run-distributed run-vectorized
-.PHONY: report compare
+.PHONY: $(SUBDIRS) run-all run-tpch run-timeseries run-columnar run-distributed run-vectorized run-multitenant run-sharding
+.PHONY: report compare dashboard dashboard-setup dashboard-serve
 
 # Default target
 all: $(COMMON_LIB) $(SUBDIRS)
@@ -137,6 +138,27 @@ run-vectorized: setup
 		PGUSER=$(PGUSER) PGDATABASE=$(PGDATABASE) \
 		OUTPUT_DIR=../$(RESULTS_DIR)/vectorized
 
+run-multitenant: setup
+	@echo "=== Running Multi-Tenant Isolation Benchmarks ==="
+	@mkdir -p $(RESULTS_DIR)/multitenant
+	$(MAKE) -C multitenant run \
+		NUM_TENANTS=$(NUM_TENANTS) \
+		ROWS_PER_TENANT=$(ROWS_PER_TENANT) \
+		DURATION=$(DURATION) \
+		PGHOST=$(PGHOST) PGPORT=$(PGPORT) \
+		PGUSER=$(PGUSER) PGDATABASE=$(PGDATABASE) \
+		OUTPUT_DIR=../$(RESULTS_DIR)/multitenant
+
+run-sharding: setup
+	@echo "=== Running Sharding/Distribution Benchmarks ==="
+	@mkdir -p $(RESULTS_DIR)/sharding
+	$(MAKE) -C sharding run \
+		RECORDS=$(SCALE_FACTOR)0000 \
+		DURATION=$(DURATION) \
+		PGHOST=$(PGHOST) PGPORT=$(PGPORT) \
+		PGUSER=$(PGUSER) PGDATABASE=$(PGDATABASE) \
+		OUTPUT_DIR=../$(RESULTS_DIR)/sharding
+
 # Generate report from results
 report:
 	@echo "=== Generating Benchmark Report ==="
@@ -146,6 +168,23 @@ report:
 compare:
 	@echo "=== Comparing Results with Baseline ==="
 	@./common/compare_results.sh $(RESULTS_DIR) $(BASELINE_DIR)
+
+# Dashboard targets
+dashboard-setup:
+	@echo "=== Setting up Dashboard Dependencies ==="
+	pip3 install -r dashboard/requirements.txt
+
+dashboard: $(RESULTS_DIR)
+	@echo "=== Generating Dashboard Report ==="
+	cd dashboard && ./generate_report.sh -r ../$(RESULTS_DIR) -o ./output -c
+
+dashboard-serve:
+	@echo "=== Starting Dashboard Web Server ==="
+	cd dashboard && python3 web_server.py -r ../$(RESULTS_DIR) -p 5000
+
+dashboard-static:
+	@echo "=== Starting Static Dashboard Server ==="
+	cd dashboard/output && python3 -m http.server 8000
 
 # Clean build artifacts
 clean:
@@ -177,8 +216,13 @@ help:
 	@echo "  run-columnar     Run columnar storage benchmarks"
 	@echo "  run-distributed  Run distributed benchmarks"
 	@echo "  run-vectorized   Run vectorized execution benchmarks"
+	@echo "  run-multitenant  Run multi-tenant isolation benchmarks"
 	@echo "  report           Generate report from results"
 	@echo "  compare          Compare results with baseline"
+	@echo "  dashboard-setup  Install dashboard Python dependencies"
+	@echo "  dashboard        Generate dashboard with charts"
+	@echo "  dashboard-serve  Start interactive web dashboard"
+	@echo "  dashboard-static Serve static dashboard files"
 	@echo "  clean            Clean build artifacts"
 	@echo "  clean-results    Clean benchmark results"
 	@echo "  clean-all        Clean everything"

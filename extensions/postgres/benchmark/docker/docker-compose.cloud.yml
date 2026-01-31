@@ -1,0 +1,407 @@
+# Orochi DB Benchmark Infrastructure - Cloud Deployment Override
+# Extended configuration for cloud deployments with higher resource limits,
+# cloud storage integration, and multi-region support.
+#
+# Usage:
+#   docker-compose -f docker-compose.yml -f docker-compose.cloud.yml up -d
+#
+# Supported Cloud Providers:
+#   - AWS (ECS/EKS with EBS, S3)
+#   - GCP (GKE with persistent disks, GCS)
+#   - Azure (AKS with managed disks, Blob Storage)
+#   - DigitalOcean (DOKS with block storage, Spaces)
+
+version: "3.9"
+
+x-cloud-common: &cloud-common
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "100m"
+      max-file: "5"
+      labels: "service,environment"
+  labels:
+    - "environment=${ENVIRONMENT:-production}"
+    - "project=orochi-benchmark"
+    - "managed-by=docker-compose"
+
+x-cloud-labels: &cloud-labels
+  labels:
+    - "environment=${ENVIRONMENT:-production}"
+    - "project=orochi-benchmark"
+    - "cloud.provider=${CLOUD_PROVIDER:-generic}"
+    - "cloud.region=${CLOUD_REGION:-us-east-1}"
+
+services:
+  # ===========================================================================
+  # Orochi DB - Enhanced for cloud deployment
+  # ===========================================================================
+  orochi-db:
+    <<: *cloud-common
+    deploy:
+      resources:
+        limits:
+          cpus: "${DB_CPU_LIMIT:-8}"
+          memory: "${DB_MEMORY_LIMIT:-32G}"
+        reservations:
+          cpus: "4"
+          memory: "16G"
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.database == true
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+    shm_size: "8gb"
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+      memlock:
+        soft: -1
+        hard: -1
+    sysctls:
+      - net.core.somaxconn=65535
+      - net.ipv4.tcp_max_syn_backlog=65535
+    command: >
+      postgres
+      -c shared_preload_libraries=orochi
+      -c max_connections=1000
+      -c shared_buffers=8GB
+      -c effective_cache_size=24GB
+      -c maintenance_work_mem=2GB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=256MB
+      -c default_statistics_target=500
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=256MB
+      -c huge_pages=try
+      -c min_wal_size=4GB
+      -c max_wal_size=16GB
+      -c max_worker_processes=16
+      -c max_parallel_workers_per_gather=8
+      -c max_parallel_workers=16
+      -c max_parallel_maintenance_workers=8
+      -c jit=on
+      -c log_min_duration_statement=500
+      -c log_checkpoints=on
+      -c log_lock_waits=on
+      -c log_temp_files=0
+      -c track_activities=on
+      -c track_counts=on
+      -c track_io_timing=on
+      -c track_wal_io_timing=on
+      -c track_functions=all
+      -c pg_stat_statements.track=all
+
+  # ===========================================================================
+  # Benchmark Runner - Enhanced for cloud workloads
+  # ===========================================================================
+  benchmark-runner:
+    <<: *cloud-common
+    environment:
+      PGHOST: orochi-db
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: ${POSTGRES_PASSWORD:-orochi_bench_secret}
+      PGDATABASE: ${POSTGRES_DB:-orochi_bench}
+      BENCHMARK_SUITE: ${BENCHMARK_SUITE:-all}
+      SCALE_FACTOR: ${SCALE_FACTOR:-100}
+      NUM_CLIENTS: ${NUM_CLIENTS:-64}
+      NUM_THREADS: ${NUM_THREADS:-16}
+      DURATION: ${DURATION:-300}
+      WARMUP: ${WARMUP:-60}
+      OUTPUT_FORMAT: ${OUTPUT_FORMAT:-json}
+      AUTO_DETECT_HARDWARE: "true"
+      VERBOSE: ${VERBOSE:-true}
+      # Cloud storage for results
+      CLOUD_STORAGE_ENABLED: "true"
+      CLOUD_PROVIDER: ${CLOUD_PROVIDER:-aws}
+      # AWS Configuration
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-orochi-benchmark-results}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      # GCP Configuration
+      GCP_PROJECT: ${GCP_PROJECT:-}
+      GCP_GCS_BUCKET: ${GCP_GCS_BUCKET:-orochi-benchmark-results}
+      GOOGLE_APPLICATION_CREDENTIALS: /secrets/gcp-credentials.json
+      # Azure Configuration
+      AZURE_STORAGE_ACCOUNT: ${AZURE_STORAGE_ACCOUNT:-}
+      AZURE_STORAGE_KEY: ${AZURE_STORAGE_KEY:-}
+      AZURE_CONTAINER: ${AZURE_CONTAINER:-orochi-benchmark-results}
+      # DigitalOcean Spaces Configuration
+      DO_SPACES_KEY: ${DO_SPACES_KEY:-}
+      DO_SPACES_SECRET: ${DO_SPACES_SECRET:-}
+      DO_SPACES_BUCKET: ${DO_SPACES_BUCKET:-orochi-benchmark-results}
+      DO_SPACES_REGION: ${DO_SPACES_REGION:-nyc3}
+      # Multi-region testing
+      MULTI_REGION_ENABLED: ${MULTI_REGION_ENABLED:-false}
+      PRIMARY_REGION: ${PRIMARY_REGION:-us-east-1}
+      SECONDARY_REGIONS: ${SECONDARY_REGIONS:-}
+      # Notification settings
+      NOTIFY_ON_COMPLETE: ${NOTIFY_ON_COMPLETE:-true}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      EMAIL_NOTIFICATION: ${EMAIL_NOTIFICATION:-}
+    deploy:
+      resources:
+        limits:
+          cpus: "${BENCH_CPU_LIMIT:-8}"
+          memory: "${BENCH_MEMORY_LIMIT:-16G}"
+        reservations:
+          cpus: "2"
+          memory: "4G"
+      placement:
+        constraints:
+          - node.labels.benchmark == true
+      restart_policy:
+        condition: none
+    volumes:
+      - benchmark-results:/results
+      - benchmark-data:/data
+      - ./reports:/opt/orochi-benchmark/reports
+      # Cloud credentials mounts
+      - ${GCP_CREDENTIALS_FILE:-/dev/null}:/secrets/gcp-credentials.json:ro
+    secrets:
+      - aws_credentials
+      - azure_credentials
+
+  # ===========================================================================
+  # Connection Poolers - Cloud-optimized configuration
+  # ===========================================================================
+  pgbouncer:
+    <<: *cloud-common
+    profiles: ["poolers", "full"]
+    environment:
+      PGBOUNCER_DATABASE: ${POSTGRES_DB:-orochi_bench}
+      POSTGRESQL_HOST: orochi-db
+      POSTGRESQL_PORT: "5432"
+      POSTGRESQL_USERNAME: postgres
+      POSTGRESQL_PASSWORD: ${POSTGRES_PASSWORD:-orochi_bench_secret}
+      PGBOUNCER_PORT: "6432"
+      PGBOUNCER_POOL_MODE: transaction
+      PGBOUNCER_MAX_CLIENT_CONN: "5000"
+      PGBOUNCER_DEFAULT_POOL_SIZE: "100"
+      PGBOUNCER_MIN_POOL_SIZE: "25"
+      PGBOUNCER_RESERVE_POOL_SIZE: "50"
+      PGBOUNCER_SERVER_RESET_QUERY: "DISCARD ALL"
+      PGBOUNCER_IGNORE_STARTUP_PARAMETERS: "extra_float_digits"
+      PGBOUNCER_TCP_KEEPALIVE: "1"
+      PGBOUNCER_TCP_KEEPCNT: "5"
+      PGBOUNCER_TCP_KEEPIDLE: "30"
+      PGBOUNCER_TCP_KEEPINTVL: "10"
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: "2G"
+        reservations:
+          cpus: "0.5"
+          memory: "256M"
+      replicas: 2
+
+  pgcat:
+    <<: *cloud-common
+    profiles: ["poolers", "full"]
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: "2G"
+        reservations:
+          cpus: "0.5"
+          memory: "256M"
+      replicas: 2
+
+  # ===========================================================================
+  # Multi-Region Coordinator (for cross-region latency testing)
+  # ===========================================================================
+  region-coordinator:
+    image: orochi-benchmark:latest
+    container_name: region-coordinator
+    profiles: ["multi-region"]
+    <<: *cloud-common
+    environment:
+      MODE: coordinator
+      PRIMARY_REGION: ${PRIMARY_REGION:-us-east-1}
+      SECONDARY_REGIONS: ${SECONDARY_REGIONS:-eu-west-1,ap-northeast-1}
+      COORDINATION_PORT: "9999"
+      RESULTS_AGGREGATION: "true"
+      # Multi-region endpoints (to be configured per deployment)
+      REGION_US_EAST_ENDPOINT: ${REGION_US_EAST_ENDPOINT:-}
+      REGION_US_WEST_ENDPOINT: ${REGION_US_WEST_ENDPOINT:-}
+      REGION_EU_WEST_ENDPOINT: ${REGION_EU_WEST_ENDPOINT:-}
+      REGION_AP_NORTHEAST_ENDPOINT: ${REGION_AP_NORTHEAST_ENDPOINT:-}
+    ports:
+      - "9999:9999"
+    networks:
+      - benchmark-net
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: "1G"
+      placement:
+        constraints:
+          - node.labels.coordinator == true
+
+  # ===========================================================================
+  # Results Aggregator & Reporter
+  # ===========================================================================
+  results-reporter:
+    image: orochi-benchmark:latest
+    container_name: results-reporter
+    profiles: ["full"]
+    <<: *cloud-common
+    environment:
+      MODE: reporter
+      RESULTS_DIR: /results
+      OUTPUT_FORMATS: "json,csv,html,pdf"
+      UPLOAD_TO_CLOUD: "true"
+      GENERATE_COMPARISON: "true"
+      BASELINE_RESULTS: /baseline
+      # Report distribution
+      UPLOAD_TO_S3: ${UPLOAD_TO_S3:-false}
+      UPLOAD_TO_GCS: ${UPLOAD_TO_GCS:-false}
+      PUBLISH_TO_GITHUB: ${PUBLISH_TO_GITHUB:-false}
+      GITHUB_REPO: ${GITHUB_REPO:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+    volumes:
+      - benchmark-results:/results:ro
+      - benchmark-baseline:/baseline:ro
+      - benchmark-reports:/reports
+    networks:
+      - benchmark-net
+    depends_on:
+      - benchmark-runner
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: "2G"
+      restart_policy:
+        condition: none
+
+  # ===========================================================================
+  # Enhanced Monitoring for Cloud
+  # ===========================================================================
+  prometheus:
+    profiles: ["full"]
+    <<: *cloud-common
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--storage.tsdb.retention.size=10GB'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: "4G"
+        reservations:
+          cpus: "0.5"
+          memory: "1G"
+
+  grafana:
+    profiles: ["full"]
+    <<: *cloud-common
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3000}
+      GF_SMTP_ENABLED: ${GRAFANA_SMTP_ENABLED:-false}
+      GF_SMTP_HOST: ${GRAFANA_SMTP_HOST:-}
+      GF_SMTP_USER: ${GRAFANA_SMTP_USER:-}
+      GF_SMTP_PASSWORD: ${GRAFANA_SMTP_PASSWORD:-}
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: "2G"
+        reservations:
+          cpus: "0.25"
+          memory: "256M"
+
+# ===========================================================================
+# Secrets (for cloud credentials)
+# ===========================================================================
+secrets:
+  aws_credentials:
+    file: ${AWS_CREDENTIALS_FILE:-./secrets/aws_credentials}
+  azure_credentials:
+    file: ${AZURE_CREDENTIALS_FILE:-./secrets/azure_credentials}
+
+# ===========================================================================
+# Cloud-optimized Networks
+# ===========================================================================
+networks:
+  benchmark-net:
+    driver: overlay
+    attachable: true
+    driver_opts:
+      encrypted: "true"
+
+# ===========================================================================
+# Cloud-optimized Volumes
+# ===========================================================================
+volumes:
+  orochi-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DB_DATA_PATH:-/data/orochi}
+
+  benchmark-results:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${RESULTS_PATH:-/data/results}
+
+  benchmark-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${WORKLOAD_DATA_PATH:-/data/workload}
+
+  benchmark-baseline:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${BASELINE_PATH:-/data/baseline}
+
+  benchmark-reports:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${REPORTS_PATH:-/data/reports}
+
+  prometheus-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PROMETHEUS_DATA_PATH:-/data/prometheus}
+
+  grafana-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${GRAFANA_DATA_PATH:-/data/grafana}

@@ -9,6 +9,8 @@
 #include <string.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <unistd.h>
+#include <inttypes.h>
 #include "bench_common.h"
 
 /* Query definitions */
@@ -184,7 +186,7 @@ static BenchResult *run_query(PGconn *conn, TpchQuery *query, int iterations)
     if (result->failed_queries > 0) {
         result->success = false;
         snprintf(result->error_msg, sizeof(result->error_msg),
-                 "%ld failed queries", result->failed_queries);
+                 "%" PRId64 " failed queries", result->failed_queries);
     }
 
     latency_stats_free(stats);
@@ -209,7 +211,7 @@ static void run_power_test(TpchBenchmark *bench, BenchSuite *suite)
         if (result) {
             bench_suite_add_result(suite, result);
 
-            printf("  Q%02d: avg=%.2fms, p95=%.2fms, rows=%ld\n",
+            printf("  Q%02d: avg=%.2fms, p95=%.2fms, rows=%" PRId64 "\n",
                    bench->queries[i].query_num,
                    result->latency.avg_us / 1000.0,
                    result->latency.p95_us / 1000.0,

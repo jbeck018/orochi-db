@@ -1,0 +1,35 @@
+# Compiled binaries
+*_bench
+*.o
+*.a
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.eggs/
+*.egg-info/
+
+# Generated output
+output/
+results/
+charts/
+*.png
+*.jpg
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude Flow
+.claude-flow/
+
+# Environment
+.env
+.env.local
+
+# OS files
+.DS_Store
+Thumbs.db

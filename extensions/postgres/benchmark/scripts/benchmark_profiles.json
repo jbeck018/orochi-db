@@ -1,0 +1,248 @@
+{
+  "profiles": {
+    "quick": {
+      "description": "Quick validation benchmark - minimal resources, fast completion",
+      "scale": 1,
+      "duration": 60,
+      "clients": 4,
+      "threads": 1,
+      "warmup": 5,
+      "min_ram_gb": 1,
+      "recommended_for": ["local_dev", "ci_cd", "quick_validation"]
+    },
+    "standard": {
+      "description": "Standard benchmark - balanced resources and duration",
+      "scale": 10,
+      "duration": 300,
+      "clients": 16,
+      "threads": 1,
+      "warmup": 30,
+      "min_ram_gb": 8,
+      "recommended_for": ["development", "regression_testing", "comparison"]
+    },
+    "stress": {
+      "description": "Stress test benchmark - maximum load for extended duration",
+      "scale": 100,
+      "duration": 3600,
+      "clients": 64,
+      "threads": 2,
+      "warmup": 60,
+      "min_ram_gb": 64,
+      "recommended_for": ["production_validation", "capacity_planning", "stress_testing"]
+    },
+    "cloud-small": {
+      "description": "Cloud benchmark for small instances (t3.large, e2-standard-4, Standard_D4s_v3)",
+      "scale": 10,
+      "duration": 600,
+      "clients": 8,
+      "threads": 1,
+      "warmup": 30,
+      "min_ram_gb": 8,
+      "cloud_instances": {
+        "aws": ["t3.large", "t3.xlarge", "m5.large", "m5.xlarge", "r5.large"],
+        "gcp": ["e2-standard-2", "e2-standard-4", "n2-standard-2", "n2-standard-4"],
+        "azure": ["Standard_D2s_v5", "Standard_D4s_v5", "Standard_E2s_v5"],
+        "digitalocean": ["s-2vcpu-4gb", "s-2vcpu-8gb", "s-4vcpu-8gb"]
+      },
+      "recommended_for": ["cloud_development", "staging_environment"]
+    },
+    "cloud-medium": {
+      "description": "Cloud benchmark for medium instances (m5.2xlarge, n2-standard-8, Standard_D8s_v3)",
+      "scale": 50,
+      "duration": 900,
+      "clients": 16,
+      "threads": 2,
+      "warmup": 45,
+      "min_ram_gb": 32,
+      "cloud_instances": {
+        "aws": ["m5.2xlarge", "m5.4xlarge", "r5.2xlarge", "c5.2xlarge"],
+        "gcp": ["n2-standard-8", "n2-standard-16", "n2-highmem-8"],
+        "azure": ["Standard_D8s_v5", "Standard_D16s_v5", "Standard_E8s_v5"],
+        "digitalocean": ["s-8vcpu-16gb", "s-8vcpu-32gb"]
+      },
+      "recommended_for": ["cloud_production", "performance_testing"]
+    },
+    "cloud-large": {
+      "description": "Cloud benchmark for large instances (m5.8xlarge, n2-standard-32, Standard_D32s_v3)",
+      "scale": 100,
+      "duration": 1800,
+      "clients": 32,
+      "threads": 2,
+      "warmup": 60,
+      "min_ram_gb": 64,
+      "cloud_instances": {
+        "aws": ["m5.8xlarge", "m5.12xlarge", "r5.8xlarge", "c5.9xlarge"],
+        "gcp": ["n2-standard-32", "n2-standard-48", "n2-highmem-16", "n2-highmem-32"],
+        "azure": ["Standard_D32s_v5", "Standard_D48s_v5", "Standard_E32s_v5"],
+        "digitalocean": ["s-16vcpu-64gb", "so-8vcpu-64gb", "m-16vcpu-128gb"]
+      },
+      "recommended_for": ["cloud_high_performance", "benchmark_comparison"]
+    },
+    "distributed": {
+      "description": "Distributed cluster benchmark - multi-node testing",
+      "scale": 100,
+      "duration": 1200,
+      "clients": 48,
+      "threads": 2,
+      "warmup": 60,
+      "min_ram_gb": 32,
+      "min_nodes": 3,
+      "recommended_for": ["distributed_testing", "cluster_validation", "sharding_benchmarks"]
+    },
+    "oltp": {
+      "description": "OLTP workload benchmark - high concurrency, short transactions",
+      "scale": 10,
+      "duration": 600,
+      "clients": 64,
+      "threads": 1,
+      "warmup": 30,
+      "min_ram_gb": 16,
+      "workload_type": "oltp",
+      "recommended_for": ["oltp_workload", "transaction_throughput"]
+    },
+    "olap": {
+      "description": "OLAP workload benchmark - complex queries, columnar storage",
+      "scale": 100,
+      "duration": 900,
+      "clients": 8,
+      "threads": 4,
+      "warmup": 60,
+      "min_ram_gb": 64,
+      "workload_type": "olap",
+      "recommended_for": ["analytics_workload", "columnar_storage", "tpch_queries"]
+    },
+    "htap": {
+      "description": "HTAP workload benchmark - mixed OLTP and OLAP",
+      "scale": 50,
+      "duration": 900,
+      "clients": 32,
+      "threads": 2,
+      "warmup": 45,
+      "min_ram_gb": 32,
+      "workload_type": "htap",
+      "workload_mix": {
+        "oltp_percent": 70,
+        "olap_percent": 30
+      },
+      "recommended_for": ["hybrid_workload", "mixed_traffic"]
+    },
+    "timeseries": {
+      "description": "Time-series benchmark - high ingestion rate testing",
+      "scale": 10,
+      "duration": 600,
+      "clients": 32,
+      "threads": 1,
+      "warmup": 30,
+      "min_ram_gb": 16,
+      "workload_type": "timeseries",
+      "metrics_per_second": 100000,
+      "recommended_for": ["time_series_ingestion", "iot_workload", "monitoring_data"]
+    },
+    "vector": {
+      "description": "Vector similarity search benchmark",
+      "scale": 10,
+      "duration": 300,
+      "clients": 16,
+      "threads": 2,
+      "warmup": 30,
+      "min_ram_gb": 32,
+      "workload_type": "vector",
+      "vector_dimensions": 768,
+      "recommended_for": ["vector_search", "embedding_similarity", "ai_workload"]
+    },
+    "ci": {
+      "description": "CI/CD pipeline benchmark - fast validation for automated testing",
+      "scale": 1,
+      "duration": 30,
+      "clients": 2,
+      "threads": 1,
+      "warmup": 5,
+      "min_ram_gb": 1,
+      "recommended_for": ["continuous_integration", "pull_request_validation", "automated_testing"]
+    }
+  },
+  "performance_tiers": {
+    "minimal": {
+      "description": "Minimal resources - development and testing only",
+      "max_scale": 1,
+      "max_clients": 4,
+      "expected_tps_range": [100, 1000]
+    },
+    "low": {
+      "description": "Low resources - light workloads",
+      "max_scale": 10,
+      "max_clients": 8,
+      "expected_tps_range": [1000, 5000]
+    },
+    "medium": {
+      "description": "Medium resources - typical production",
+      "max_scale": 50,
+      "max_clients": 32,
+      "expected_tps_range": [5000, 20000]
+    },
+    "high": {
+      "description": "High resources - demanding workloads",
+      "max_scale": 100,
+      "max_clients": 64,
+      "expected_tps_range": [20000, 100000]
+    },
+    "very_high": {
+      "description": "Very high resources - enterprise workloads",
+      "max_scale": 500,
+      "max_clients": 128,
+      "expected_tps_range": [100000, 500000]
+    },
+    "extreme": {
+      "description": "Extreme resources - maximum performance",
+      "max_scale": 1000,
+      "max_clients": 256,
+      "expected_tps_range": [500000, 2000000]
+    }
+  },
+  "postgresql_tuning": {
+    "minimal": {
+      "shared_buffers": "128MB",
+      "work_mem": "4MB",
+      "effective_cache_size": "512MB",
+      "maintenance_work_mem": "64MB",
+      "max_connections": 50
+    },
+    "low": {
+      "shared_buffers": "512MB",
+      "work_mem": "8MB",
+      "effective_cache_size": "2GB",
+      "maintenance_work_mem": "128MB",
+      "max_connections": 100
+    },
+    "medium": {
+      "shared_buffers": "2GB",
+      "work_mem": "16MB",
+      "effective_cache_size": "8GB",
+      "maintenance_work_mem": "512MB",
+      "max_connections": 200
+    },
+    "high": {
+      "shared_buffers": "4GB",
+      "work_mem": "32MB",
+      "effective_cache_size": "16GB",
+      "maintenance_work_mem": "1GB",
+      "max_connections": 300
+    },
+    "very_high": {
+      "shared_buffers": "8GB",
+      "work_mem": "64MB",
+      "effective_cache_size": "48GB",
+      "maintenance_work_mem": "2GB",
+      "max_connections": 500
+    },
+    "extreme": {
+      "shared_buffers": "8GB",
+      "work_mem": "128MB",
+      "effective_cache_size": "128GB",
+      "maintenance_work_mem": "4GB",
+      "max_connections": 1000
+    }
+  },
+  "version": "1.0.0",
+  "last_updated": "2025-01-31"
+}

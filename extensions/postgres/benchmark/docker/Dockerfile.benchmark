@@ -1,0 +1,195 @@
+# Orochi DB Benchmark Framework
+# Multi-stage Dockerfile for comprehensive database benchmarking
+#
+# This image includes:
+# - PostgreSQL 16 with Orochi extension
+# - pgbench (built-in)
+# - sysbench
+# - TSBS (Time Series Benchmark Suite)
+# - HammerDB prerequisites
+# - Custom Orochi benchmark suite
+#
+# Usage:
+#   docker build -f Dockerfile.benchmark -t orochi-benchmark .
+#   docker run --rm -v ./results:/results orochi-benchmark
+
+ARG PG_MAJOR=16
+ARG OROCHI_VERSION=1.0.0
+
+# =============================================================================
+# Stage 1: Build Stage - Compile benchmark tools and Orochi extension
+# =============================================================================
+FROM postgres:${PG_MAJOR} AS builder
+
+ARG PG_MAJOR=16
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    postgresql-server-dev-${PG_MAJOR} \
+    libpq-dev \
+    liblz4-dev \
+    libzstd-dev \
+    libcurl4-openssl-dev \
+    libssl-dev \
+    librdkafka-dev \
+    git \
+    wget \
+    curl \
+    ca-certificates \
+    pkg-config \
+    cmake \
+    automake \
+    autoconf \
+    libtool \
+    libmysqlclient-dev \
+    libaio-dev \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build sysbench from source for latest features
+WORKDIR /tmp
+RUN git clone --depth 1 https://github.com/akopytov/sysbench.git && \
+    cd sysbench && \
+    ./autogen.sh && \
+    ./configure --with-pgsql --without-mysql && \
+    make -j$(nproc) && \
+    make install && \
+    cd .. && rm -rf sysbench
+
+# Build TSBS (Time Series Benchmark Suite)
+RUN git clone --depth 1 https://github.com/timescale/tsbs.git && \
+    cd tsbs && \
+    if [ -f "go.mod" ]; then \
+        # Install Go for building TSBS
+        wget -q https://go.dev/dl/go1.21.6.linux-amd64.tar.gz && \
+        tar -C /usr/local -xzf go1.21.6.linux-amd64.tar.gz && \
+        export PATH=$PATH:/usr/local/go/bin && \
+        export GOPATH=/tmp/go && \
+        go build -o /usr/local/bin/tsbs_generate_data ./cmd/tsbs_generate_data && \
+        go build -o /usr/local/bin/tsbs_generate_queries ./cmd/tsbs_generate_queries && \
+        go build -o /usr/local/bin/tsbs_load_timescaledb ./cmd/tsbs_load_timescaledb && \
+        go build -o /usr/local/bin/tsbs_run_queries_timescaledb ./cmd/tsbs_run_queries_timescaledb || true; \
+    fi && \
+    cd .. && rm -rf tsbs /tmp/go /usr/local/go
+
+# Copy and build Orochi extension
+COPY . /tmp/orochi-db
+WORKDIR /tmp/orochi-db/extensions/postgres
+
+# Build extension
+RUN make clean PG_CONFIG=/usr/bin/pg_config || true && \
+    make PG_CONFIG=/usr/bin/pg_config && \
+    make install PG_CONFIG=/usr/bin/pg_config
+
+# Build benchmark suite
+WORKDIR /tmp/orochi-db/extensions/postgres/benchmark
+RUN make clean || true && \
+    make all PG_CONFIG=/usr/bin/pg_config || true
+
+# =============================================================================
+# Stage 2: Runtime Stage - Lean image for running benchmarks
+# =============================================================================
+FROM postgres:${PG_MAJOR}
+
+ARG PG_MAJOR=16
+
+LABEL org.opencontainers.image.title="Orochi DB Benchmark Suite"
+LABEL org.opencontainers.image.description="Comprehensive benchmark framework for Orochi DB"
+LABEL org.opencontainers.image.version="${OROCHI_VERSION}"
+LABEL org.opencontainers.image.vendor="Orochi DB"
+
+# Install runtime dependencies and utilities
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Runtime libraries
+    libpq5 \
+    liblz4-1 \
+    libzstd1 \
+    libcurl4 \
+    libssl3 \
+    librdkafka1 \
+    libaio1 \
+    # Utilities
+    jq \
+    bc \
+    procps \
+    sysstat \
+    iotop \
+    htop \
+    vim-tiny \
+    less \
+    curl \
+    wget \
+    netcat-openbsd \
+    lsof \
+    strace \
+    # Python for analysis scripts
+    python3 \
+    python3-pip \
+    python3-psycopg2 \
+    # Disk utilities
+    fio \
+    hdparm \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python packages for result analysis
+RUN pip3 install --no-cache-dir --break-system-packages \
+    pandas \
+    matplotlib \
+    seaborn \
+    tabulate || true
+
+# Copy built artifacts from builder stage
+COPY --from=builder /usr/share/postgresql/${PG_MAJOR}/extension/orochi* /usr/share/postgresql/${PG_MAJOR}/extension/
+COPY --from=builder /usr/lib/postgresql/${PG_MAJOR}/lib/orochi.so /usr/lib/postgresql/${PG_MAJOR}/lib/
+COPY --from=builder /usr/local/bin/sysbench /usr/local/bin/
+COPY --from=builder /usr/local/bin/tsbs_* /usr/local/bin/ 2>/dev/null || true
+COPY --from=builder /usr/local/share/sysbench /usr/local/share/sysbench/
+
+# Copy benchmark suite
+COPY --from=builder /tmp/orochi-db/extensions/postgres/benchmark /opt/orochi-benchmark
+WORKDIR /opt/orochi-benchmark
+
+# Copy Docker-specific scripts
+COPY extensions/postgres/benchmark/docker/entrypoint.sh /usr/local/bin/benchmark-entrypoint.sh
+RUN chmod +x /usr/local/bin/benchmark-entrypoint.sh
+
+# Create directories
+RUN mkdir -p /results /data /var/log/benchmark && \
+    chown -R postgres:postgres /results /data /var/log/benchmark /opt/orochi-benchmark
+
+# Environment variables (defaults)
+ENV PGHOST=orochi-db \
+    PGPORT=5432 \
+    PGUSER=postgres \
+    PGPASSWORD=postgres \
+    PGDATABASE=orochi_bench \
+    BENCHMARK_SUITE=all \
+    SCALE_FACTOR=1 \
+    NUM_CLIENTS=auto \
+    NUM_THREADS=auto \
+    DURATION=60 \
+    WARMUP=10 \
+    OUTPUT_FORMAT=json \
+    AUTO_DETECT_HARDWARE=true \
+    RESULTS_DIR=/results \
+    DATA_DIR=/data \
+    VERBOSE=false \
+    # Connection pooler comparison
+    COMPARE_POOLERS=false \
+    PGBOUNCER_HOST= \
+    PGCAT_HOST= \
+    PGDOG_HOST=
+
+# Volume for persisting results
+VOLUME ["/results", "/data"]
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD pg_isready -h ${PGHOST} -p ${PGPORT} -U ${PGUSER} || exit 1
+
+# Run as postgres user
+USER postgres
+
+ENTRYPOINT ["/usr/local/bin/benchmark-entrypoint.sh"]
+CMD ["--help"]

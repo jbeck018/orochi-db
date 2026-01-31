@@ -9,6 +9,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+#include <unistd.h>
+#include <inttypes.h>
 #include "bench_common.h"
 
 /* Benchmark modes */
@@ -40,7 +42,7 @@ static void populate_customers(PGconn *conn, int64_t num_customers)
         "  'Customer ' || generate_series, "
         "  'customer' || generate_series || '@example.com', "
         "  (ARRAY['us-east','us-west','eu-west','eu-east','ap-south','ap-north'])[1 + (random() * 5)::int] "
-        "FROM generate_series(1, %ld)", num_customers);
+        "FROM generate_series(1, %" PRId64 ")", num_customers);
 
     Timer timer;
     timer_start(&timer);
@@ -256,7 +258,7 @@ static void run_cross_shard_benchmark(DistributedBenchmark *bench, BenchSuite *s
         latency_stats_compute(stats);
         result->latency = *stats;
 
-        printf("  %-30s %10.2fms %10.2fms %10ld\n",
+        printf("  %-30s %10.2fms %10.2fms %10" PRId64 "\n",
                query->name,
                result->latency.avg_us / 1000.0,
                result->latency.p95_us / 1000.0,
@@ -325,7 +327,7 @@ static void run_local_benchmark(DistributedBenchmark *bench, BenchSuite *suite)
         latency_stats_compute(stats);
         result->latency = *stats;
 
-        printf("  %-30s %10.2fms %10.2fms %10ld\n",
+        printf("  %-30s %10.2fms %10.2fms %10" PRId64 "\n",
                query->name,
                result->latency.avg_us / 1000.0,
                result->latency.p95_us / 1000.0,
@@ -450,7 +452,7 @@ static void run_throughput_benchmark(DistributedBenchmark *bench, BenchSuite *su
     printf("\n  Throughput Results:\n");
     printf("    Clients:      %d\n", num_workers);
     printf("    Duration:     %.2f seconds\n", duration);
-    printf("    Total Queries: %ld\n", total_queries);
+    printf("    Total Queries: %" PRId64 "\n", total_queries);
     printf("    Throughput:   %.2f queries/sec\n", result->throughput.ops_per_sec);
     printf("    Latency:      avg=%.2fms, p95=%.2fms, p99=%.2fms\n",
            result->latency.avg_us / 1000.0,
@@ -548,8 +550,8 @@ int main(int argc, char *argv[])
 
     bench_config_print(&bench.config);
     printf("Shards: %d\n", bench.num_shards);
-    printf("Customers: %ld\n", bench.num_customers);
-    printf("Orders: %ld\n\n", bench.num_orders);
+    printf("Customers: %" PRId64 "\n", bench.num_customers);
+    printf("Orders: %" PRId64 "\n\n", bench.num_orders);
 
     /* Create benchmark suite */
     BenchSuite *suite = bench_suite_create("Distributed", 20);

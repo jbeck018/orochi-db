@@ -1,0 +1,14 @@
+# Grafana dashboard provisioning for Orochi DB Benchmarks
+apiVersion: 1
+
+providers:
+  - name: 'Orochi DB Benchmarks'
+    orgId: 1
+    folder: 'Benchmarks'
+    folderUid: 'benchmarks'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards/json
