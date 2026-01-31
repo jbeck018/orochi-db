@@ -358,3 +358,306 @@ func (h *ClusterHandler) Scale(w http.ResponseWriter, r *http.Request) {
 		"cluster": cluster,
 	})
 }
+
+// Suspend suspends a cluster (scale-to-zero).
+// POST /api/v1/clusters/{id}/suspend
+func (h *ClusterHandler) Suspend(w http.ResponseWriter, r *http.Request) {
+	user, ok := auth.UserFromContext(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, models.APIError{
+			Code:    models.ErrCodeUnauthorized,
+			Message: "Not authenticated",
+		})
+		return
+	}
+
+	clusterID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, models.APIError{
+			Code:    models.ErrCodeBadRequest,
+			Message: "Invalid cluster ID",
+		})
+		return
+	}
+
+	// Limit request body size to 1MB
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+
+	var req models.SuspendClusterRequest
+	// Allow empty body with defaults
+	json.NewDecoder(r.Body).Decode(&req)
+
+	err = h.clusterService.SuspendCluster(r.Context(), clusterID, user.ID, &req)
+	if err != nil {
+		switch {
+		case errors.Is(err, models.ErrClusterNotFound):
+			writeJSON(w, http.StatusNotFound, models.APIError{
+				Code:    models.ErrCodeNotFound,
+				Message: "Cluster not found",
+			})
+		case errors.Is(err, models.ErrForbidden):
+			writeJSON(w, http.StatusForbidden, models.APIError{
+				Code:    models.ErrCodeForbidden,
+				Message: "Access denied",
+			})
+		case errors.Is(err, models.ErrClusterAlreadySuspended):
+			writeJSON(w, http.StatusConflict, models.APIError{
+				Code:    models.ErrCodeConflict,
+				Message: "Cluster is already suspended",
+			})
+		case errors.Is(err, models.ErrClusterSuspending):
+			writeJSON(w, http.StatusConflict, models.APIError{
+				Code:    models.ErrCodeConflict,
+				Message: "Cluster is currently suspending",
+			})
+		case errors.Is(err, models.ErrClusterWaking):
+			writeJSON(w, http.StatusConflict, models.APIError{
+				Code:    models.ErrCodeConflict,
+				Message: "Cluster is currently waking",
+			})
+		case errors.Is(err, models.ErrClusterOperationPending):
+			writeJSON(w, http.StatusConflict, models.APIError{
+				Code:    models.ErrCodeConflict,
+				Message: "Another operation is in progress",
+			})
+		default:
+			h.logger.Error("failed to suspend cluster", "error", err)
+			writeJSON(w, http.StatusInternalServerError, models.APIError{
+				Code:    models.ErrCodeInternal,
+				Message: "Failed to suspend cluster",
+			})
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusAccepted, map[string]interface{}{
+		"message": "Cluster suspend initiated",
+		"status":  models.ClusterStatusSuspending,
+	})
+}
+
+// Wake wakes a suspended cluster.
+// POST /api/v1/clusters/{id}/wake
+func (h *ClusterHandler) Wake(w http.ResponseWriter, r *http.Request) {
+	user, ok := auth.UserFromContext(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, models.APIError{
+			Code:    models.ErrCodeUnauthorized,
+			Message: "Not authenticated",
+		})
+		return
+	}
+
+	clusterID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, models.APIError{
+			Code:    models.ErrCodeBadRequest,
+			Message: "Invalid cluster ID",
+		})
+		return
+	}
+
+	// Limit request body size to 1MB
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+
+	var req models.WakeClusterRequest
+	// Allow empty body with defaults
+	json.NewDecoder(r.Body).Decode(&req)
+
+	state, err := h.clusterService.WakeCluster(r.Context(), clusterID, user.ID, &req)
+	if err != nil {
+		switch {
+		case errors.Is(err, models.ErrClusterNotFound):
+			writeJSON(w, http.StatusNotFound, models.APIError{
+				Code:    models.ErrCodeNotFound,
+				Message: "Cluster not found",
+			})
+		case errors.Is(err, models.ErrForbidden):
+			writeJSON(w, http.StatusForbidden, models.APIError{
+				Code:    models.ErrCodeForbidden,
+				Message: "Access denied",
+			})
+		case errors.Is(err, models.ErrClusterNotSuspended):
+			writeJSON(w, http.StatusConflict, models.APIError{
+				Code:    models.ErrCodeConflict,
+				Message: "Cluster is not suspended",
+			})
+		case errors.Is(err, models.ErrClusterSuspending):
+			writeJSON(w, http.StatusConflict, models.APIError{
+				Code:    models.ErrCodeConflict,
+				Message: "Cluster is currently suspending",
+			})
+		case errors.Is(err, models.ErrWakeTimeout):
+			// Still return state but with error status
+			writeJSON(w, http.StatusGatewayTimeout, map[string]interface{}{
+				"state":   state,
+				"message": "Wake timeout - cluster may still be starting",
+			})
+		default:
+			h.logger.Error("failed to wake cluster", "error", err)
+			writeJSON(w, http.StatusInternalServerError, models.APIError{
+				Code:    models.ErrCodeInternal,
+				Message: "Failed to wake cluster",
+			})
+		}
+		return
+	}
+
+	statusCode := http.StatusAccepted
+	if state.IsReady {
+		statusCode = http.StatusOK
+	}
+
+	writeJSON(w, statusCode, map[string]interface{}{
+		"state": state,
+	})
+}
+
+// GetState returns the current state of a cluster.
+// GET /api/v1/clusters/{id}/state
+func (h *ClusterHandler) GetState(w http.ResponseWriter, r *http.Request) {
+	user, ok := auth.UserFromContext(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, models.APIError{
+			Code:    models.ErrCodeUnauthorized,
+			Message: "Not authenticated",
+		})
+		return
+	}
+
+	clusterID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, models.APIError{
+			Code:    models.ErrCodeBadRequest,
+			Message: "Invalid cluster ID",
+		})
+		return
+	}
+
+	// Verify ownership first
+	if err := h.clusterService.CheckOwnership(r.Context(), clusterID, user.ID); err != nil {
+		if errors.Is(err, models.ErrClusterNotFound) {
+			writeJSON(w, http.StatusNotFound, models.APIError{
+				Code:    models.ErrCodeNotFound,
+				Message: "Cluster not found",
+			})
+			return
+		}
+		if errors.Is(err, models.ErrForbidden) {
+			writeJSON(w, http.StatusForbidden, models.APIError{
+				Code:    models.ErrCodeForbidden,
+				Message: "Access denied",
+			})
+			return
+		}
+		h.logger.Error("failed to check ownership", "error", err)
+		writeJSON(w, http.StatusInternalServerError, models.APIError{
+			Code:    models.ErrCodeInternal,
+			Message: "Failed to get cluster state",
+		})
+		return
+	}
+
+	state, err := h.clusterService.GetClusterState(r.Context(), clusterID)
+	if err != nil {
+		if errors.Is(err, models.ErrClusterNotFound) {
+			writeJSON(w, http.StatusNotFound, models.APIError{
+				Code:    models.ErrCodeNotFound,
+				Message: "Cluster not found",
+			})
+			return
+		}
+		h.logger.Error("failed to get cluster state", "error", err)
+		writeJSON(w, http.StatusInternalServerError, models.APIError{
+			Code:    models.ErrCodeInternal,
+			Message: "Failed to get cluster state",
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"state": state,
+	})
+}
+
+// GetStateInternal returns the cluster state for internal service-to-service calls.
+// This endpoint is used by the JWT gateway for wake-on-connect.
+// GET /api/v1/internal/clusters/{id}/state
+func (h *ClusterHandler) GetStateInternal(w http.ResponseWriter, r *http.Request) {
+	clusterID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, models.APIError{
+			Code:    models.ErrCodeBadRequest,
+			Message: "Invalid cluster ID",
+		})
+		return
+	}
+
+	state, err := h.clusterService.GetClusterState(r.Context(), clusterID)
+	if err != nil {
+		if errors.Is(err, models.ErrClusterNotFound) {
+			writeJSON(w, http.StatusNotFound, models.APIError{
+				Code:    models.ErrCodeNotFound,
+				Message: "Cluster not found",
+			})
+			return
+		}
+		h.logger.Error("failed to get cluster state (internal)", "error", err)
+		writeJSON(w, http.StatusInternalServerError, models.APIError{
+			Code:    models.ErrCodeInternal,
+			Message: "Failed to get cluster state",
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"state": state,
+	})
+}
+
+// WakeInternal triggers a wake for internal service-to-service calls.
+// This endpoint is used by the JWT gateway for wake-on-connect.
+// POST /api/v1/internal/clusters/{id}/wake
+func (h *ClusterHandler) WakeInternal(w http.ResponseWriter, r *http.Request) {
+	clusterID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, models.APIError{
+			Code:    models.ErrCodeBadRequest,
+			Message: "Invalid cluster ID",
+		})
+		return
+	}
+
+	state, err := h.clusterService.TriggerWakeForConnection(r.Context(), clusterID)
+	if err != nil {
+		if errors.Is(err, models.ErrClusterNotFound) {
+			writeJSON(w, http.StatusNotFound, models.APIError{
+				Code:    models.ErrCodeNotFound,
+				Message: "Cluster not found",
+			})
+			return
+		}
+		if errors.Is(err, models.ErrClusterSuspending) {
+			writeJSON(w, http.StatusConflict, models.APIError{
+				Code:    models.ErrCodeConflict,
+				Message: "Cluster is currently suspending",
+			})
+			return
+		}
+		h.logger.Error("failed to trigger wake (internal)", "error", err)
+		writeJSON(w, http.StatusInternalServerError, models.APIError{
+			Code:    models.ErrCodeInternal,
+			Message: "Failed to wake cluster",
+		})
+		return
+	}
+
+	statusCode := http.StatusAccepted
+	if state.IsReady {
+		statusCode = http.StatusOK
+	}
+
+	writeJSON(w, statusCode, map[string]interface{}{
+		"state": state,
+	})
+}

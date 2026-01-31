@@ -4,6 +4,9 @@ use (
 	./packages/go/shared
 	./services/autoscaler
 	./services/control-plane
+	./services/pgdog-router/jwt-gateway
+	./services/pgdog-router/pkg/hash
 	./services/provisioner
+	./tests/pgdog-integration
 	./tools/cli
 )

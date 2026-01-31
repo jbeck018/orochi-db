@@ -704,3 +704,12 @@ func (m *ClusterManager) ScaleCluster(ctx context.Context, namespace, name strin
 
 	return m.k8sClient.CtrlClient().Update(ctx, cluster)
 }
+
+// GetClusterGVK returns the GroupVersionKind for CloudNativePG Cluster resources.
+func (m *ClusterManager) GetClusterGVK() schema.GroupVersionKind {
+	return schema.GroupVersionKind{
+		Group:   "postgresql.cnpg.io",
+		Version: "v1",
+		Kind:    "Cluster",
+	}
+}

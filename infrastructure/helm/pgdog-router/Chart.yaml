@@ -1,0 +1,22 @@
+apiVersion: v2
+name: pgdog-router
+description: A Helm chart for PgDog - high-performance PostgreSQL connection pooler and query router
+type: application
+version: 0.1.0
+appVersion: "0.9.0"
+keywords:
+  - postgresql
+  - pgdog
+  - connection-pooler
+  - query-router
+  - database
+  - proxy
+home: https://github.com/pgdog/pgdog
+sources:
+  - https://github.com/pgdog/pgdog
+maintainers:
+  - name: Orochi DB Team
+    email: team@orochi.cloud
+annotations:
+  category: Database
+  licenses: MIT

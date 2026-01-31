@@ -1,0 +1,99 @@
+version: '3.8'
+
+# PgDog Integration Test Environment
+# Usage: docker-compose -f docker-compose.test.yml up -d
+
+services:
+  # PostgreSQL Primary with Orochi extension
+  postgres-primary:
+    image: registry.digitalocean.com/orochi-registry/orochi-pg:18
+    container_name: pgdog-test-primary
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: testpassword
+      POSTGRES_DB: orochi_test
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./init-scripts:/docker-entrypoint-initdb.d:ro
+      - pgdata-primary:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - pgdog-test
+
+  # PostgreSQL Replica for read/write split tests
+  postgres-replica:
+    image: registry.digitalocean.com/orochi-registry/orochi-pg:18
+    container_name: pgdog-test-replica
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: testpassword
+      POSTGRES_DB: orochi_test
+    ports:
+      - "5434:5432"
+    volumes:
+      - pgdata-replica:/var/lib/postgresql/data
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - pgdog-test
+
+  # PgDog Router (placeholder - replace with actual image)
+  pgdog:
+    image: registry.digitalocean.com/orochi-registry/pgdog-router:latest
+    container_name: pgdog-test-router
+    ports:
+      - "5432:5432"
+      - "6432:6432"
+      - "9090:9090"
+    volumes:
+      - ./config/pgdog.toml:/etc/pgdog/pgdog.toml:ro
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "localhost", "-p", "5432"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - pgdog-test
+
+  # Test Runner
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    container_name: pgdog-test-runner
+    environment:
+      PGDOG_HOST: pgdog
+      PGDOG_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: testpassword
+      POSTGRES_DB: orochi_test
+    depends_on:
+      pgdog:
+        condition: service_healthy
+    volumes:
+      - ./:/tests
+    networks:
+      - pgdog-test
+    command: ["go", "test", "-v", "./..."]
+
+volumes:
+  pgdata-primary:
+  pgdata-replica:
+
+networks:
+  pgdog-test:
+    driver: bridge

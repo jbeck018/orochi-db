@@ -34,10 +34,12 @@ import { Route as ClustersIdTopologyRouteImport } from './routes/clusters/$id/to
 import { Route as ClustersIdTimeseriesRouteImport } from './routes/clusters/$id/timeseries'
 import { Route as ClustersIdShardingRouteImport } from './routes/clusters/$id/sharding'
 import { Route as ClustersIdSettingsRouteImport } from './routes/clusters/$id/settings'
+import { Route as ClustersIdPoolerRouteImport } from './routes/clusters/$id/pooler'
 import { Route as ClustersIdPipelinesRouteImport } from './routes/clusters/$id/pipelines'
 import { Route as ClustersIdDataRouteImport } from './routes/clusters/$id/data'
 import { Route as ClustersIdColumnarRouteImport } from './routes/clusters/$id/columnar'
 import { Route as ClustersIdCdcRouteImport } from './routes/clusters/$id/cdc'
+import { Route as ClustersIdBranchesRouteImport } from './routes/clusters/$id/branches'
 import { Route as AuthCallbackProviderRouteImport } from './routes/auth.callback.$provider'
 
 const TermsRoute = TermsRouteImport.update({
@@ -165,6 +167,11 @@ const ClustersIdSettingsRoute = ClustersIdSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => ClustersIdRouteRoute,
 } as any)
+const ClustersIdPoolerRoute = ClustersIdPoolerRouteImport.update({
+  id: '/pooler',
+  path: '/pooler',
+  getParentRoute: () => ClustersIdRouteRoute,
+} as any)
 const ClustersIdPipelinesRoute = ClustersIdPipelinesRouteImport.update({
   id: '/pipelines',
   path: '/pipelines',
@@ -183,6 +190,11 @@ const ClustersIdColumnarRoute = ClustersIdColumnarRouteImport.update({
 const ClustersIdCdcRoute = ClustersIdCdcRouteImport.update({
   id: '/cdc',
   path: '/cdc',
+  getParentRoute: () => ClustersIdRouteRoute,
+} as any)
+const ClustersIdBranchesRoute = ClustersIdBranchesRouteImport.update({
+  id: '/branches',
+  path: '/branches',
   getParentRoute: () => ClustersIdRouteRoute,
 } as any)
 const AuthCallbackProviderRoute = AuthCallbackProviderRouteImport.update({
@@ -213,10 +225,12 @@ export interface FileRoutesByFullPath {
   '/admin/': typeof AdminIndexRoute
   '/clusters/': typeof ClustersIndexRoute
   '/auth/callback/$provider': typeof AuthCallbackProviderRoute
+  '/clusters/$id/branches': typeof ClustersIdBranchesRoute
   '/clusters/$id/cdc': typeof ClustersIdCdcRoute
   '/clusters/$id/columnar': typeof ClustersIdColumnarRoute
   '/clusters/$id/data': typeof ClustersIdDataRoute
   '/clusters/$id/pipelines': typeof ClustersIdPipelinesRoute
+  '/clusters/$id/pooler': typeof ClustersIdPoolerRoute
   '/clusters/$id/settings': typeof ClustersIdSettingsRoute
   '/clusters/$id/sharding': typeof ClustersIdShardingRoute
   '/clusters/$id/timeseries': typeof ClustersIdTimeseriesRoute
@@ -243,10 +257,12 @@ export interface FileRoutesByTo {
   '/admin': typeof AdminIndexRoute
   '/clusters': typeof ClustersIndexRoute
   '/auth/callback/$provider': typeof AuthCallbackProviderRoute
+  '/clusters/$id/branches': typeof ClustersIdBranchesRoute
   '/clusters/$id/cdc': typeof ClustersIdCdcRoute
   '/clusters/$id/columnar': typeof ClustersIdColumnarRoute
   '/clusters/$id/data': typeof ClustersIdDataRoute
   '/clusters/$id/pipelines': typeof ClustersIdPipelinesRoute
+  '/clusters/$id/pooler': typeof ClustersIdPoolerRoute
   '/clusters/$id/settings': typeof ClustersIdSettingsRoute
   '/clusters/$id/sharding': typeof ClustersIdShardingRoute
   '/clusters/$id/timeseries': typeof ClustersIdTimeseriesRoute
@@ -276,10 +292,12 @@ export interface FileRoutesById {
   '/admin/': typeof AdminIndexRoute
   '/clusters/': typeof ClustersIndexRoute
   '/auth/callback/$provider': typeof AuthCallbackProviderRoute
+  '/clusters/$id/branches': typeof ClustersIdBranchesRoute
   '/clusters/$id/cdc': typeof ClustersIdCdcRoute
   '/clusters/$id/columnar': typeof ClustersIdColumnarRoute
   '/clusters/$id/data': typeof ClustersIdDataRoute
   '/clusters/$id/pipelines': typeof ClustersIdPipelinesRoute
+  '/clusters/$id/pooler': typeof ClustersIdPoolerRoute
   '/clusters/$id/settings': typeof ClustersIdSettingsRoute
   '/clusters/$id/sharding': typeof ClustersIdShardingRoute
   '/clusters/$id/timeseries': typeof ClustersIdTimeseriesRoute
@@ -310,10 +328,12 @@ export interface FileRouteTypes {
     | '/admin/'
     | '/clusters/'
     | '/auth/callback/$provider'
+    | '/clusters/$id/branches'
     | '/clusters/$id/cdc'
     | '/clusters/$id/columnar'
     | '/clusters/$id/data'
     | '/clusters/$id/pipelines'
+    | '/clusters/$id/pooler'
     | '/clusters/$id/settings'
     | '/clusters/$id/sharding'
     | '/clusters/$id/timeseries'
@@ -340,10 +360,12 @@ export interface FileRouteTypes {
     | '/admin'
     | '/clusters'
     | '/auth/callback/$provider'
+    | '/clusters/$id/branches'
     | '/clusters/$id/cdc'
     | '/clusters/$id/columnar'
     | '/clusters/$id/data'
     | '/clusters/$id/pipelines'
+    | '/clusters/$id/pooler'
     | '/clusters/$id/settings'
     | '/clusters/$id/sharding'
     | '/clusters/$id/timeseries'
@@ -372,10 +394,12 @@ export interface FileRouteTypes {
     | '/admin/'
     | '/clusters/'
     | '/auth/callback/$provider'
+    | '/clusters/$id/branches'
     | '/clusters/$id/cdc'
     | '/clusters/$id/columnar'
     | '/clusters/$id/data'
     | '/clusters/$id/pipelines'
+    | '/clusters/$id/pooler'
     | '/clusters/$id/settings'
     | '/clusters/$id/sharding'
     | '/clusters/$id/timeseries'
@@ -581,6 +605,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ClustersIdSettingsRouteImport
       parentRoute: typeof ClustersIdRouteRoute
     }
+    '/clusters/$id/pooler': {
+      id: '/clusters/$id/pooler'
+      path: '/pooler'
+      fullPath: '/clusters/$id/pooler'
+      preLoaderRoute: typeof ClustersIdPoolerRouteImport
+      parentRoute: typeof ClustersIdRouteRoute
+    }
     '/clusters/$id/pipelines': {
       id: '/clusters/$id/pipelines'
       path: '/pipelines'
@@ -609,6 +640,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ClustersIdCdcRouteImport
       parentRoute: typeof ClustersIdRouteRoute
     }
+    '/clusters/$id/branches': {
+      id: '/clusters/$id/branches'
+      path: '/branches'
+      fullPath: '/clusters/$id/branches'
+      preLoaderRoute: typeof ClustersIdBranchesRouteImport
+      parentRoute: typeof ClustersIdRouteRoute
+    }
     '/auth/callback/$provider': {
       id: '/auth/callback/$provider'
       path: '/auth/callback/$provider'
@@ -634,10 +672,12 @@ const AdminRouteChildren: AdminRouteChildren = {
 const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
 interface ClustersIdRouteRouteChildren {
+  ClustersIdBranchesRoute: typeof ClustersIdBranchesRoute
   ClustersIdCdcRoute: typeof ClustersIdCdcRoute
   ClustersIdColumnarRoute: typeof ClustersIdColumnarRoute
   ClustersIdDataRoute: typeof ClustersIdDataRoute
   ClustersIdPipelinesRoute: typeof ClustersIdPipelinesRoute
+  ClustersIdPoolerRoute: typeof ClustersIdPoolerRoute
   ClustersIdSettingsRoute: typeof ClustersIdSettingsRoute
   ClustersIdShardingRoute: typeof ClustersIdShardingRoute
   ClustersIdTimeseriesRoute: typeof ClustersIdTimeseriesRoute
@@ -646,10 +686,12 @@ interface ClustersIdRouteRouteChildren {
 }
 
 const ClustersIdRouteRouteChildren: ClustersIdRouteRouteChildren = {
+  ClustersIdBranchesRoute: ClustersIdBranchesRoute,
   ClustersIdCdcRoute: ClustersIdCdcRoute,
   ClustersIdColumnarRoute: ClustersIdColumnarRoute,
   ClustersIdDataRoute: ClustersIdDataRoute,
   ClustersIdPipelinesRoute: ClustersIdPipelinesRoute,
+  ClustersIdPoolerRoute: ClustersIdPoolerRoute,
   ClustersIdSettingsRoute: ClustersIdSettingsRoute,
   ClustersIdShardingRoute: ClustersIdShardingRoute,
   ClustersIdTimeseriesRoute: ClustersIdTimeseriesRoute,

@@ -1,0 +1,130 @@
+# PgDog Router - Development Dockerfile
+# Includes hot reload capabilities and debugging tools
+#
+# Build: docker build -f Dockerfile.dev -t pgdog-router:dev .
+# Run:   docker run -p 5432:5432 -p 6432:6432 -p 9090:9090 \
+#          -v $(pwd)/config:/etc/pgdog pgdog-router:dev
+
+# ==============================================================================
+# Development image with full toolchain
+# ==============================================================================
+FROM rust:1.75-bookworm
+
+# Labels
+LABEL org.opencontainers.image.title="PgDog Router (Development)"
+LABEL org.opencontainers.image.description="Development image for PgDog with hot reload"
+
+# Install development and runtime dependencies
+RUN apt-get update && apt-get install -y \
+    libssl-dev \
+    pkg-config \
+    cmake \
+    libclang-dev \
+    git \
+    curl \
+    netcat-openbsd \
+    postgresql-client \
+    procps \
+    htop \
+    vim \
+    inotify-tools \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install cargo-watch for hot reloading
+RUN cargo install cargo-watch
+
+# Clone and build PgDog
+WORKDIR /app
+ARG PGDOG_REPO=https://github.com/pgdogdev/pgdog.git
+RUN git clone ${PGDOG_REPO} .
+
+# Build in debug mode for faster compilation during development
+RUN cargo build
+
+# Create required directories
+RUN mkdir -p /etc/pgdog/certs \
+    && mkdir -p /var/log/pgdog \
+    && mkdir -p /var/run/pgdog
+
+# Copy configuration templates
+COPY config/pgdog.toml.tmpl /etc/pgdog/pgdog.toml.tmpl
+COPY config/users.toml.tmpl /etc/pgdog/users.toml.tmpl
+
+# Copy scripts
+COPY scripts/entrypoint.sh /entrypoint.sh
+COPY scripts/health-check.sh /health-check.sh
+RUN chmod +x /entrypoint.sh /health-check.sh
+
+# Development environment variables
+ENV PGDOG_CONFIG=/etc/pgdog/pgdog.toml
+ENV PGDOG_USERS_CONFIG=/etc/pgdog/users.toml
+ENV PGDOG_LOG_LEVEL=debug
+ENV PGDOG_HOST=0.0.0.0
+ENV PGDOG_PORT=5432
+ENV PGDOG_ADMIN_PORT=6432
+ENV PGDOG_METRICS_PORT=9090
+ENV RUST_BACKTRACE=1
+ENV RUST_LOG=debug
+
+# Expose ports
+EXPOSE 5432 6432 9090
+
+# Health check
+HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
+    CMD /health-check.sh || exit 1
+
+# Working directory
+WORKDIR /app
+
+# Development entrypoint script
+RUN cat > /dev-entrypoint.sh << 'EOF'
+#!/bin/bash
+set -e
+
+echo "==> Starting PgDog development environment..."
+
+# Generate configuration if templates exist and config doesn't
+if [ -f /etc/pgdog/pgdog.toml.tmpl ] && [ ! -f /etc/pgdog/pgdog.toml ]; then
+    echo "==> Generating configuration from template..."
+    cp /etc/pgdog/pgdog.toml.tmpl /etc/pgdog/pgdog.toml
+fi
+
+if [ -f /etc/pgdog/users.toml.tmpl ] && [ ! -f /etc/pgdog/users.toml ]; then
+    cp /etc/pgdog/users.toml.tmpl /etc/pgdog/users.toml
+fi
+
+# Mode selection
+case "${1:-run}" in
+    watch)
+        echo "==> Starting cargo-watch for hot reload..."
+        exec cargo watch -x "run -- --config /etc/pgdog/pgdog.toml"
+        ;;
+    debug)
+        echo "==> Starting in debug mode..."
+        exec cargo run -- --config /etc/pgdog/pgdog.toml
+        ;;
+    run)
+        echo "==> Starting PgDog..."
+        if [ -f /app/target/debug/pgdog ]; then
+            exec /app/target/debug/pgdog --config /etc/pgdog/pgdog.toml
+        elif [ -f /app/target/release/pgdog ]; then
+            exec /app/target/release/pgdog --config /etc/pgdog/pgdog.toml
+        else
+            echo "==> Binary not found, building..."
+            cargo build
+            exec /app/target/debug/pgdog --config /etc/pgdog/pgdog.toml
+        fi
+        ;;
+    shell)
+        echo "==> Starting shell..."
+        exec /bin/bash
+        ;;
+    *)
+        exec "$@"
+        ;;
+esac
+EOF
+RUN chmod +x /dev-entrypoint.sh
+
+ENTRYPOINT ["/dev-entrypoint.sh"]
+CMD ["run"]

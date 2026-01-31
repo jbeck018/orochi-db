@@ -1,0 +1,439 @@
+# Default values for pgdog-router
+# This is a YAML-formatted file.
+
+# -- Number of PgDog replicas
+replicaCount: 2
+
+image:
+  # -- PgDog image repository
+  repository: ghcr.io/pgdog/pgdog
+  # -- Image pull policy
+  pullPolicy: IfNotPresent
+  # -- Overrides the image tag whose default is the chart appVersion
+  tag: ""
+
+# -- Image pull secrets for private registries
+imagePullSecrets: []
+
+# -- Override the chart name
+nameOverride: ""
+
+# -- Override the full release name
+fullnameOverride: ""
+
+serviceAccount:
+  # -- Specifies whether a service account should be created
+  create: true
+  # -- Annotations to add to the service account
+  annotations: {}
+  # -- The name of the service account to use
+  name: ""
+
+# -- Pod annotations
+podAnnotations: {}
+
+# -- Pod labels
+podLabels: {}
+
+# -- Pod security context
+podSecurityContext:
+  fsGroup: 1000
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+
+# -- Container security context
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+
+service:
+  # -- Service type
+  type: ClusterIP
+  # -- PostgreSQL proxy port
+  port: 5432
+  # -- Admin/metrics port
+  adminPort: 9898
+  # -- Node port for PostgreSQL (only used when type is NodePort)
+  nodePort: null
+  # -- Node port for admin (only used when type is NodePort)
+  adminNodePort: null
+  # -- Service annotations
+  annotations: {}
+  # -- Load balancer IP (only used when type is LoadBalancer)
+  loadBalancerIP: ""
+  # -- Load balancer source ranges
+  loadBalancerSourceRanges: []
+  # -- External traffic policy
+  externalTrafficPolicy: ""
+
+ingress:
+  # -- Enable ingress
+  enabled: false
+  # -- Ingress class name
+  className: ""
+  # -- Ingress annotations
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+  # -- Ingress hosts configuration
+  hosts:
+    - host: pgdog.local
+      paths:
+        - path: /
+          pathType: Prefix
+  # -- Ingress TLS configuration
+  tls: []
+  #  - secretName: pgdog-tls
+  #    hosts:
+  #      - pgdog.local
+
+resources:
+  # -- Resource limits
+  limits:
+    cpu: 2000m
+    memory: 2Gi
+  # -- Resource requests
+  requests:
+    cpu: 500m
+    memory: 512Mi
+
+autoscaling:
+  # -- Enable horizontal pod autoscaler
+  enabled: false
+  # -- Minimum number of replicas
+  minReplicas: 2
+  # -- Maximum number of replicas
+  maxReplicas: 10
+  # -- Target CPU utilization percentage
+  targetCPUUtilizationPercentage: 70
+  # -- Target memory utilization percentage
+  targetMemoryUtilizationPercentage: 80
+  # -- Custom metrics for scaling
+  customMetrics: []
+  # -- Scaling behavior configuration
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 10
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+        - type: Pods
+          value: 4
+          periodSeconds: 15
+      selectPolicy: Max
+
+podDisruptionBudget:
+  # -- Enable pod disruption budget
+  enabled: true
+  # -- Minimum available pods
+  minAvailable: 1
+  # -- Maximum unavailable pods (alternative to minAvailable)
+  maxUnavailable: null
+
+# -- Node selector
+nodeSelector: {}
+
+# -- Tolerations
+tolerations: []
+
+# -- Affinity rules
+affinity: {}
+
+# -- Topology spread constraints
+topologySpreadConstraints: []
+
+# -- Priority class name
+priorityClassName: ""
+
+# -- Termination grace period in seconds
+terminationGracePeriodSeconds: 30
+
+# -- Extra environment variables
+extraEnv: []
+# - name: PGDOG_LOG_LEVEL
+#   value: "debug"
+
+# -- Extra volume mounts
+extraVolumeMounts: []
+
+# -- Extra volumes
+extraVolumes: []
+
+# -- Init containers
+initContainers: []
+
+# -- Sidecar containers
+sidecarContainers: []
+
+# PgDog configuration
+pgdog:
+  # -- General settings
+  general:
+    # -- Host to bind to
+    host: "0.0.0.0"
+    # -- Port to listen on
+    port: 5432
+    # -- Admin port for metrics and management
+    adminPort: 9898
+    # -- Number of worker threads (0 = auto-detect based on CPU cores)
+    workers: 0
+    # -- Connect timeout in milliseconds
+    connectTimeout: 5000
+    # -- Query timeout in milliseconds (0 = no timeout)
+    queryTimeout: 0
+    # -- Idle timeout in milliseconds
+    idleTimeout: 600000
+    # -- Shutdown timeout in milliseconds
+    shutdownTimeout: 30000
+
+  # -- Pool configuration
+  pool:
+    # -- Pool mode: session, transaction, or statement
+    mode: "transaction"
+    # -- Default pool size per user/database combination
+    defaultSize: 10
+    # -- Minimum pool size
+    minSize: 2
+    # -- Maximum pool size
+    maxSize: 100
+    # -- Maximum client connections
+    maxClientConnections: 10000
+    # -- Connection lifetime in seconds (0 = unlimited)
+    connectionLifetime: 3600
+    # -- Idle connection timeout in seconds
+    idleConnectionTimeout: 600
+    # -- Queue timeout in milliseconds for waiting clients
+    queueTimeout: 10000
+    # -- Queue size for pending connections
+    queueSize: 1000
+
+  # -- Load balancing configuration
+  loadBalancing:
+    # -- Enable load balancing
+    enabled: true
+    # -- Load balancing strategy: round_robin, random, least_connections
+    strategy: "round_robin"
+    # -- Health check interval in milliseconds
+    healthCheckInterval: 5000
+    # -- Health check timeout in milliseconds
+    healthCheckTimeout: 3000
+    # -- Number of failed health checks before marking server as down
+    healthCheckRetries: 3
+
+  # -- Query routing configuration
+  routing:
+    # -- Enable query routing
+    enabled: true
+    # -- Read/write splitting
+    readWriteSplit: true
+    # -- Route reads to replicas
+    readFromReplica: true
+    # -- Sticky sessions for transactions
+    stickyTransactions: true
+
+  # -- Authentication configuration
+  auth:
+    # -- Authentication type: md5, scram-sha-256, trust
+    type: "scram-sha-256"
+    # -- Default username (if not using per-user auth)
+    defaultUser: ""
+    # -- Default database
+    defaultDatabase: ""
+
+  # -- Logging configuration
+  logging:
+    # -- Log level: trace, debug, info, warn, error
+    level: "info"
+    # -- Log format: json, text
+    format: "json"
+    # -- Log queries
+    logQueries: false
+    # -- Log slow queries (threshold in milliseconds)
+    slowQueryThreshold: 1000
+
+  # -- Metrics configuration
+  metrics:
+    # -- Enable Prometheus metrics
+    enabled: true
+    # -- Metrics path
+    path: "/metrics"
+
+  # -- TLS configuration for client connections
+  tls:
+    # -- Enable TLS for client connections
+    enabled: false
+    # -- TLS mode: disable, allow, prefer, require, verify-ca, verify-full
+    mode: "prefer"
+    # -- Name of existing secret containing TLS certificates
+    existingSecret: ""
+    # -- TLS certificate (if not using existingSecret)
+    certificate: ""
+    # -- TLS private key (if not using existingSecret)
+    privateKey: ""
+    # -- CA certificate for client verification
+    caCertificate: ""
+
+  # -- Upstream PostgreSQL servers configuration
+  # Define your PostgreSQL servers here
+  upstreams: []
+  # Example configuration:
+  # - name: primary
+  #   host: postgres-primary.database.svc.cluster.local
+  #   port: 5432
+  #   role: primary
+  #   weight: 100
+  # - name: replica-1
+  #   host: postgres-replica-1.database.svc.cluster.local
+  #   port: 5432
+  #   role: replica
+  #   weight: 100
+  # - name: replica-2
+  #   host: postgres-replica-2.database.svc.cluster.local
+  #   port: 5432
+  #   role: replica
+  #   weight: 100
+
+  # -- Users configuration
+  users: []
+  # Example configuration:
+  # - name: app_user
+  #   databases:
+  #     - myapp
+  #   poolSize: 20
+  #   poolMode: transaction
+
+  # -- Custom configuration to merge with generated config
+  customConfig: {}
+
+# JWT Proxy configuration (optional sidecar)
+jwtProxy:
+  # -- Enable JWT proxy sidecar
+  enabled: false
+  image:
+    # -- JWT proxy image repository
+    repository: ghcr.io/pgdog/pgdog-jwt-proxy
+    # -- JWT proxy image tag
+    tag: "latest"
+    # -- Image pull policy
+    pullPolicy: IfNotPresent
+  # -- JWT proxy port
+  port: 5433
+  # -- JWT secret (use existingSecret in production)
+  jwtSecret: ""
+  # -- Name of existing secret containing JWT secret
+  existingSecret: ""
+  # -- JWT secret key in the secret
+  existingSecretKey: "jwt-secret"
+  # -- JWT issuer
+  issuer: ""
+  # -- JWT audience
+  audience: ""
+  # -- JWT algorithm: HS256, RS256, ES256
+  algorithm: "HS256"
+  # -- Resources for JWT proxy container
+  resources:
+    limits:
+      cpu: 200m
+      memory: 128Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+
+# Secrets configuration
+secrets:
+  # -- Create secrets
+  create: true
+  # -- Name of existing secret to use
+  existingSecret: ""
+  # -- PostgreSQL credentials for upstream servers
+  # The secret should contain keys like: PGDOG_USER_<username>_PASSWORD
+  credentials: {}
+  # Example:
+  # app_user: "secure-password"
+  # admin_user: "admin-password"
+
+# Service monitor configuration for Prometheus Operator
+serviceMonitor:
+  # -- Enable ServiceMonitor
+  enabled: false
+  # -- Namespace for ServiceMonitor (defaults to release namespace)
+  namespace: ""
+  # -- Additional labels for ServiceMonitor
+  additionalLabels: {}
+  # -- Scrape interval
+  interval: 30s
+  # -- Scrape timeout
+  scrapeTimeout: 10s
+  # -- Honor labels
+  honorLabels: false
+  # -- Metric relabelings
+  metricRelabelings: []
+  # -- Relabelings
+  relabelings: []
+
+# Network policies
+networkPolicy:
+  # -- Enable network policy
+  enabled: false
+  # -- Ingress rules
+  ingress: []
+  # -- Egress rules
+  egress: []
+
+# Liveness probe configuration
+livenessProbe:
+  # -- Enable liveness probe
+  enabled: true
+  # -- Initial delay seconds
+  initialDelaySeconds: 10
+  # -- Period seconds
+  periodSeconds: 10
+  # -- Timeout seconds
+  timeoutSeconds: 5
+  # -- Failure threshold
+  failureThreshold: 3
+  # -- Success threshold
+  successThreshold: 1
+
+# Readiness probe configuration
+readinessProbe:
+  # -- Enable readiness probe
+  enabled: true
+  # -- Initial delay seconds
+  initialDelaySeconds: 5
+  # -- Period seconds
+  periodSeconds: 5
+  # -- Timeout seconds
+  timeoutSeconds: 3
+  # -- Failure threshold
+  failureThreshold: 3
+  # -- Success threshold
+  successThreshold: 1
+
+# Startup probe configuration
+startupProbe:
+  # -- Enable startup probe
+  enabled: false
+  # -- Initial delay seconds
+  initialDelaySeconds: 0
+  # -- Period seconds
+  periodSeconds: 5
+  # -- Timeout seconds
+  timeoutSeconds: 3
+  # -- Failure threshold
+  failureThreshold: 30
+  # -- Success threshold
+  successThreshold: 1

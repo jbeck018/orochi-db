@@ -201,13 +201,45 @@ type MonitoringConfig struct {
 
 // ConnectionPoolerSpec configures the connection pooler
 type ConnectionPoolerSpec struct {
-	Enabled   bool            `json:"enabled"`
-	Instances int32           `json:"instances,omitempty"`
-	Type      string          `json:"type,omitempty"`
-	PgBouncer *PgBouncerConfig `json:"pgbouncer,omitempty"`
+	Enabled           bool              `json:"enabled"`
+	// PgDog-specific configuration
+	Image             string            `json:"image,omitempty"`
+	ImageTag          string            `json:"image_tag,omitempty"`
+	Replicas          int32             `json:"replicas"`
+	Resources         ResourceSpec      `json:"resources,omitempty"`
+	Mode              string            `json:"mode"` // transaction, session
+	MaxPoolSize       int32             `json:"max_pool_size"`
+	MinPoolSize       int32             `json:"min_pool_size"`
+	IdleTimeout       int32             `json:"idle_timeout_seconds"`
+	ReadWriteSplit    bool              `json:"read_write_split"`
+	ShardingEnabled   bool              `json:"sharding_enabled"`
+	ShardCount        int32             `json:"shard_count,omitempty"`
+	TLSEnabled        bool              `json:"tls_enabled"`
+	JWTAuth           *JWTAuthConfig    `json:"jwt_auth,omitempty"`
+	// Legacy CloudNativePG PgBouncer configuration (for backward compatibility)
+	Instances         int32             `json:"instances,omitempty"` // Legacy: same as Replicas
+	Type              string            `json:"type,omitempty"`      // Legacy: rw/ro for CloudNativePG pooler
+	PgBouncer         *PgBouncerConfig  `json:"pgbouncer,omitempty"` // Legacy: CloudNativePG pooler
 }
 
-// PgBouncerConfig configures PgBouncer
+// ResourceSpec defines resource requests and limits for pooler pods
+type ResourceSpec struct {
+	CPURequest    string `json:"cpu_request,omitempty"`
+	CPULimit      string `json:"cpu_limit,omitempty"`
+	MemoryRequest string `json:"memory_request,omitempty"`
+	MemoryLimit   string `json:"memory_limit,omitempty"`
+}
+
+// JWTAuthConfig configures JWT authentication for PgDog
+type JWTAuthConfig struct {
+	Enabled       bool   `json:"enabled"`
+	Issuer        string `json:"issuer,omitempty"`
+	Audience      string `json:"audience,omitempty"`
+	PublicKeyPath string `json:"public_key_path,omitempty"`
+	SecretName    string `json:"secret_name,omitempty"` // K8s secret containing JWT keys
+}
+
+// PgBouncerConfig configures PgBouncer (legacy CloudNativePG pooler)
 type PgBouncerConfig struct {
 	PoolMode        PoolMode          `json:"poolMode,omitempty"`
 	DefaultPoolSize int32             `json:"defaultPoolSize,omitempty"`
@@ -243,6 +275,18 @@ type ClusterStatus struct {
 	LastSuccessfulBackup      string           `json:"lastSuccessfulBackup,omitempty"`
 	Instances                 []InstanceStatus `json:"instances,omitempty"`
 	Conditions                []string         `json:"conditions,omitempty"`
+	Pooler                    *PoolerStatus    `json:"pooler,omitempty"`
+}
+
+// PoolerStatus represents the status of the connection pooler
+type PoolerStatus struct {
+	Enabled         bool   `json:"enabled"`
+	Ready           bool   `json:"ready"`
+	Replicas        int32  `json:"replicas"`
+	ReadyReplicas   int32  `json:"readyReplicas"`
+	Endpoint        string `json:"endpoint,omitempty"`
+	JWTEndpoint     string `json:"jwtEndpoint,omitempty"`
+	InternalEndpoint string `json:"internalEndpoint,omitempty"`
 }
 
 // InstanceStatus represents the status of a single instance
@@ -423,15 +467,15 @@ type BranchSpec struct {
 
 // BranchStatus represents the current status of a branch
 type BranchStatus struct {
-	Phase              BranchPhase `json:"phase"`
-	Message            string      `json:"message,omitempty"`
-	ClusterName        string      `json:"clusterName,omitempty"`
-	ConnectionString   string      `json:"connectionString,omitempty"`
-	PoolerConnection   string      `json:"poolerConnection,omitempty"`
-	SourceLSN          string      `json:"sourceLsn,omitempty"`
-	SourceTimestamp    string      `json:"sourceTimestamp,omitempty"`
-	CreationMethod     BranchMethod `json:"creationMethod"`
-	CreationDuration   string      `json:"creationDuration,omitempty"`
+	Phase            BranchPhase  `json:"phase"`
+	Message          string       `json:"message,omitempty"`
+	ClusterName      string       `json:"clusterName,omitempty"`
+	ConnectionString string       `json:"connectionString,omitempty"`
+	PoolerConnection string       `json:"poolerConnection,omitempty"`
+	SourceLSN        string       `json:"sourceLsn,omitempty"`
+	SourceTimestamp  string       `json:"sourceTimestamp,omitempty"`
+	CreationMethod   BranchMethod `json:"creationMethod"`
+	CreationDuration string       `json:"creationDuration,omitempty"`
 }
 
 // BranchInfo contains full branch information
@@ -491,4 +535,11 @@ func DefaultBranchMethod(hasVolumeSnapshots, hasXFSReflinks bool) BranchMethod {
 	}
 	// Default to pg_basebackup (always available)
 	return BranchMethodPgBasebackup
+}
+
+// SuspendInfo contains information about a suspended cluster.
+type SuspendInfo struct {
+	Suspended        bool      `json:"suspended"`
+	SuspendedAt      time.Time `json:"suspendedAt,omitempty"`
+	PreviousReplicas int32     `json:"previousReplicas,omitempty"`
 }

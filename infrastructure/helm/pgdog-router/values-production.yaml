@@ -1,0 +1,200 @@
+# Production values for pgdog-router
+# This file contains production-ready overrides
+
+# Increase replicas for high availability
+replicaCount: 3
+
+image:
+  pullPolicy: Always
+
+# Production resource allocation
+resources:
+  limits:
+    cpu: 4000m
+    memory: 4Gi
+  requests:
+    cpu: 1000m
+    memory: 1Gi
+
+# Enable autoscaling in production
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 20
+  targetCPUUtilizationPercentage: 60
+  targetMemoryUtilizationPercentage: 70
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 600
+      policies:
+        - type: Percent
+          value: 10
+          periodSeconds: 120
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 50
+          periodSeconds: 30
+        - type: Pods
+          value: 4
+          periodSeconds: 30
+      selectPolicy: Max
+
+# PDB configuration
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+# Pod anti-affinity for high availability
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: pgdog-router
+          topologyKey: kubernetes.io/hostname
+      - weight: 50
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: pgdog-router
+          topologyKey: topology.kubernetes.io/zone
+
+# Spread pods across zones
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: pgdog-router
+
+# Production PgDog configuration
+pgdog:
+  general:
+    workers: 0  # Auto-detect based on CPU cores
+    connectTimeout: 10000
+    queryTimeout: 300000  # 5 minutes
+    idleTimeout: 900000   # 15 minutes
+    shutdownTimeout: 60000
+
+  pool:
+    mode: "transaction"
+    defaultSize: 25
+    minSize: 5
+    maxSize: 200
+    maxClientConnections: 50000
+    connectionLifetime: 1800
+    idleConnectionTimeout: 300
+    queueTimeout: 30000
+    queueSize: 5000
+
+  loadBalancing:
+    enabled: true
+    strategy: "least_connections"
+    healthCheckInterval: 3000
+    healthCheckTimeout: 2000
+    healthCheckRetries: 5
+
+  routing:
+    enabled: true
+    readWriteSplit: true
+    readFromReplica: true
+    stickyTransactions: true
+
+  auth:
+    type: "scram-sha-256"
+
+  logging:
+    level: "warn"
+    format: "json"
+    logQueries: false
+    slowQueryThreshold: 5000
+
+  metrics:
+    enabled: true
+
+  tls:
+    enabled: true
+    mode: "require"
+
+# Enable ServiceMonitor for Prometheus
+serviceMonitor:
+  enabled: true
+  interval: 15s
+  scrapeTimeout: 10s
+  additionalLabels:
+    prometheus: main
+
+# Service configuration for production
+service:
+  type: ClusterIP
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9898"
+    prometheus.io/path: "/metrics"
+
+# Enhanced probes for production
+livenessProbe:
+  enabled: true
+  initialDelaySeconds: 15
+  periodSeconds: 15
+  timeoutSeconds: 5
+  failureThreshold: 5
+  successThreshold: 1
+
+readinessProbe:
+  enabled: true
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+  successThreshold: 1
+
+startupProbe:
+  enabled: true
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 5
+  failureThreshold: 60
+  successThreshold: 1
+
+# Network policy for production
+networkPolicy:
+  enabled: true
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: orochi-cloud
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 9898
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: orochi-cloud
+      ports:
+        - protocol: TCP
+          port: 5432
+
+# Use existing secrets in production
+secrets:
+  create: false
+  existingSecret: "pgdog-credentials"
+
+# Priority class for production workloads
+priorityClassName: "system-cluster-critical"
+
+# Longer termination grace period for graceful shutdown
+terminationGracePeriodSeconds: 60
+
+# Pod annotations for production
+podAnnotations:
+  cluster-autoscaler.kubernetes.io/safe-to-evict: "false"

@@ -1,7 +1,6 @@
 import * as React from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { AlertCircle } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { useCluster } from "@/hooks/api";
 import { BranchesList } from "@/components/branches";
 

@@ -1,0 +1,137 @@
+Thank you for installing {{ .Chart.Name }}!
+
+Chart Version: {{ .Chart.Version }}
+App Version: {{ .Chart.AppVersion }}
+
+=============================================================================
+                            PgDog Router
+=============================================================================
+
+Your PgDog connection pooler has been deployed with the following configuration:
+
+  Release Name: {{ .Release.Name }}
+  Namespace: {{ .Release.Namespace }}
+  Replicas: {{ .Values.replicaCount }}
+  Pool Mode: {{ .Values.pgdog.pool.mode }}
+
+-----------------------------------------------------------------------------
+                          Connection Information
+-----------------------------------------------------------------------------
+
+{{- if contains "NodePort" .Values.service.type }}
+
+  PostgreSQL Port (NodePort):
+    export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "pgdog-router.fullname" . }})
+    export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+    psql -h $NODE_IP -p $NODE_PORT -U <username> -d <database>
+
+{{- else if contains "LoadBalancer" .Values.service.type }}
+
+  PostgreSQL Port (LoadBalancer):
+    NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+    Watch the status with:
+      kubectl get --namespace {{ .Release.Namespace }} svc -w {{ include "pgdog-router.fullname" . }}
+
+    export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "pgdog-router.fullname" . }} --template "{{"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}"}}")
+    psql -h $SERVICE_IP -p {{ .Values.service.port }} -U <username> -d <database>
+
+{{- else if contains "ClusterIP" .Values.service.type }}
+
+  PostgreSQL Port (ClusterIP - internal only):
+    kubectl port-forward --namespace {{ .Release.Namespace }} svc/{{ include "pgdog-router.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+    psql -h 127.0.0.1 -p {{ .Values.service.port }} -U <username> -d <database>
+
+  Or from within the cluster:
+    Host: {{ include "pgdog-router.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local
+    Port: {{ .Values.service.port }}
+
+{{- end }}
+
+{{- if .Values.jwtProxy.enabled }}
+
+  JWT Proxy Port: {{ .Values.jwtProxy.port }}
+  Use this port for JWT-authenticated connections.
+
+{{- end }}
+
+-----------------------------------------------------------------------------
+                          Admin Interface
+-----------------------------------------------------------------------------
+
+  Access the admin interface for metrics and management:
+
+  kubectl port-forward --namespace {{ .Release.Namespace }} svc/{{ include "pgdog-router.fullname" . }} {{ .Values.service.adminPort }}:{{ .Values.service.adminPort }}
+
+  Then open: http://localhost:{{ .Values.service.adminPort }}
+
+{{- if .Values.pgdog.metrics.enabled }}
+
+  Prometheus metrics available at:
+    http://localhost:{{ .Values.service.adminPort }}{{ .Values.pgdog.metrics.path }}
+
+{{- end }}
+
+-----------------------------------------------------------------------------
+                          Pool Configuration
+-----------------------------------------------------------------------------
+
+  Pool Mode: {{ .Values.pgdog.pool.mode }}
+  Default Pool Size: {{ .Values.pgdog.pool.defaultSize }}
+  Max Pool Size: {{ .Values.pgdog.pool.maxSize }}
+  Max Client Connections: {{ .Values.pgdog.pool.maxClientConnections }}
+
+{{- if .Values.pgdog.loadBalancing.enabled }}
+
+  Load Balancing: Enabled
+  Strategy: {{ .Values.pgdog.loadBalancing.strategy }}
+
+{{- end }}
+
+{{- if .Values.pgdog.routing.enabled }}
+
+  Query Routing: Enabled
+  Read/Write Split: {{ .Values.pgdog.routing.readWriteSplit }}
+
+{{- end }}
+
+-----------------------------------------------------------------------------
+                          Useful Commands
+-----------------------------------------------------------------------------
+
+  # View pod status
+  kubectl get pods --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "pgdog-router.name" . }},app.kubernetes.io/instance={{ .Release.Name }}"
+
+  # View logs
+  kubectl logs --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "pgdog-router.name" . }},app.kubernetes.io/instance={{ .Release.Name }}" -f
+
+  # View configuration
+  kubectl get configmap --namespace {{ .Release.Namespace }} {{ include "pgdog-router.fullname" . }} -o yaml
+
+  # Scale deployment
+  kubectl scale deployment --namespace {{ .Release.Namespace }} {{ include "pgdog-router.fullname" . }} --replicas=<count>
+
+{{- if .Values.autoscaling.enabled }}
+
+  # View HPA status
+  kubectl get hpa --namespace {{ .Release.Namespace }} {{ include "pgdog-router.fullname" . }}
+
+{{- end }}
+
+{{- if .Values.serviceMonitor.enabled }}
+
+  # ServiceMonitor is enabled for Prometheus Operator integration
+
+{{- end }}
+
+=============================================================================
+
+For more information, visit:
+  - PgDog Documentation: https://github.com/pgdog/pgdog
+  - Orochi Cloud: https://orochi.cloud
+
+If you encounter any issues, please check:
+  1. Pod logs for error messages
+  2. ConfigMap for correct upstream configuration
+  3. Secrets for proper credentials
+
+=============================================================================

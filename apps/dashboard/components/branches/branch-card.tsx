@@ -7,7 +7,6 @@ import {
   Trash2,
   ArrowUpCircle,
   Copy,
-  ExternalLink,
   Loader2,
 } from "lucide-react";
 import {

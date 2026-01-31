@@ -820,3 +820,6 @@ export interface BranchListResponse {
   branches: Branch[];
   totalCount: number;
 }
+
+// Re-export pooler types
+export * from "./pooler";

@@ -9,6 +9,7 @@ import {
   AlertCircle,
   Table2,
   GitBranch,
+  Zap,
 } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
@@ -244,6 +245,12 @@ function ClusterLayout(): React.JSX.Element {
                 <Link to="/clusters/$id/branches" params={{ id: clusterId }}>
                   <GitBranch className="mr-2 h-4 w-4" />
                   Branches
+                </Link>
+              </Button>
+              <Button variant="outline" className="justify-start" asChild>
+                <Link to="/clusters/$id/pooler" params={{ id: clusterId }}>
+                  <Zap className="mr-2 h-4 w-4" />
+                  Connection Pooler
                 </Link>
               </Button>
             </div>
