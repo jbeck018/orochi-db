@@ -50,3 +50,19 @@ test/unit/test_pipelines
 test/unit/test_raft
 test/unit/test_vectorized
 test/unit/run_tests
+
+# Secrets and sensitive configuration - NEVER COMMIT THESE
+**/secrets.yaml
+**/secrets.yml
+**/*.secrets.yaml
+**/*.secrets.yml
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+!*.example
+credentials.json
+service-account*.json
+kubeconfig
