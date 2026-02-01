@@ -1,6 +1,6 @@
 {
   "initialized": true,
-  "topology": "hierarchical",
+  "topology": "mesh",
   "workers": [
     "orochi-worker-1768662639789-g1i5",
     "orochi-worker-1768662639789-mwas",
@@ -62,7 +62,20 @@
     "branching-worker-1769208959940-wsna",
     "branching-worker-1769208959940-962i",
     "branching-worker-1769208959940-lqtf",
-    "branching-worker-1769208959940-7x0u"
+    "branching-worker-1769208959940-7x0u",
+    "benchmark-research-1769896314256-ul82",
+    "benchmark-research-1769896314256-6jb1",
+    "benchmark-research-1769896314256-7cms",
+    "benchmark-research-1769896314256-46et",
+    "bench-impl-1769896907302-96wn",
+    "bench-impl-1769896907303-rgfc",
+    "bench-impl-1769896907303-75ys",
+    "bench-impl-1769896907303-q0lg",
+    "bench-impl-1769896907303-y2lr",
+    "pgdog-worker-1769924648992-qydp",
+    "pgdog-worker-1769924648992-c1v9",
+    "pgdog-worker-1769924648992-64x4",
+    "pgdog-worker-1769924648992-o63r"
   ],
   "consensus": {
     "pending": [
@@ -477,6 +490,13 @@
         "priority": "high",
         "fromId": "research-queen",
         "timestamp": "2026-01-23T22:40:37.031Z"
+      },
+      {
+        "messageId": "msg-1769896382768-c5hv91",
+        "message": "Benchmarking research in progress: 6 research agents analyzing competitor benchmarks (Neon, CockroachDB, TimescaleDB, Citus, PlanetScale, Supabase), standard benchmark tools (pgbench, TPC-C/H, YCSB), query/insert performance patterns, and connection pooler testing methodologies.",
+        "priority": "normal",
+        "fromId": "orchestrator",
+        "timestamp": "2026-01-31T21:53:02.768Z"
       }
     ],
     "implementation-plan": {
@@ -875,11 +895,11 @@
       "recommendation": "Focus on API exposure and metadata - core cloning already works"
     }
   },
-  "createdAt": "2026-01-23T22:55:54.872Z",
-  "updatedAt": "2026-01-23T22:55:59.941Z",
+  "createdAt": "2026-02-01T19:46:26.942Z",
+  "updatedAt": "2026-02-01T19:46:26.942Z",
   "queen": {
-    "agentId": "branching-deployment-queen",
-    "electedAt": "2026-01-23T22:55:54.872Z",
+    "agentId": "ci-fixer-queen",
+    "electedAt": "2026-02-01T19:46:26.942Z",
     "term": 1
   }
 }

@@ -792,6 +792,175 @@
       },
       "createdAt": "2026-01-23T22:55:59.940Z",
       "domain": "hive-mind"
+    },
+    "benchmark-research-1769896314256-ul82": {
+      "agentId": "benchmark-research-1769896314256-ul82",
+      "agentType": "worker",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "role": "scout",
+        "hiveRole": "scout"
+      },
+      "createdAt": "2026-01-31T21:51:54.256Z",
+      "domain": "hive-mind"
+    },
+    "benchmark-research-1769896314256-6jb1": {
+      "agentId": "benchmark-research-1769896314256-6jb1",
+      "agentType": "worker",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "role": "scout",
+        "hiveRole": "scout"
+      },
+      "createdAt": "2026-01-31T21:51:54.256Z",
+      "domain": "hive-mind"
+    },
+    "benchmark-research-1769896314256-7cms": {
+      "agentId": "benchmark-research-1769896314256-7cms",
+      "agentType": "worker",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "role": "scout",
+        "hiveRole": "scout"
+      },
+      "createdAt": "2026-01-31T21:51:54.256Z",
+      "domain": "hive-mind"
+    },
+    "benchmark-research-1769896314256-46et": {
+      "agentId": "benchmark-research-1769896314256-46et",
+      "agentType": "worker",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "role": "scout",
+        "hiveRole": "scout"
+      },
+      "createdAt": "2026-01-31T21:51:54.256Z",
+      "domain": "hive-mind"
+    },
+    "bench-impl-1769896907302-96wn": {
+      "agentId": "bench-impl-1769896907302-96wn",
+      "agentType": "coder",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "role": "specialist",
+        "hiveRole": "specialist"
+      },
+      "createdAt": "2026-01-31T22:01:47.303Z",
+      "domain": "hive-mind"
+    },
+    "bench-impl-1769896907303-rgfc": {
+      "agentId": "bench-impl-1769896907303-rgfc",
+      "agentType": "coder",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "role": "specialist",
+        "hiveRole": "specialist"
+      },
+      "createdAt": "2026-01-31T22:01:47.303Z",
+      "domain": "hive-mind"
+    },
+    "bench-impl-1769896907303-75ys": {
+      "agentId": "bench-impl-1769896907303-75ys",
+      "agentType": "coder",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "role": "specialist",
+        "hiveRole": "specialist"
+      },
+      "createdAt": "2026-01-31T22:01:47.303Z",
+      "domain": "hive-mind"
+    },
+    "bench-impl-1769896907303-q0lg": {
+      "agentId": "bench-impl-1769896907303-q0lg",
+      "agentType": "coder",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "role": "specialist",
+        "hiveRole": "specialist"
+      },
+      "createdAt": "2026-01-31T22:01:47.303Z",
+      "domain": "hive-mind"
+    },
+    "bench-impl-1769896907303-y2lr": {
+      "agentId": "bench-impl-1769896907303-y2lr",
+      "agentType": "coder",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "role": "specialist",
+        "hiveRole": "specialist"
+      },
+      "createdAt": "2026-01-31T22:01:47.303Z",
+      "domain": "hive-mind"
+    },
+    "pgdog-worker-1769924648992-qydp": {
+      "agentId": "pgdog-worker-1769924648992-qydp",
+      "agentType": "coder",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "role": "specialist",
+        "hiveRole": "specialist"
+      },
+      "createdAt": "2026-02-01T05:44:08.992Z",
+      "domain": "hive-mind"
+    },
+    "pgdog-worker-1769924648992-c1v9": {
+      "agentId": "pgdog-worker-1769924648992-c1v9",
+      "agentType": "coder",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "role": "specialist",
+        "hiveRole": "specialist"
+      },
+      "createdAt": "2026-02-01T05:44:08.992Z",
+      "domain": "hive-mind"
+    },
+    "pgdog-worker-1769924648992-64x4": {
+      "agentId": "pgdog-worker-1769924648992-64x4",
+      "agentType": "coder",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "role": "specialist",
+        "hiveRole": "specialist"
+      },
+      "createdAt": "2026-02-01T05:44:08.992Z",
+      "domain": "hive-mind"
+    },
+    "pgdog-worker-1769924648992-o63r": {
+      "agentId": "pgdog-worker-1769924648992-o63r",
+      "agentType": "coder",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "role": "specialist",
+        "hiveRole": "specialist"
+      },
+      "createdAt": "2026-02-01T05:44:08.992Z",
+      "domain": "hive-mind"
     }
   }
 }

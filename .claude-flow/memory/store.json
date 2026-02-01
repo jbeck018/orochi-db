@@ -764,6 +764,245 @@
       "storedAt": "2026-01-23T22:42:37.959Z",
       "accessCount": 0,
       "lastAccessed": "2026-01-23T22:42:37.959Z"
+    },
+    "benchmarking-research-goals": {
+      "key": "benchmarking-research-goals",
+      "value": {
+        "objective": "Create comprehensive benchmark suite for Orochi DB",
+        "comparison_targets": [
+          "Neon",
+          "PlanetScale",
+          "CockroachDB",
+          "Citus",
+          "TimescaleDB",
+          "Supabase"
+        ],
+        "benchmark_categories": [
+          "Standard benchmarks (pgbench, TPC-C, TPC-H, YCSB)",
+          "Query performance (OLTP and OLAP)",
+          "Insert/write throughput",
+          "Sharding efficiency",
+          "Connection pooling",
+          "Time-series workloads"
+        ],
+        "key_metrics": [
+          "Throughput (TPS, QPS, rows/sec)",
+          "Latency (p50, p95, p99)",
+          "Scalability (linear vs sublinear)",
+          "Resource efficiency (CPU, memory, storage)"
+        ]
+      },
+      "metadata": {
+        "type": "research-context",
+        "created": "2026-01-31"
+      },
+      "storedAt": "2026-01-31T21:52:43.133Z",
+      "accessCount": 0,
+      "lastAccessed": "2026-01-31T21:52:43.133Z"
+    },
+    "existing-benchmark-suite": {
+      "key": "existing-benchmark-suite",
+      "value": {
+        "location": "extensions/postgres/benchmark/",
+        "suites": [
+          "tpch",
+          "timeseries",
+          "columnar",
+          "distributed",
+          "vectorized"
+        ],
+        "runner": "run_all.sh",
+        "features": [
+          "Configurable scale factor (1-100GB)",
+          "Multi-client support",
+          "JSON/CSV/text output",
+          "Warmup period",
+          "System info collection"
+        ],
+        "missing": [
+          "pgbench integration",
+          "YCSB integration",
+          "Connection pooler benchmarks",
+          "HTAP (CH-benCHmark)",
+          "Competitor comparison framework"
+        ]
+      },
+      "metadata": {
+        "type": "codebase-analysis",
+        "discovered": "2026-01-31"
+      },
+      "storedAt": "2026-01-31T21:53:44.738Z",
+      "accessCount": 0,
+      "lastAccessed": "2026-01-31T21:53:44.738Z"
+    },
+    "benchmark-research-standard-tools": {
+      "key": "benchmark-research-standard-tools",
+      "value": {
+        "completed": true,
+        "tools": {
+          "pgbench": {
+            "url": "built-in",
+            "measures": "TPS, latency, connection overhead"
+          },
+          "tpc-c": {
+            "url": "github.com/TPC-Council/HammerDB",
+            "measures": "NOPM, TPM, warehouse scaling"
+          },
+          "tpc-h": {
+            "url": "github.com/tvondra/pg_tpch",
+            "measures": "22 analytical queries, geometric mean"
+          },
+          "ycsb": {
+            "url": "github.com/brianfrankcooper/YCSB",
+            "measures": "key-value ops, 6 workload types"
+          },
+          "sysbench": {
+            "url": "github.com/akopytov/sysbench",
+            "measures": "OLTP read/write mix"
+          },
+          "tsbs": {
+            "url": "github.com/timescale/tsbs",
+            "measures": "time-series ingestion and queries"
+          },
+          "ch-benchmark": {
+            "url": "github.com/faclc4/HTAPBench",
+            "measures": "HTAP - TPC-C + TPC-H combined"
+          },
+          "benchbase": {
+            "url": "github.com/cmu-db/benchbase",
+            "measures": "17+ benchmark types via JDBC"
+          }
+        },
+        "recommendations": {
+          "core": [
+            "pgbench",
+            "TPC-C",
+            "TPC-H",
+            "CH-benCHmark",
+            "TSBS"
+          ],
+          "competitive": [
+            "YCSB",
+            "sysbench-tpcc",
+            "pooler tests"
+          ]
+        }
+      },
+      "metadata": {
+        "type": "research-result",
+        "agent": "aafabeb"
+      },
+      "storedAt": "2026-01-31T21:56:43.860Z",
+      "accessCount": 0,
+      "lastAccessed": "2026-01-31T21:56:43.860Z"
+    },
+    "benchmarking-research-complete": {
+      "key": "benchmarking-research-complete",
+      "value": {
+        "completion_date": "2026-01-31",
+        "research_agents": {
+          "pgbench_alternatives": {
+            "tools": [
+              "pgbench",
+              "TPC-C via HammerDB/BenchmarkSQL",
+              "TPC-H",
+              "TPC-DS",
+              "YCSB",
+              "Sysbench",
+              "CH-benCHmark",
+              "TSBS"
+            ],
+            "key_recommendation": "TPC-C via HammerDB for OLTP, TSBS for time-series, CH-benCHmark for HTAP"
+          },
+          "query_performance": {
+            "methodologies": [
+              "cold vs warm cache testing",
+              "percentile reporting (P50-P99.9)",
+              "EXPLAIN ANALYZE patterns"
+            ],
+            "patterns": [
+              "OLAP range queries",
+              "distributed query routing",
+              "columnar vs row tradeoffs"
+            ]
+          },
+          "insert_benchmarking": {
+            "tools": [
+              "COPY command benchmarks",
+              "batch insert testing",
+              "TSBS for time-series"
+            ],
+            "patterns": [
+              "Kafka integration testing",
+              "CDC overhead measurement",
+              "hot partition detection"
+            ]
+          },
+          "sharding_benchmarks": {
+            "metrics": [
+              "distribution uniformity (RSD)",
+              "rebalancing overhead",
+              "cross-shard query ratio"
+            ],
+            "tools": [
+              "Citus metadata tables",
+              "custom distribution scripts",
+              "HammerDB with sharded schema"
+            ]
+          },
+          "connection_benchmarking": {
+            "poolers_compared": [
+              "PgBouncer (44K TPS)",
+              "PgCat (59K TPS)",
+              "Odyssey (55K+ TPS)",
+              "PgDog (+10% vs PgBouncer)"
+            ],
+            "metrics": [
+              "connection establishment rate",
+              "pool saturation behavior",
+              "idle connection overhead"
+            ]
+          },
+          "competitor_analysis": {
+            "competitors": [
+              "Neon",
+              "PlanetScale",
+              "CockroachDB",
+              "Citus",
+              "TimescaleDB",
+              "Supabase"
+            ],
+            "common_presentation": [
+              "time-series charts",
+              "comparison tables",
+              "interactive dashboards",
+              "percentile distributions"
+            ]
+          }
+        },
+        "key_benchmarks_for_orochi": [
+          "TPC-C (OLTP) - compare to Aurora, Neon, CockroachDB",
+          "TSBS (time-series) - compare to TimescaleDB, QuestDB",
+          "CH-benCHmark (HTAP) - compare to Citus, SingleStore",
+          "ClickBench (columnar) - compare to ClickHouse, DuckDB",
+          "Resilience testing - follow CockroachDB adversity methodology"
+        ],
+        "metrics_to_capture": [
+          "QPS/TPS throughput",
+          "Latency percentiles (p50, p95, p99, p99.9)",
+          "Distribution skew (RSD < 10%)",
+          "Compression ratios",
+          "Cold start latency",
+          "Rebalancing overhead percentage"
+        ]
+      },
+      "metadata": {
+        "category": "research",
+        "topic": "benchmarking"
+      },
+      "storedAt": "2026-01-31T21:58:22.467Z",
+      "accessCount": 0,
+      "lastAccessed": "2026-01-31T21:58:22.467Z"
     }
   },
   "version": "3.0.0"
