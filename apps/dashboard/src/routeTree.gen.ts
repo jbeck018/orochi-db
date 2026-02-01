@@ -19,6 +19,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as LandingRouteImport } from './routes/landing'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as DocsRouteImport } from './routes/docs'
+import { Route as BenchmarksRouteImport } from './routes/benchmarks'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ClustersIndexRouteImport } from './routes/clusters.index'
@@ -90,6 +91,11 @@ const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
 const DocsRoute = DocsRouteImport.update({
   id: '/docs',
   path: '/docs',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BenchmarksRoute = BenchmarksRouteImport.update({
+  id: '/benchmarks',
+  path: '/benchmarks',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminRoute = AdminRouteImport.update({
@@ -206,6 +212,7 @@ const AuthCallbackProviderRoute = AuthCallbackProviderRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
+  '/benchmarks': typeof BenchmarksRoute
   '/docs': typeof DocsRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/landing': typeof LandingRoute
@@ -239,6 +246,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/benchmarks': typeof BenchmarksRoute
   '/docs': typeof DocsRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/landing': typeof LandingRoute
@@ -273,6 +281,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
+  '/benchmarks': typeof BenchmarksRoute
   '/docs': typeof DocsRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/landing': typeof LandingRoute
@@ -309,6 +318,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/admin'
+    | '/benchmarks'
     | '/docs'
     | '/forgot-password'
     | '/landing'
@@ -342,6 +352,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/benchmarks'
     | '/docs'
     | '/forgot-password'
     | '/landing'
@@ -375,6 +386,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/admin'
+    | '/benchmarks'
     | '/docs'
     | '/forgot-password'
     | '/landing'
@@ -410,6 +422,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRouteWithChildren
+  BenchmarksRoute: typeof BenchmarksRoute
   DocsRoute: typeof DocsRoute
   ForgotPasswordRoute: typeof ForgotPasswordRoute
   LandingRoute: typeof LandingRoute
@@ -498,6 +511,13 @@ declare module '@tanstack/react-router' {
       path: '/docs'
       fullPath: '/docs'
       preLoaderRoute: typeof DocsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/benchmarks': {
+      id: '/benchmarks'
+      path: '/benchmarks'
+      fullPath: '/benchmarks'
+      preLoaderRoute: typeof BenchmarksRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin': {
@@ -706,6 +726,7 @@ const ClustersIdRouteRouteWithChildren = ClustersIdRouteRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRouteWithChildren,
+  BenchmarksRoute: BenchmarksRoute,
   DocsRoute: DocsRoute,
   ForgotPasswordRoute: ForgotPasswordRoute,
   LandingRoute: LandingRoute,
@@ -726,12 +747,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { createStart } from '@tanstack/react-start'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-  }
-}
