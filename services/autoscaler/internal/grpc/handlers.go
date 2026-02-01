@@ -49,12 +49,12 @@ type ResourceAllocation struct {
 type ScalingState int32
 
 const (
-	ScalingStateUnknown    ScalingState = 0
-	ScalingStateStable     ScalingState = 1
-	ScalingStateScalingUp  ScalingState = 2
+	ScalingStateUnknown     ScalingState = 0
+	ScalingStateStable      ScalingState = 1
+	ScalingStateScalingUp   ScalingState = 2
 	ScalingStateScalingDown ScalingState = 3
-	ScalingStateCooldown   ScalingState = 4
-	ScalingStateError      ScalingState = 5
+	ScalingStateCooldown    ScalingState = 4
+	ScalingStateError       ScalingState = 5
 )
 
 // ClusterMetrics contains cluster metrics.
@@ -119,17 +119,17 @@ type ScalingPolicy struct {
 
 // HorizontalScalingPolicy defines horizontal scaling.
 type HorizontalScalingPolicy struct {
-	Enabled                   bool
-	MinReplicas               int32
-	MaxReplicas               int32
-	TargetCPUUtilization      float64
-	TargetMemoryUtilization   float64
-	TargetConnectionsPerPod   int64
-	TargetQueryLatencyMs      float64
-	ScaleUpCooldownSeconds    int32
-	ScaleDownCooldownSeconds  int32
-	ScaleUpStep               int32
-	ScaleDownStep             int32
+	Enabled                    bool
+	MinReplicas                int32
+	MaxReplicas                int32
+	TargetCPUUtilization       float64
+	TargetMemoryUtilization    float64
+	TargetConnectionsPerPod    int64
+	TargetQueryLatencyMs       float64
+	ScaleUpCooldownSeconds     int32
+	ScaleDownCooldownSeconds   int32
+	ScaleUpStep                int32
+	ScaleDownStep              int32
 	StabilizationWindowSeconds int32
 }
 

@@ -21,16 +21,16 @@ import (
 
 // RouterConfig holds the configuration for the router.
 type RouterConfig struct {
-	JWTManager              *auth.JWTManager
-	UserService             *services.UserService
-	ClusterService          *services.ClusterService
-	AdminService            *services.AdminService
-	OrganizationService     *services.OrganizationService
-	InviteService           *services.InviteService
-	DataBrowserService      *services.DataBrowserService
-	ClusterSettingsService  *services.ClusterSettingsService
-	PoolerService           *services.PoolerService
-	Logger                  *slog.Logger
+	JWTManager             *auth.JWTManager
+	UserService            *services.UserService
+	ClusterService         *services.ClusterService
+	AdminService           *services.AdminService
+	OrganizationService    *services.OrganizationService
+	InviteService          *services.InviteService
+	DataBrowserService     *services.DataBrowserService
+	ClusterSettingsService *services.ClusterSettingsService
+	PoolerService          *services.PoolerService
+	Logger                 *slog.Logger
 
 	// AllowedOrigins specifies CORS allowed origins.
 	// If empty, defaults to environment variable ALLOWED_ORIGINS or localhost only.

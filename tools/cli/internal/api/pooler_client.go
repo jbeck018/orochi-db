@@ -90,13 +90,13 @@ type PoolerStats struct {
 	WriteQueries     int64   `json:"write_queries"`
 
 	// Latency stats (in milliseconds)
-	AvgLatencyMs   float64 `json:"avg_latency_ms"`
-	P50LatencyMs   float64 `json:"p50_latency_ms"`
-	P95LatencyMs   float64 `json:"p95_latency_ms"`
-	P99LatencyMs   float64 `json:"p99_latency_ms"`
-	MaxLatencyMs   float64 `json:"max_latency_ms"`
-	TotalWaitMs    float64 `json:"total_wait_ms"`
-	AvgWaitMs      float64 `json:"avg_wait_ms"`
+	AvgLatencyMs float64 `json:"avg_latency_ms"`
+	P50LatencyMs float64 `json:"p50_latency_ms"`
+	P95LatencyMs float64 `json:"p95_latency_ms"`
+	P99LatencyMs float64 `json:"p99_latency_ms"`
+	MaxLatencyMs float64 `json:"max_latency_ms"`
+	TotalWaitMs  float64 `json:"total_wait_ms"`
+	AvgWaitMs    float64 `json:"avg_wait_ms"`
 
 	// Traffic stats (in bytes)
 	BytesSent     int64 `json:"bytes_sent"`
@@ -258,7 +258,6 @@ func (c *Client) GetPoolerClients(ctx context.Context, clusterID string, filter 
 
 	return result.Clients, nil
 }
-
 
 // ValidatePoolerMode validates a pooler mode string.
 func ValidatePoolerMode(mode string) (PoolerMode, error) {

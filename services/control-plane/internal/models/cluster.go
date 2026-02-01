@@ -18,9 +18,9 @@ const (
 	ClusterStatusStopped      ClusterStatus = "stopped"
 	ClusterStatusDeleting     ClusterStatus = "deleting"
 	ClusterStatusFailed       ClusterStatus = "failed"
-	ClusterStatusSuspended    ClusterStatus = "suspended"   // Scale-to-zero: cluster pods are scaled down
-	ClusterStatusSuspending   ClusterStatus = "suspending"  // Scale-to-zero: transitioning to suspended
-	ClusterStatusWaking       ClusterStatus = "waking"      // Scale-to-zero: transitioning from suspended to running
+	ClusterStatusSuspended    ClusterStatus = "suspended"  // Scale-to-zero: cluster pods are scaled down
+	ClusterStatusSuspending   ClusterStatus = "suspending" // Scale-to-zero: transitioning to suspended
+	ClusterStatusWaking       ClusterStatus = "waking"     // Scale-to-zero: transitioning from suspended to running
 )
 
 // ClusterTier represents the pricing tier of a cluster.
@@ -45,44 +45,44 @@ const (
 
 // Cluster represents an Orochi DB cluster.
 type Cluster struct {
-	ID                  uuid.UUID      `json:"id"`
-	Name                string         `json:"name"`
-	OwnerID             uuid.UUID      `json:"owner_id"`
-	OrganizationID      *uuid.UUID     `json:"organization_id,omitempty"`    // Optional team/organization for multi-tenant isolation
-	Status              ClusterStatus  `json:"status"`
-	Tier                ClusterTier    `json:"tier"`
-	Provider            CloudProvider  `json:"provider"`
-	Region              string         `json:"region"`
-	Version             string         `json:"version"`
-	NodeCount           int            `json:"node_count"`
-	NodeSize            string         `json:"node_size"`
-	StorageGB           int            `json:"storage_gb"`
-	ConnectionURL       *string        `json:"connection_url,omitempty"`     // Direct PostgreSQL connection
-	PoolerURL           *string        `json:"pooler_url,omitempty"`         // PgBouncer pooler connection
-	MaintenanceDay      string         `json:"maintenance_day"`
-	MaintenanceHour     int            `json:"maintenance_hour"`
-	BackupEnabled       bool           `json:"backup_enabled"`
-	BackupRetention     int            `json:"backup_retention_days"`
-	PoolerEnabled       bool           `json:"pooler_enabled"`               // Whether connection pooling is enabled
-	TieringEnabled      bool           `json:"tiering_enabled"`              // Whether tiered storage is enabled
-	TieringHotDuration  *string        `json:"tiering_hot_duration,omitempty"`   // Hot tier duration
-	TieringWarmDuration *string        `json:"tiering_warm_duration,omitempty"`  // Warm tier duration
-	TieringColdDuration *string        `json:"tiering_cold_duration,omitempty"`  // Cold tier duration
-	TieringCompression  *string        `json:"tiering_compression,omitempty"`    // Compression type (lz4, zstd)
-	S3Endpoint          *string        `json:"s3_endpoint,omitempty"`        // S3 endpoint for cold/frozen tiers
-	S3Bucket            *string        `json:"s3_bucket,omitempty"`          // S3 bucket name
-	S3Region            *string        `json:"s3_region,omitempty"`          // S3 region
-	EnableColumnar      bool           `json:"enable_columnar"`              // Enable columnar storage
-	DefaultShardCount   int            `json:"default_shard_count"`          // Default shard count for distributed tables
+	ID                  uuid.UUID     `json:"id"`
+	Name                string        `json:"name"`
+	OwnerID             uuid.UUID     `json:"owner_id"`
+	OrganizationID      *uuid.UUID    `json:"organization_id,omitempty"` // Optional team/organization for multi-tenant isolation
+	Status              ClusterStatus `json:"status"`
+	Tier                ClusterTier   `json:"tier"`
+	Provider            CloudProvider `json:"provider"`
+	Region              string        `json:"region"`
+	Version             string        `json:"version"`
+	NodeCount           int           `json:"node_count"`
+	NodeSize            string        `json:"node_size"`
+	StorageGB           int           `json:"storage_gb"`
+	ConnectionURL       *string       `json:"connection_url,omitempty"` // Direct PostgreSQL connection
+	PoolerURL           *string       `json:"pooler_url,omitempty"`     // PgBouncer pooler connection
+	MaintenanceDay      string        `json:"maintenance_day"`
+	MaintenanceHour     int           `json:"maintenance_hour"`
+	BackupEnabled       bool          `json:"backup_enabled"`
+	BackupRetention     int           `json:"backup_retention_days"`
+	PoolerEnabled       bool          `json:"pooler_enabled"`                  // Whether connection pooling is enabled
+	TieringEnabled      bool          `json:"tiering_enabled"`                 // Whether tiered storage is enabled
+	TieringHotDuration  *string       `json:"tiering_hot_duration,omitempty"`  // Hot tier duration
+	TieringWarmDuration *string       `json:"tiering_warm_duration,omitempty"` // Warm tier duration
+	TieringColdDuration *string       `json:"tiering_cold_duration,omitempty"` // Cold tier duration
+	TieringCompression  *string       `json:"tiering_compression,omitempty"`   // Compression type (lz4, zstd)
+	S3Endpoint          *string       `json:"s3_endpoint,omitempty"`           // S3 endpoint for cold/frozen tiers
+	S3Bucket            *string       `json:"s3_bucket,omitempty"`             // S3 bucket name
+	S3Region            *string       `json:"s3_region,omitempty"`             // S3 region
+	EnableColumnar      bool          `json:"enable_columnar"`                 // Enable columnar storage
+	DefaultShardCount   int           `json:"default_shard_count"`             // Default shard count for distributed tables
 	// Scale-to-zero configuration
-	ScaleToZeroEnabled  bool           `json:"scale_to_zero_enabled"`        // Enable automatic scale-to-zero
-	IdleTimeoutSeconds  int            `json:"idle_timeout_seconds"`         // Seconds of inactivity before suspending (default: 300)
-	WakeTimeoutSeconds  int            `json:"wake_timeout_seconds"`         // Max seconds to wait for cluster to wake (default: 60)
-	LastActivityAt      *time.Time     `json:"last_activity_at,omitempty"`   // Last connection/query activity timestamp
-	SuspendedAt         *time.Time     `json:"suspended_at,omitempty"`       // When cluster was suspended
-	CreatedAt           time.Time      `json:"created_at"`
-	UpdatedAt           time.Time      `json:"updated_at"`
-	DeletedAt           *time.Time     `json:"deleted_at,omitempty"`
+	ScaleToZeroEnabled bool       `json:"scale_to_zero_enabled"`      // Enable automatic scale-to-zero
+	IdleTimeoutSeconds int        `json:"idle_timeout_seconds"`       // Seconds of inactivity before suspending (default: 300)
+	WakeTimeoutSeconds int        `json:"wake_timeout_seconds"`       // Max seconds to wait for cluster to wake (default: 60)
+	LastActivityAt     *time.Time `json:"last_activity_at,omitempty"` // Last connection/query activity timestamp
+	SuspendedAt        *time.Time `json:"suspended_at,omitempty"`     // When cluster was suspended
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+	DeletedAt          *time.Time `json:"deleted_at,omitempty"`
 }
 
 // TieringConfig represents the tiered storage configuration for a cluster.
@@ -119,12 +119,12 @@ type ClusterCreateRequest struct {
 	MaintenanceHour   int            `json:"maintenance_hour,omitempty"`
 	BackupEnabled     bool           `json:"backup_enabled,omitempty"`
 	BackupRetention   int            `json:"backup_retention_days,omitempty"`
-	PoolerEnabled     bool           `json:"pooler_enabled,omitempty"`     // Enable PgBouncer connection pooling
-	OrganizationID    *uuid.UUID     `json:"organization_id,omitempty"`    // Optional team/organization
-	TieringConfig     *TieringConfig `json:"tieringConfig,omitempty"`      // Tiered storage configuration
-	S3Config          *S3Config      `json:"s3Config,omitempty"`           // S3 configuration for cold/frozen tiers
-	EnableColumnar    bool           `json:"enableColumnar"`               // Enable columnar storage for analytics
-	DefaultShardCount int            `json:"defaultShardCount,omitempty"`  // Default number of shards for distributed tables
+	PoolerEnabled     bool           `json:"pooler_enabled,omitempty"`    // Enable PgBouncer connection pooling
+	OrganizationID    *uuid.UUID     `json:"organization_id,omitempty"`   // Optional team/organization
+	TieringConfig     *TieringConfig `json:"tieringConfig,omitempty"`     // Tiered storage configuration
+	S3Config          *S3Config      `json:"s3Config,omitempty"`          // S3 configuration for cold/frozen tiers
+	EnableColumnar    bool           `json:"enableColumnar"`              // Enable columnar storage for analytics
+	DefaultShardCount int            `json:"defaultShardCount,omitempty"` // Default number of shards for distributed tables
 }
 
 // ClusterUpdateRequest represents a request to update a cluster.
@@ -148,7 +148,7 @@ type ClusterScaleRequest struct {
 type ClusterStateResponse struct {
 	ClusterID     uuid.UUID     `json:"cluster_id"`
 	Status        ClusterStatus `json:"status"`
-	IsReady       bool          `json:"is_ready"`        // True if cluster can accept connections
+	IsReady       bool          `json:"is_ready"` // True if cluster can accept connections
 	LastActivity  *time.Time    `json:"last_activity,omitempty"`
 	SuspendedAt   *time.Time    `json:"suspended_at,omitempty"`
 	WakeStartedAt *time.Time    `json:"wake_started_at,omitempty"`
@@ -157,8 +157,8 @@ type ClusterStateResponse struct {
 
 // SuspendClusterRequest represents a request to suspend a cluster.
 type SuspendClusterRequest struct {
-	Force          bool `json:"force"`           // Force suspend even with active connections
-	DrainTimeout   int  `json:"drain_timeout"`   // Seconds to wait for connections to drain (default: 30)
+	Force        bool `json:"force"`         // Force suspend even with active connections
+	DrainTimeout int  `json:"drain_timeout"` // Seconds to wait for connections to drain (default: 30)
 }
 
 // WakeClusterRequest represents a request to wake a suspended cluster.
@@ -170,8 +170,8 @@ type WakeClusterRequest struct {
 // ScaleToZeroConfig represents scale-to-zero configuration for a cluster.
 type ScaleToZeroConfig struct {
 	Enabled            bool `json:"enabled"`
-	IdleTimeoutSeconds int  `json:"idle_timeout_seconds"` // Default: 300 (5 minutes)
-	WakeTimeoutSeconds int  `json:"wake_timeout_seconds"` // Default: 60
+	IdleTimeoutSeconds int  `json:"idle_timeout_seconds"`   // Default: 300 (5 minutes)
+	WakeTimeoutSeconds int  `json:"wake_timeout_seconds"`   // Default: 60
 	MaxQueuedConns     int  `json:"max_queued_connections"` // Default: 100
 }
 

@@ -428,7 +428,7 @@ func (h *OrganizationHandler) AddMember(w http.ResponseWriter, r *http.Request) 
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
 	var req struct {
-		UserID uuid.UUID                    `json:"user_id"`
+		UserID uuid.UUID                     `json:"user_id"`
 		Role   models.OrganizationMemberRole `json:"role"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

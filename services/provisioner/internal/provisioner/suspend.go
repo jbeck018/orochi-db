@@ -18,19 +18,19 @@ import (
 
 // SuspendConfig holds configuration for suspend operations.
 type SuspendConfig struct {
-	DrainTimeout         time.Duration // Time to wait for connections to drain
-	GracePeriodSeconds   int64         // Kubernetes termination grace period
-	PreserveVolumeData   bool          // Keep PVCs when scaling to zero
-	AnnotateSuspendTime  bool          // Add annotation with suspend timestamp
+	DrainTimeout        time.Duration // Time to wait for connections to drain
+	GracePeriodSeconds  int64         // Kubernetes termination grace period
+	PreserveVolumeData  bool          // Keep PVCs when scaling to zero
+	AnnotateSuspendTime bool          // Add annotation with suspend timestamp
 }
 
 // DefaultSuspendConfig returns default suspend configuration.
 func DefaultSuspendConfig() *SuspendConfig {
 	return &SuspendConfig{
-		DrainTimeout:         30 * time.Second,
-		GracePeriodSeconds:   30,
-		PreserveVolumeData:   true,
-		AnnotateSuspendTime:  true,
+		DrainTimeout:        30 * time.Second,
+		GracePeriodSeconds:  30,
+		PreserveVolumeData:  true,
+		AnnotateSuspendTime: true,
 	}
 }
 
@@ -51,23 +51,23 @@ func DefaultResumeConfig() *ResumeConfig {
 
 // SuspendResult contains the result of a suspend operation.
 type SuspendResult struct {
-	Success           bool          `json:"success"`
-	PreviousReplicas  int32         `json:"previousReplicas"`
-	ConnectionsDrained int          `json:"connectionsDrained"`
-	SuspendedAt       time.Time     `json:"suspendedAt"`
-	Duration          time.Duration `json:"duration"`
-	Error             string        `json:"error,omitempty"`
+	Success            bool          `json:"success"`
+	PreviousReplicas   int32         `json:"previousReplicas"`
+	ConnectionsDrained int           `json:"connectionsDrained"`
+	SuspendedAt        time.Time     `json:"suspendedAt"`
+	Duration           time.Duration `json:"duration"`
+	Error              string        `json:"error,omitempty"`
 }
 
 // ResumeResult contains the result of a resume operation.
 type ResumeResult struct {
-	Success         bool          `json:"success"`
-	TargetReplicas  int32         `json:"targetReplicas"`
-	ReadyReplicas   int32         `json:"readyReplicas"`
-	ResumedAt       time.Time     `json:"resumedAt"`
-	Duration        time.Duration `json:"duration"`
+	Success          bool          `json:"success"`
+	TargetReplicas   int32         `json:"targetReplicas"`
+	ReadyReplicas    int32         `json:"readyReplicas"`
+	ResumedAt        time.Time     `json:"resumedAt"`
+	Duration         time.Duration `json:"duration"`
 	ColdStartLatency time.Duration `json:"coldStartLatency"`
-	Error           string        `json:"error,omitempty"`
+	Error            string        `json:"error,omitempty"`
 }
 
 // SuspendCluster suspends a cluster by scaling its PostgreSQL instances to zero.

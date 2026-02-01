@@ -111,6 +111,9 @@ format:
 	cd services/autoscaler && go fmt ./...
 	cd tools/cli && go fmt ./...
 
+check-format:
+	$(MAKE) -C extensions/postgres check-format
+
 # =============================================================================
 # Go Workspace
 # =============================================================================

@@ -102,23 +102,23 @@ type ResourceRequirements struct {
 
 // StorageSpec defines storage configuration
 type StorageSpec struct {
-	Size                 string `json:"size"`
-	StorageClass         string `json:"storageClass,omitempty"`
-	ResizeInUseVolumes   bool   `json:"resizeInUseVolumes,omitempty"`
-	WALSize              string `json:"walSize,omitempty"`
-	WALStorageClass      string `json:"walStorageClass,omitempty"`
-	TablespaceSize       string `json:"tablespaceSize,omitempty"`
+	Size               string `json:"size"`
+	StorageClass       string `json:"storageClass,omitempty"`
+	ResizeInUseVolumes bool   `json:"resizeInUseVolumes,omitempty"`
+	WALSize            string `json:"walSize,omitempty"`
+	WALStorageClass    string `json:"walStorageClass,omitempty"`
+	TablespaceSize     string `json:"tablespaceSize,omitempty"`
 }
 
 // OrochiConfig configures the Orochi DB extension
 type OrochiConfig struct {
-	Enabled             bool            `json:"enabled"`
-	DefaultShardCount   int32           `json:"defaultShardCount,omitempty"`
-	ChunkInterval       string          `json:"chunkInterval,omitempty"`
-	EnableColumnar      bool            `json:"enableColumnar,omitempty"`
-	DefaultCompression  CompressionType `json:"defaultCompression,omitempty"`
-	Tiering             *TieringConfig  `json:"tiering,omitempty"`
-	CustomParameters    map[string]string `json:"customParameters,omitempty"`
+	Enabled            bool              `json:"enabled"`
+	DefaultShardCount  int32             `json:"defaultShardCount,omitempty"`
+	ChunkInterval      string            `json:"chunkInterval,omitempty"`
+	EnableColumnar     bool              `json:"enableColumnar,omitempty"`
+	DefaultCompression CompressionType   `json:"defaultCompression,omitempty"`
+	Tiering            *TieringConfig    `json:"tiering,omitempty"`
+	CustomParameters   map[string]string `json:"customParameters,omitempty"`
 }
 
 // TieringConfig configures tiered storage
@@ -140,10 +140,10 @@ type S3Config struct {
 
 // BackupConfiguration configures backup settings
 type BackupConfiguration struct {
-	RetentionPolicy    string              `json:"retentionPolicy,omitempty"`
-	BarmanObjectStore  *BarmanObjectStore  `json:"barmanObjectStore,omitempty"`
-	ScheduledBackup    *ScheduledBackup    `json:"scheduledBackup,omitempty"`
-	VolumeSnapshot     *VolumeSnapshotSpec `json:"volumeSnapshot,omitempty"`
+	RetentionPolicy   string              `json:"retentionPolicy,omitempty"`
+	BarmanObjectStore *BarmanObjectStore  `json:"barmanObjectStore,omitempty"`
+	ScheduledBackup   *ScheduledBackup    `json:"scheduledBackup,omitempty"`
+	VolumeSnapshot    *VolumeSnapshotSpec `json:"volumeSnapshot,omitempty"`
 }
 
 // BarmanObjectStore configures backup to object storage
@@ -201,25 +201,25 @@ type MonitoringConfig struct {
 
 // ConnectionPoolerSpec configures the connection pooler
 type ConnectionPoolerSpec struct {
-	Enabled           bool              `json:"enabled"`
+	Enabled bool `json:"enabled"`
 	// PgDog-specific configuration
-	Image             string            `json:"image,omitempty"`
-	ImageTag          string            `json:"image_tag,omitempty"`
-	Replicas          int32             `json:"replicas"`
-	Resources         ResourceSpec      `json:"resources,omitempty"`
-	Mode              string            `json:"mode"` // transaction, session
-	MaxPoolSize       int32             `json:"max_pool_size"`
-	MinPoolSize       int32             `json:"min_pool_size"`
-	IdleTimeout       int32             `json:"idle_timeout_seconds"`
-	ReadWriteSplit    bool              `json:"read_write_split"`
-	ShardingEnabled   bool              `json:"sharding_enabled"`
-	ShardCount        int32             `json:"shard_count,omitempty"`
-	TLSEnabled        bool              `json:"tls_enabled"`
-	JWTAuth           *JWTAuthConfig    `json:"jwt_auth,omitempty"`
+	Image           string         `json:"image,omitempty"`
+	ImageTag        string         `json:"image_tag,omitempty"`
+	Replicas        int32          `json:"replicas"`
+	Resources       ResourceSpec   `json:"resources,omitempty"`
+	Mode            string         `json:"mode"` // transaction, session
+	MaxPoolSize     int32          `json:"max_pool_size"`
+	MinPoolSize     int32          `json:"min_pool_size"`
+	IdleTimeout     int32          `json:"idle_timeout_seconds"`
+	ReadWriteSplit  bool           `json:"read_write_split"`
+	ShardingEnabled bool           `json:"sharding_enabled"`
+	ShardCount      int32          `json:"shard_count,omitempty"`
+	TLSEnabled      bool           `json:"tls_enabled"`
+	JWTAuth         *JWTAuthConfig `json:"jwt_auth,omitempty"`
 	// Legacy CloudNativePG PgBouncer configuration (for backward compatibility)
-	Instances         int32             `json:"instances,omitempty"` // Legacy: same as Replicas
-	Type              string            `json:"type,omitempty"`      // Legacy: rw/ro for CloudNativePG pooler
-	PgBouncer         *PgBouncerConfig  `json:"pgbouncer,omitempty"` // Legacy: CloudNativePG pooler
+	Instances int32            `json:"instances,omitempty"` // Legacy: same as Replicas
+	Type      string           `json:"type,omitempty"`      // Legacy: rw/ro for CloudNativePG pooler
+	PgBouncer *PgBouncerConfig `json:"pgbouncer,omitempty"` // Legacy: CloudNativePG pooler
 }
 
 // ResourceSpec defines resource requests and limits for pooler pods
@@ -266,26 +266,26 @@ type Toleration struct {
 
 // ClusterStatus represents the current status of a cluster
 type ClusterStatus struct {
-	Phase                     ClusterPhase     `json:"phase"`
-	ReadyInstances            int32            `json:"readyInstances"`
-	TotalInstances            int32            `json:"totalInstances"`
-	CurrentPrimary            string           `json:"currentPrimary,omitempty"`
-	CurrentPrimaryTimestamp   string           `json:"currentPrimaryTimestamp,omitempty"`
-	FirstRecoverabilityPoint  string           `json:"firstRecoverabilityPoint,omitempty"`
-	LastSuccessfulBackup      string           `json:"lastSuccessfulBackup,omitempty"`
-	Instances                 []InstanceStatus `json:"instances,omitempty"`
-	Conditions                []string         `json:"conditions,omitempty"`
-	Pooler                    *PoolerStatus    `json:"pooler,omitempty"`
+	Phase                    ClusterPhase     `json:"phase"`
+	ReadyInstances           int32            `json:"readyInstances"`
+	TotalInstances           int32            `json:"totalInstances"`
+	CurrentPrimary           string           `json:"currentPrimary,omitempty"`
+	CurrentPrimaryTimestamp  string           `json:"currentPrimaryTimestamp,omitempty"`
+	FirstRecoverabilityPoint string           `json:"firstRecoverabilityPoint,omitempty"`
+	LastSuccessfulBackup     string           `json:"lastSuccessfulBackup,omitempty"`
+	Instances                []InstanceStatus `json:"instances,omitempty"`
+	Conditions               []string         `json:"conditions,omitempty"`
+	Pooler                   *PoolerStatus    `json:"pooler,omitempty"`
 }
 
 // PoolerStatus represents the status of the connection pooler
 type PoolerStatus struct {
-	Enabled         bool   `json:"enabled"`
-	Ready           bool   `json:"ready"`
-	Replicas        int32  `json:"replicas"`
-	ReadyReplicas   int32  `json:"readyReplicas"`
-	Endpoint        string `json:"endpoint,omitempty"`
-	JWTEndpoint     string `json:"jwtEndpoint,omitempty"`
+	Enabled          bool   `json:"enabled"`
+	Ready            bool   `json:"ready"`
+	Replicas         int32  `json:"replicas"`
+	ReadyReplicas    int32  `json:"readyReplicas"`
+	Endpoint         string `json:"endpoint,omitempty"`
+	JWTEndpoint      string `json:"jwtEndpoint,omitempty"`
 	InternalEndpoint string `json:"internalEndpoint,omitempty"`
 }
 
@@ -311,26 +311,26 @@ type ClusterInfo struct {
 
 // BackupInfo contains backup information
 type BackupInfo struct {
-	BackupID    string      `json:"backupId"`
-	Name        string      `json:"name"`
-	ClusterName string      `json:"clusterName"`
+	BackupID    string       `json:"backupId"`
+	Name        string       `json:"name"`
+	ClusterName string       `json:"clusterName"`
 	Method      BackupMethod `json:"method"`
 	Phase       BackupPhase  `json:"phase"`
-	StartedAt   time.Time   `json:"startedAt,omitempty"`
-	CompletedAt time.Time   `json:"completedAt,omitempty"`
-	BeginWAL    string      `json:"beginWal,omitempty"`
-	EndWAL      string      `json:"endWal,omitempty"`
-	BeginLSN    string      `json:"beginLsn,omitempty"`
-	EndLSN      string      `json:"endLsn,omitempty"`
-	BackupSize  int64       `json:"backupSize,omitempty"`
+	StartedAt   time.Time    `json:"startedAt,omitempty"`
+	CompletedAt time.Time    `json:"completedAt,omitempty"`
+	BeginWAL    string       `json:"beginWal,omitempty"`
+	EndWAL      string       `json:"endWal,omitempty"`
+	BeginLSN    string       `json:"beginLsn,omitempty"`
+	EndLSN      string       `json:"endLsn,omitempty"`
+	BackupSize  int64        `json:"backupSize,omitempty"`
 }
 
 // RestoreOptions configures point-in-time recovery
 type RestoreOptions struct {
-	BackupID               string `json:"backupId,omitempty"`
-	RecoveryTargetTime     string `json:"recoveryTargetTime,omitempty"`
-	RecoveryTargetLSN      string `json:"recoveryTargetLsn,omitempty"`
-	RecoveryTargetName     string `json:"recoveryTargetName,omitempty"`
+	BackupID                string `json:"backupId,omitempty"`
+	RecoveryTargetTime      string `json:"recoveryTargetTime,omitempty"`
+	RecoveryTargetLSN       string `json:"recoveryTargetLsn,omitempty"`
+	RecoveryTargetName      string `json:"recoveryTargetName,omitempty"`
 	RecoveryTargetInclusive bool   `json:"recoveryTargetInclusive,omitempty"`
 }
 

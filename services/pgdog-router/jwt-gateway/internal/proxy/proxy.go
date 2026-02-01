@@ -35,16 +35,16 @@ const (
 	cancelRequestCode = 80877102
 
 	// Message types
-	msgTypeAuthentication     = 'R'
-	msgTypeBackendKeyData     = 'K'
-	msgTypeParameterStatus    = 'S'
-	msgTypeReadyForQuery      = 'Z'
-	msgTypeError              = 'E'
-	msgTypePasswordMessage    = 'p'
-	msgTypeQuery              = 'Q'
-	msgTypeTerminate          = 'X'
-	msgTypeCommandComplete    = 'C'
-	msgTypeNoticeResponse     = 'N'
+	msgTypeAuthentication  = 'R'
+	msgTypeBackendKeyData  = 'K'
+	msgTypeParameterStatus = 'S'
+	msgTypeReadyForQuery   = 'Z'
+	msgTypeError           = 'E'
+	msgTypePasswordMessage = 'p'
+	msgTypeQuery           = 'Q'
+	msgTypeTerminate       = 'X'
+	msgTypeCommandComplete = 'C'
+	msgTypeNoticeResponse  = 'N'
 
 	// Authentication request types
 	authTypeOK                = 0

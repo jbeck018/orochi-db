@@ -81,12 +81,12 @@ type ChangePasswordRequest struct {
 
 // APIKey represents an API key for programmatic access
 type APIKey struct {
-	ID          string    `json:"id"`
-	UserID      string    `json:"user_id"`
-	Name        string    `json:"name"`
-	KeyPrefix   string    `json:"key_prefix"` // First 8 chars for identification
-	KeyHash     string    `json:"-"`          // Never expose
-	Permissions []string  `json:"permissions"`
+	ID          string     `json:"id"`
+	UserID      string     `json:"user_id"`
+	Name        string     `json:"name"`
+	KeyPrefix   string     `json:"key_prefix"` // First 8 chars for identification
+	KeyHash     string     `json:"-"`          // Never expose
+	Permissions []string   `json:"permissions"`
 	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
 	LastUsedAt  *time.Time `json:"last_used_at,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
@@ -94,8 +94,8 @@ type APIKey struct {
 
 // CreateAPIKeyRequest represents a request to create an API key
 type CreateAPIKeyRequest struct {
-	Name        string    `json:"name" validate:"required,min=3,max=100"`
-	Permissions []string  `json:"permissions" validate:"required,min=1"`
+	Name        string     `json:"name" validate:"required,min=3,max=100"`
+	Permissions []string   `json:"permissions" validate:"required,min=1"`
 	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
 }
 

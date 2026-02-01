@@ -244,8 +244,8 @@ func (m *ClusterManager) buildClusterSpec(spec *types.ClusterSpec) *unstructured
 				"annotations": m.buildAnnotations(spec),
 			},
 			"spec": map[string]interface{}{
-				"instances":             int64(spec.Instances),
-				"imageName":             imageName,
+				"instances": int64(spec.Instances),
+				"imageName": imageName,
 				"imagePullSecrets": []interface{}{
 					map[string]interface{}{
 						"name": "ghcr-secret",

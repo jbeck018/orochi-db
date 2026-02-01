@@ -12,32 +12,32 @@ import (
 type MetricType string
 
 const (
-	MetricTypeCPU           MetricType = "cpu_utilization"
-	MetricTypeMemory        MetricType = "memory_utilization"
-	MetricTypeConnections   MetricType = "active_connections"
-	MetricTypeQueryLatency  MetricType = "query_latency"
-	MetricTypeQPS           MetricType = "queries_per_second"
-	MetricTypeReplication   MetricType = "replication_lag"
-	MetricTypeDisk          MetricType = "disk_utilization"
-	MetricTypeCustom        MetricType = "custom"
+	MetricTypeCPU          MetricType = "cpu_utilization"
+	MetricTypeMemory       MetricType = "memory_utilization"
+	MetricTypeConnections  MetricType = "active_connections"
+	MetricTypeQueryLatency MetricType = "query_latency"
+	MetricTypeQPS          MetricType = "queries_per_second"
+	MetricTypeReplication  MetricType = "replication_lag"
+	MetricTypeDisk         MetricType = "disk_utilization"
+	MetricTypeCustom       MetricType = "custom"
 )
 
 // ClusterMetrics holds the current metrics for a cluster.
 type ClusterMetrics struct {
-	ClusterID              string
-	Namespace              string
-	Timestamp              time.Time
-	CPUUtilization         float64
-	MemoryUtilization      float64
-	ActiveConnections      int64
-	QueryLatencyP50Ms      float64
-	QueryLatencyP95Ms      float64
-	QueryLatencyP99Ms      float64
-	QueriesPerSecond       float64
-	ReplicationLagSeconds  float64
-	DiskUsageBytes         int64
-	DiskUtilization        float64
-	CustomMetrics          map[string]float64
+	ClusterID             string
+	Namespace             string
+	Timestamp             time.Time
+	CPUUtilization        float64
+	MemoryUtilization     float64
+	ActiveConnections     int64
+	QueryLatencyP50Ms     float64
+	QueryLatencyP95Ms     float64
+	QueryLatencyP99Ms     float64
+	QueriesPerSecond      float64
+	ReplicationLagSeconds float64
+	DiskUsageBytes        int64
+	DiskUtilization       float64
+	CustomMetrics         map[string]float64
 }
 
 // MetricSample represents a single metric measurement.

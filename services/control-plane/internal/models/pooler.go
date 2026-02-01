@@ -25,36 +25,36 @@ const (
 // PoolerConfig represents the configuration for a PgDog connection pooler.
 type PoolerConfig struct {
 	Enabled         bool       `json:"enabled"`
-	Mode            PoolerMode `json:"mode"`                        // transaction, session, statement
-	MaxPoolSize     int        `json:"max_pool_size"`               // Maximum connections per pool
-	MinPoolSize     int        `json:"min_pool_size"`               // Minimum idle connections per pool
-	IdleTimeout     int        `json:"idle_timeout_seconds"`        // Seconds before idle connection is closed
-	ConnectTimeout  int        `json:"connect_timeout_ms"`          // Connection timeout in milliseconds
-	QueryTimeout    int        `json:"query_timeout_ms"`            // Query timeout in milliseconds (0 = unlimited)
-	ReadWriteSplit  bool       `json:"read_write_split"`            // Enable read/write splitting
-	ShardingEnabled bool       `json:"sharding_enabled"`            // Enable query-based sharding
-	ShardCount      int        `json:"shard_count,omitempty"`       // Number of shards (if sharding enabled)
-	LoadBalancing   string     `json:"load_balancing,omitempty"`    // Load balancing strategy: round_robin, random, least_conn
-	HealthCheckSec  int        `json:"health_check_interval_sec"`   // Health check interval in seconds
+	Mode            PoolerMode `json:"mode"`                      // transaction, session, statement
+	MaxPoolSize     int        `json:"max_pool_size"`             // Maximum connections per pool
+	MinPoolSize     int        `json:"min_pool_size"`             // Minimum idle connections per pool
+	IdleTimeout     int        `json:"idle_timeout_seconds"`      // Seconds before idle connection is closed
+	ConnectTimeout  int        `json:"connect_timeout_ms"`        // Connection timeout in milliseconds
+	QueryTimeout    int        `json:"query_timeout_ms"`          // Query timeout in milliseconds (0 = unlimited)
+	ReadWriteSplit  bool       `json:"read_write_split"`          // Enable read/write splitting
+	ShardingEnabled bool       `json:"sharding_enabled"`          // Enable query-based sharding
+	ShardCount      int        `json:"shard_count,omitempty"`     // Number of shards (if sharding enabled)
+	LoadBalancing   string     `json:"load_balancing,omitempty"`  // Load balancing strategy: round_robin, random, least_conn
+	HealthCheckSec  int        `json:"health_check_interval_sec"` // Health check interval in seconds
 }
 
 // PoolerStats represents real-time statistics from a PgDog pooler.
 type PoolerStats struct {
-	ActiveConnections   int     `json:"active_connections"`   // Currently active connections
-	IdleConnections     int     `json:"idle_connections"`     // Idle connections in pool
-	WaitingClients      int     `json:"waiting_clients"`      // Clients waiting for a connection
-	TotalQueries        int64   `json:"total_queries"`        // Total queries executed
-	QueriesPerSecond    float64 `json:"queries_per_second"`   // Current QPS
-	AverageLatencyMs    float64 `json:"avg_latency_ms"`       // Average query latency
-	P99LatencyMs        float64 `json:"p99_latency_ms"`       // 99th percentile latency
-	PoolUtilization     float64 `json:"pool_utilization"`     // Pool utilization percentage
-	BytesSent           int64   `json:"bytes_sent"`           // Total bytes sent to clients
-	BytesReceived       int64   `json:"bytes_received"`       // Total bytes received from clients
-	TotalTransactions   int64   `json:"total_transactions"`   // Total transactions executed
-	TransactionsPerSec  float64 `json:"transactions_per_sec"` // Current TPS
-	ErrorCount          int64   `json:"error_count"`          // Total error count
-	ConnectionsCreated  int64   `json:"connections_created"`  // Total connections created
-	ConnectionsClosed   int64   `json:"connections_closed"`   // Total connections closed
+	ActiveConnections  int     `json:"active_connections"`   // Currently active connections
+	IdleConnections    int     `json:"idle_connections"`     // Idle connections in pool
+	WaitingClients     int     `json:"waiting_clients"`      // Clients waiting for a connection
+	TotalQueries       int64   `json:"total_queries"`        // Total queries executed
+	QueriesPerSecond   float64 `json:"queries_per_second"`   // Current QPS
+	AverageLatencyMs   float64 `json:"avg_latency_ms"`       // Average query latency
+	P99LatencyMs       float64 `json:"p99_latency_ms"`       // 99th percentile latency
+	PoolUtilization    float64 `json:"pool_utilization"`     // Pool utilization percentage
+	BytesSent          int64   `json:"bytes_sent"`           // Total bytes sent to clients
+	BytesReceived      int64   `json:"bytes_received"`       // Total bytes received from clients
+	TotalTransactions  int64   `json:"total_transactions"`   // Total transactions executed
+	TransactionsPerSec float64 `json:"transactions_per_sec"` // Current TPS
+	ErrorCount         int64   `json:"error_count"`          // Total error count
+	ConnectionsCreated int64   `json:"connections_created"`  // Total connections created
+	ConnectionsClosed  int64   `json:"connections_closed"`   // Total connections closed
 }
 
 // PoolerStatus represents the complete status of a PgDog pooler for a cluster.
@@ -63,11 +63,11 @@ type PoolerStatus struct {
 	Healthy       bool         `json:"healthy"`
 	Config        PoolerConfig `json:"config"`
 	Stats         PoolerStats  `json:"stats"`
-	Replicas      int          `json:"replicas"`        // Desired replicas
-	ReadyReplicas int          `json:"ready_replicas"`  // Ready replicas
-	Version       string       `json:"version"`         // PgDog version
-	Endpoint      string       `json:"endpoint"`        // Pooler endpoint URL
-	AdminEndpoint string       `json:"admin_endpoint"`  // Admin endpoint for stats/management
+	Replicas      int          `json:"replicas"`       // Desired replicas
+	ReadyReplicas int          `json:"ready_replicas"` // Ready replicas
+	Version       string       `json:"version"`        // PgDog version
+	Endpoint      string       `json:"endpoint"`       // Pooler endpoint URL
+	AdminEndpoint string       `json:"admin_endpoint"` // Admin endpoint for stats/management
 	LastUpdated   time.Time    `json:"last_updated"`
 }
 

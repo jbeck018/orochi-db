@@ -440,10 +440,10 @@ func TestShardCount_Validation(t *testing.T) {
 // TestApplyDefaults_Tiering tests that ApplyDefaults correctly sets tiering defaults
 func TestApplyDefaults_Tiering(t *testing.T) {
 	tests := []struct {
-		name              string
-		request           *ClusterCreateRequest
+		name                string
+		request             *ClusterCreateRequest
 		expectedCompression string
-		description       string
+		description         string
 	}{
 		{
 			name: "tiering enabled - compression defaults to zstd",

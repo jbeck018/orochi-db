@@ -20,26 +20,26 @@ type APIError struct {
 
 // Common error codes
 const (
-	ErrCodeBadRequest          = "BAD_REQUEST"
-	ErrCodeUnauthorized        = "UNAUTHORIZED"
-	ErrCodeForbidden           = "FORBIDDEN"
-	ErrCodeNotFound            = "NOT_FOUND"
-	ErrCodeConflict            = "CONFLICT"
-	ErrCodeValidation          = "VALIDATION_ERROR"
-	ErrCodeInternal            = "INTERNAL_ERROR"
-	ErrCodeServiceUnavailable  = "SERVICE_UNAVAILABLE"
-	ErrCodeRateLimited         = "RATE_LIMITED"
-	ErrCodeQuotaExceeded       = "QUOTA_EXCEEDED"
+	ErrCodeBadRequest         = "BAD_REQUEST"
+	ErrCodeUnauthorized       = "UNAUTHORIZED"
+	ErrCodeForbidden          = "FORBIDDEN"
+	ErrCodeNotFound           = "NOT_FOUND"
+	ErrCodeConflict           = "CONFLICT"
+	ErrCodeValidation         = "VALIDATION_ERROR"
+	ErrCodeInternal           = "INTERNAL_ERROR"
+	ErrCodeServiceUnavailable = "SERVICE_UNAVAILABLE"
+	ErrCodeRateLimited        = "RATE_LIMITED"
+	ErrCodeQuotaExceeded      = "QUOTA_EXCEEDED"
 )
 
 // PaginatedResponse wraps paginated results
 type PaginatedResponse[T any] struct {
-	Items      []T    `json:"items"`
-	Total      int64  `json:"total"`
-	Page       int    `json:"page"`
-	PageSize   int    `json:"page_size"`
-	TotalPages int    `json:"total_pages"`
-	HasMore    bool   `json:"has_more"`
+	Items      []T   `json:"items"`
+	Total      int64 `json:"total"`
+	Page       int   `json:"page"`
+	PageSize   int   `json:"page_size"`
+	TotalPages int   `json:"total_pages"`
+	HasMore    bool  `json:"has_more"`
 }
 
 // PaginationParams holds pagination parameters
@@ -62,20 +62,20 @@ func DefaultPagination() PaginationParams {
 
 // FilterParams holds common filter parameters
 type FilterParams struct {
-	Search    string   `json:"search" form:"search"`
-	Status    []string `json:"status" form:"status"`
-	Region    []string `json:"region" form:"region"`
+	Search    string     `json:"search" form:"search"`
+	Status    []string   `json:"status" form:"status"`
+	Region    []string   `json:"region" form:"region"`
 	StartDate *time.Time `json:"start_date" form:"start_date"`
 	EndDate   *time.Time `json:"end_date" form:"end_date"`
 }
 
 // HealthResponse represents a health check response
 type HealthResponse struct {
-	Status    string            `json:"status"` // "healthy", "degraded", "unhealthy"
-	Version   string            `json:"version"`
-	Uptime    string            `json:"uptime"`
-	Checks    map[string]bool   `json:"checks"`
-	Timestamp time.Time         `json:"timestamp"`
+	Status    string          `json:"status"` // "healthy", "degraded", "unhealthy"
+	Version   string          `json:"version"`
+	Uptime    string          `json:"uptime"`
+	Checks    map[string]bool `json:"checks"`
+	Timestamp time.Time       `json:"timestamp"`
 }
 
 // MetricsQuery represents a metrics query request
@@ -102,13 +102,13 @@ type MetricsResponse struct {
 
 // Event represents a system event
 type Event struct {
-	ID          string                 `json:"id"`
-	Type        string                 `json:"type"`
-	Source      string                 `json:"source"`
-	ClusterID   string                 `json:"cluster_id,omitempty"`
-	UserID      string                 `json:"user_id,omitempty"`
-	Severity    string                 `json:"severity"` // "info", "warning", "error", "critical"
-	Message     string                 `json:"message"`
-	Details     map[string]interface{} `json:"details,omitempty"`
-	Timestamp   time.Time              `json:"timestamp"`
+	ID        string                 `json:"id"`
+	Type      string                 `json:"type"`
+	Source    string                 `json:"source"`
+	ClusterID string                 `json:"cluster_id,omitempty"`
+	UserID    string                 `json:"user_id,omitempty"`
+	Severity  string                 `json:"severity"` // "info", "warning", "error", "critical"
+	Message   string                 `json:"message"`
+	Details   map[string]interface{} `json:"details,omitempty"`
+	Timestamp time.Time              `json:"timestamp"`
 }

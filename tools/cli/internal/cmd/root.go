@@ -4,9 +4,9 @@ package cmd
 import (
 	"os"
 
-	"github.com/spf13/cobra"
 	"github.com/orochi-db/orochi-db/tools/cli/internal/config"
 	"github.com/orochi-db/orochi-db/tools/cli/internal/output"
+	"github.com/spf13/cobra"
 )
 
 var (

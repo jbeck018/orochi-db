@@ -182,12 +182,12 @@ func TestSNIRouter_Route(t *testing.T) {
 	defer router.Close()
 
 	tests := []struct {
-		name           string
-		hostname       string
-		wantCluster    string
-		wantBranch     string
-		wantBackend    string
-		wantErr        error
+		name        string
+		hostname    string
+		wantCluster string
+		wantBranch  string
+		wantBackend string
+		wantErr     error
 	}{
 		{
 			name:        "route to cluster1 main",

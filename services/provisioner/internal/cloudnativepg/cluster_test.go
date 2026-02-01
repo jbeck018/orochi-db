@@ -445,11 +445,11 @@ func TestBuildClusterSpec_CompleteConfiguration(t *testing.T) {
 			StorageClass: "fast-ssd",
 		},
 		OrochiConfig: &types.OrochiConfig{
-			Enabled:              true,
-			DefaultShardCount:    32,
-			ChunkInterval:        "1 day",
-			DefaultCompression:   types.CompressionZSTD,
-			EnableColumnar:       true,
+			Enabled:            true,
+			DefaultShardCount:  32,
+			ChunkInterval:      "1 day",
+			DefaultCompression: types.CompressionZSTD,
+			EnableColumnar:     true,
 			Tiering: &types.TieringConfig{
 				Enabled:      true,
 				HotDuration:  "7 days",

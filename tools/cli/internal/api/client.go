@@ -63,21 +63,21 @@ const (
 
 // Cluster represents an OrochiDB cluster.
 type Cluster struct {
-	ID             string        `json:"id"`
-	Name           string        `json:"name"`
-	Size           ClusterSize   `json:"size"`
-	Region         string        `json:"region"`
-	Replicas       int           `json:"replicas"`
-	Status         ClusterStatus `json:"status"`
-	Version        string        `json:"version"`
-	CreatedAt      time.Time     `json:"created_at"`
-	UpdatedAt      time.Time     `json:"updated_at"`
-	Host           string        `json:"host,omitempty"`
-	Port           int           `json:"port,omitempty"`
-	ConnectionURI  string        `json:"connection_uri,omitempty"`
-	StorageGB      int           `json:"storage_gb"`
-	VCPU           int           `json:"vcpu"`
-	MemoryGB       int           `json:"memory_gb"`
+	ID            string        `json:"id"`
+	Name          string        `json:"name"`
+	Size          ClusterSize   `json:"size"`
+	Region        string        `json:"region"`
+	Replicas      int           `json:"replicas"`
+	Status        ClusterStatus `json:"status"`
+	Version       string        `json:"version"`
+	CreatedAt     time.Time     `json:"created_at"`
+	UpdatedAt     time.Time     `json:"updated_at"`
+	Host          string        `json:"host,omitempty"`
+	Port          int           `json:"port,omitempty"`
+	ConnectionURI string        `json:"connection_uri,omitempty"`
+	StorageGB     int           `json:"storage_gb"`
+	VCPU          int           `json:"vcpu"`
+	MemoryGB      int           `json:"memory_gb"`
 }
 
 // User represents a HowlerOps user.
@@ -515,13 +515,13 @@ type Backup struct {
 
 // Branch represents a database branch.
 type Branch struct {
-	ID           string    `json:"id"`
-	Name         string    `json:"name"`
-	ClusterID    string    `json:"cluster_id"`
-	ParentBranch string    `json:"parent_branch"`
-	Status       string    `json:"status"`
-	CreatedAt    time.Time `json:"created_at"`
-	ConnectionURI string   `json:"connection_uri,omitempty"`
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	ClusterID     string    `json:"cluster_id"`
+	ParentBranch  string    `json:"parent_branch"`
+	Status        string    `json:"status"`
+	CreatedAt     time.Time `json:"created_at"`
+	ConnectionURI string    `json:"connection_uri,omitempty"`
 }
 
 // Organization represents an organization.

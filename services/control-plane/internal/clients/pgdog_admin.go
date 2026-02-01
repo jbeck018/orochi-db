@@ -19,15 +19,15 @@ import (
 // PgDog exposes a PostgreSQL-compatible admin interface on port 6432
 // that accepts commands like SHOW POOLS, SHOW STATS, SHOW CLIENTS, and RELOAD.
 type PgDogAdminClient struct {
-	host          string
-	port          int
-	user          string
-	password      string
-	database      string
+	host           string
+	port           int
+	user           string
+	password       string
+	database       string
 	connectTimeout time.Duration
 	readTimeout    time.Duration
-	logger        *slog.Logger
-	mu            sync.Mutex
+	logger         *slog.Logger
+	mu             sync.Mutex
 }
 
 // PgDogAdminConfig holds configuration for the PgDog admin client.

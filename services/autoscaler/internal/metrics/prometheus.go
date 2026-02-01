@@ -543,11 +543,11 @@ type MetricsServer struct {
 
 // Server timeout constants
 const (
-	serverReadTimeout     = 10 * time.Second
-	serverWriteTimeout    = 30 * time.Second
-	serverIdleTimeout     = 60 * time.Second
-	serverReadHeaderTime  = 5 * time.Second
-	serverMaxHeaderBytes  = 1 << 20 // 1 MB
+	serverReadTimeout    = 10 * time.Second
+	serverWriteTimeout   = 30 * time.Second
+	serverIdleTimeout    = 60 * time.Second
+	serverReadHeaderTime = 5 * time.Second
+	serverMaxHeaderBytes = 1 << 20 // 1 MB
 )
 
 // NewMetricsServer creates a new metrics HTTP server.

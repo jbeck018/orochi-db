@@ -32,18 +32,18 @@ func NewDataBrowserService(db *db.DB, logger *slog.Logger) *DataBrowserService {
 
 // internalTablePatterns defines patterns for tables that should not be shown to users.
 var internalTablePatterns = []string{
-	"_timescaledb_%",        // TimescaleDB internal tables
-	"_hypertable_%",         // Hypertable internals
-	"hypertable_data_%",     // Hypertable data chunks
-	"orochi_%",              // Orochi internal tables
-	"_orochi_%",             // Orochi internal prefixed
-	"pg_%",                  // PostgreSQL system catalogs (except pg_catalog)
-	"_pg_%",                 // PostgreSQL internal
-	"information_schema.%",  // Information schema (handled separately)
-	"chunk_%",               // TimescaleDB chunks
-	"_materialized_hyper%",  // Materialized views internal
-	"_dist_hyper%",          // Distributed hypertable internal
-	"_shard_%",              // Shard internal tables
+	"_timescaledb_%",       // TimescaleDB internal tables
+	"_hypertable_%",        // Hypertable internals
+	"hypertable_data_%",    // Hypertable data chunks
+	"orochi_%",             // Orochi internal tables
+	"_orochi_%",            // Orochi internal prefixed
+	"pg_%",                 // PostgreSQL system catalogs (except pg_catalog)
+	"_pg_%",                // PostgreSQL internal
+	"information_schema.%", // Information schema (handled separately)
+	"chunk_%",              // TimescaleDB chunks
+	"_materialized_hyper%", // Materialized views internal
+	"_dist_hyper%",         // Distributed hypertable internal
+	"_shard_%",             // Shard internal tables
 }
 
 // TableInfo represents information about a database table.

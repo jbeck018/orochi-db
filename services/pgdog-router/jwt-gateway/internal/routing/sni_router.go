@@ -62,8 +62,8 @@ type SNIRouter struct {
 
 // cacheEntry holds a cached route resolution.
 type cacheEntry struct {
-	route     *RouteInfo
-	expiresAt time.Time
+	route      *RouteInfo
+	expiresAt  time.Time
 	isNegative bool // true if this is a "not found" cache entry
 }
 

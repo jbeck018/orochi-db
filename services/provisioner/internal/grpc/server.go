@@ -34,9 +34,9 @@ type Server struct {
 	handler       *Handler
 	logger        *zap.Logger
 	metricsServer *http.Server
-	metricsMu     sync.Mutex       // protects metricsServer access
-	metricsReady  chan struct{}    // signals when metrics server is ready
-	stopOnce      sync.Once        // ensures Stop() is only executed once
+	metricsMu     sync.Mutex    // protects metricsServer access
+	metricsReady  chan struct{} // signals when metrics server is ready
+	stopOnce      sync.Once     // ensures Stop() is only executed once
 }
 
 // NewServer creates a new gRPC server

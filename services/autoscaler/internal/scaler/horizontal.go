@@ -13,16 +13,16 @@ import (
 
 // HorizontalScaler handles horizontal scaling operations.
 type HorizontalScaler struct {
-	mu              sync.RWMutex
-	k8sClient       *k8s.Client
-	metricsCollector *metrics.MetricsCollector
-	policyEngine    *PolicyEngine
-	autoscalerMetrics *metrics.AutoscalerMetrics
-	eventRecorder   *ScalingEventRecorder
+	mu                 sync.RWMutex
+	k8sClient          *k8s.Client
+	metricsCollector   *metrics.MetricsCollector
+	policyEngine       *PolicyEngine
+	autoscalerMetrics  *metrics.AutoscalerMetrics
+	eventRecorder      *ScalingEventRecorder
 	evaluationInterval time.Duration
-	stopCh          chan struct{}
-	doneCh          chan struct{}
-	stopOnce        sync.Once // Prevents double-close panic
+	stopCh             chan struct{}
+	doneCh             chan struct{}
+	stopOnce           sync.Once // Prevents double-close panic
 }
 
 // HorizontalScalerConfig holds configuration for the horizontal scaler.
@@ -278,9 +278,9 @@ func (s *HorizontalScaler) Scale(ctx context.Context, clusterID, namespace strin
 
 // ScalingEventRecorder records scaling events for history.
 type ScalingEventRecorder struct {
-	mu     sync.RWMutex
-	events map[string][]ScalingEvent
-	maxAge time.Duration
+	mu       sync.RWMutex
+	events   map[string][]ScalingEvent
+	maxAge   time.Duration
 	maxCount int
 }
 

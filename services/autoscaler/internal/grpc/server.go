@@ -19,13 +19,13 @@ import (
 
 // Server represents the gRPC server for the autoscaler service.
 type Server struct {
-	mu               sync.RWMutex
-	grpcServer       *grpc.Server
-	handler          *Handler
-	healthServer     *health.Server
-	port             int
-	listener         net.Listener
-	running          bool
+	mu           sync.RWMutex
+	grpcServer   *grpc.Server
+	handler      *Handler
+	healthServer *health.Server
+	port         int
+	listener     net.Listener
+	running      bool
 }
 
 // ServerConfig holds configuration for the gRPC server.
@@ -35,12 +35,12 @@ type ServerConfig struct {
 
 // ServerDependencies holds the dependencies for the gRPC server.
 type ServerDependencies struct {
-	K8sClient         *k8s.Client
-	MetricsCollector  *metrics.MetricsCollector
-	HorizontalScaler  *scaler.HorizontalScaler
-	VerticalScaler    *scaler.VerticalScaler
-	PolicyEngine      *scaler.PolicyEngine
-	EventRecorder     *scaler.ScalingEventRecorder
+	K8sClient        *k8s.Client
+	MetricsCollector *metrics.MetricsCollector
+	HorizontalScaler *scaler.HorizontalScaler
+	VerticalScaler   *scaler.VerticalScaler
+	PolicyEngine     *scaler.PolicyEngine
+	EventRecorder    *scaler.ScalingEventRecorder
 }
 
 // NewServer creates a new gRPC server.

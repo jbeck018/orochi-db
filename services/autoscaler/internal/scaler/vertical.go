@@ -30,17 +30,17 @@ type VerticalScaler struct {
 
 // VerticalRecommendation holds a vertical scaling recommendation.
 type VerticalRecommendation struct {
-	ClusterID          string
-	Namespace          string
-	Timestamp          time.Time
-	CurrentCPU         resource.Quantity
-	CurrentMemory      resource.Quantity
-	RecommendedCPU     resource.Quantity
-	RecommendedMemory  resource.Quantity
-	CPUUtilization     float64
-	MemoryUtilization  float64
-	Confidence         float64
-	Reason             string
+	ClusterID         string
+	Namespace         string
+	Timestamp         time.Time
+	CurrentCPU        resource.Quantity
+	CurrentMemory     resource.Quantity
+	RecommendedCPU    resource.Quantity
+	RecommendedMemory resource.Quantity
+	CPUUtilization    float64
+	MemoryUtilization float64
+	Confidence        float64
+	Reason            string
 }
 
 // VerticalScalerConfig holds configuration for the vertical scaler.

@@ -42,27 +42,27 @@ func (s *ClusterService) Create(ctx context.Context, ownerID uuid.UUID, req *mod
 	req.ApplyDefaults()
 
 	cluster := &models.Cluster{
-		ID:              uuid.New(),
-		Name:            req.Name,
-		OwnerID:         ownerID,
-		OrganizationID:  req.OrganizationID, // Optional team/organization for isolation
-		Status:          models.ClusterStatusPending,
-		Tier:            req.Tier,
-		Provider:        req.Provider,
-		Region:          req.Region,
-		Version:         req.Version,
-		NodeCount:       req.NodeCount,
-		NodeSize:        req.NodeSize,
-		StorageGB:       req.StorageGB,
-		MaintenanceDay:  req.MaintenanceDay,
-		MaintenanceHour: req.MaintenanceHour,
-		BackupEnabled:   req.BackupEnabled,
-		BackupRetention: req.BackupRetention,
-		PoolerEnabled:   req.PoolerEnabled, // PgBouncer connection pooling
-		EnableColumnar:  req.EnableColumnar,
+		ID:                uuid.New(),
+		Name:              req.Name,
+		OwnerID:           ownerID,
+		OrganizationID:    req.OrganizationID, // Optional team/organization for isolation
+		Status:            models.ClusterStatusPending,
+		Tier:              req.Tier,
+		Provider:          req.Provider,
+		Region:            req.Region,
+		Version:           req.Version,
+		NodeCount:         req.NodeCount,
+		NodeSize:          req.NodeSize,
+		StorageGB:         req.StorageGB,
+		MaintenanceDay:    req.MaintenanceDay,
+		MaintenanceHour:   req.MaintenanceHour,
+		BackupEnabled:     req.BackupEnabled,
+		BackupRetention:   req.BackupRetention,
+		PoolerEnabled:     req.PoolerEnabled, // PgBouncer connection pooling
+		EnableColumnar:    req.EnableColumnar,
 		DefaultShardCount: req.DefaultShardCount,
-		CreatedAt:       time.Now(),
-		UpdatedAt:       time.Now(),
+		CreatedAt:         time.Now(),
+		UpdatedAt:         time.Now(),
 	}
 
 	// Apply tiering configuration if provided
@@ -1056,9 +1056,9 @@ func (s *ClusterService) provisionWithRealProvisioner(ctx context.Context, clust
 	spec := s.clusterToProtoSpec(cluster)
 
 	req := &pb.CreateClusterRequest{
-		Spec:         spec,
-		WaitForReady: false, // We'll poll for status
-		TimeoutSeconds: 600, // 10 minute timeout
+		Spec:           spec,
+		WaitForReady:   false, // We'll poll for status
+		TimeoutSeconds: 600,   // 10 minute timeout
 	}
 
 	resp, err := s.provisioner.CreateCluster(ctx, req)
@@ -1188,18 +1188,18 @@ func (s *ClusterService) clusterToProtoSpec(cluster *models.Cluster) *pb.Cluster
 			MemoryLimit:   s.nodeSizeToMemory(cluster.NodeSize),
 		},
 		Storage: &pb.StorageSpec{
-			Size:                fmt.Sprintf("%dGi", cluster.StorageGB),
-			StorageClass:        "do-block-storage", // DigitalOcean block storage
-			ResizeInUseVolumes:  true,
+			Size:               fmt.Sprintf("%dGi", cluster.StorageGB),
+			StorageClass:       "do-block-storage", // DigitalOcean block storage
+			ResizeInUseVolumes: true,
 		},
 	}
 
 	// Add Orochi configuration
 	spec.OrochiConfig = &pb.OrochiConfig{
-		Enabled:           true,
-		DefaultShardCount: int32(cluster.DefaultShardCount),
-		ChunkInterval:     "7d", // Default chunk interval
-		EnableColumnar:    cluster.EnableColumnar,
+		Enabled:            true,
+		DefaultShardCount:  int32(cluster.DefaultShardCount),
+		ChunkInterval:      "7d", // Default chunk interval
+		EnableColumnar:     cluster.EnableColumnar,
 		DefaultCompression: pb.CompressionType_COMPRESSION_ZSTD,
 	}
 

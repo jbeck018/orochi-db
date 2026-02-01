@@ -32,11 +32,11 @@ type ScalingDecision struct {
 type ScalingDirection string
 
 const (
-	ScalingDirectionNone  ScalingDirection = "none"
-	ScalingDirectionUp    ScalingDirection = "up"
-	ScalingDirectionDown  ScalingDirection = "down"
-	ScalingDirectionOut   ScalingDirection = "out"
-	ScalingDirectionIn    ScalingDirection = "in"
+	ScalingDirectionNone ScalingDirection = "none"
+	ScalingDirectionUp   ScalingDirection = "up"
+	ScalingDirectionDown ScalingDirection = "down"
+	ScalingDirectionOut  ScalingDirection = "out"
+	ScalingDirectionIn   ScalingDirection = "in"
 )
 
 // ScalingType indicates the type of scaling.
@@ -68,18 +68,18 @@ type Policy struct {
 
 // HorizontalPolicy defines horizontal scaling configuration.
 type HorizontalPolicy struct {
-	Enabled                  bool
-	MinReplicas              int32
-	MaxReplicas              int32
-	TargetCPUUtilization     float64
-	TargetMemoryUtilization  float64
-	TargetConnectionsPerPod  int64
-	TargetQueryLatencyMs     float64
-	ScaleUpCooldown          time.Duration
-	ScaleDownCooldown        time.Duration
-	ScaleUpStep              int32
-	ScaleDownStep            int32
-	StabilizationWindow      time.Duration
+	Enabled                 bool
+	MinReplicas             int32
+	MaxReplicas             int32
+	TargetCPUUtilization    float64
+	TargetMemoryUtilization float64
+	TargetConnectionsPerPod int64
+	TargetQueryLatencyMs    float64
+	ScaleUpCooldown         time.Duration
+	ScaleDownCooldown       time.Duration
+	ScaleUpStep             int32
+	ScaleDownStep           int32
+	StabilizationWindow     time.Duration
 }
 
 // VerticalPolicy defines vertical scaling configuration.
@@ -166,10 +166,10 @@ type ScheduledEvent struct {
 
 // CooldownTracker tracks cooldown periods for scaling operations.
 type CooldownTracker struct {
-	mu          sync.RWMutex
-	scaleUp     map[string]time.Time
-	scaleDown   map[string]time.Time
-	vertical    map[string]time.Time
+	mu           sync.RWMutex
+	scaleUp      map[string]time.Time
+	scaleDown    map[string]time.Time
+	vertical     map[string]time.Time
 	ruleSpecific map[string]time.Time
 }
 
@@ -293,11 +293,11 @@ func (c *CooldownTracker) TimeUntilScaleDown(clusterID, namespace string) time.D
 
 // PolicyEngine evaluates scaling policies.
 type PolicyEngine struct {
-	mu              sync.RWMutex
-	policies        map[string]*Policy
-	cooldowns       *CooldownTracker
-	metricsHistory  map[string]*metrics.MetricHistory
-	stabilization   map[string]*StabilizationWindow
+	mu             sync.RWMutex
+	policies       map[string]*Policy
+	cooldowns      *CooldownTracker
+	metricsHistory map[string]*metrics.MetricHistory
+	stabilization  map[string]*StabilizationWindow
 }
 
 // StabilizationWindow tracks metric values for stabilization.

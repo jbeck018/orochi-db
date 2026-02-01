@@ -98,18 +98,18 @@ type ScalingDefaults struct {
 
 // HorizontalDefaults holds default horizontal scaling parameters.
 type HorizontalDefaults struct {
-	MinReplicas              int32         `yaml:"minReplicas"`
-	MaxReplicas              int32         `yaml:"maxReplicas"`
-	TargetCPUUtilization     float64       `yaml:"targetCPUUtilization"`
-	TargetMemoryUtilization  float64       `yaml:"targetMemoryUtilization"`
-	TargetConnectionsPerPod  int64         `yaml:"targetConnectionsPerPod"`
-	TargetQueryLatencyMs     float64       `yaml:"targetQueryLatencyMs"`
-	ScaleUpCooldown          time.Duration `yaml:"scaleUpCooldown"`
-	ScaleDownCooldown        time.Duration `yaml:"scaleDownCooldown"`
-	ScaleUpStep              int32         `yaml:"scaleUpStep"`
-	ScaleDownStep            int32         `yaml:"scaleDownStep"`
-	ScaleUpThreshold         float64       `yaml:"scaleUpThreshold"`
-	ScaleDownThreshold       float64       `yaml:"scaleDownThreshold"`
+	MinReplicas             int32         `yaml:"minReplicas"`
+	MaxReplicas             int32         `yaml:"maxReplicas"`
+	TargetCPUUtilization    float64       `yaml:"targetCPUUtilization"`
+	TargetMemoryUtilization float64       `yaml:"targetMemoryUtilization"`
+	TargetConnectionsPerPod int64         `yaml:"targetConnectionsPerPod"`
+	TargetQueryLatencyMs    float64       `yaml:"targetQueryLatencyMs"`
+	ScaleUpCooldown         time.Duration `yaml:"scaleUpCooldown"`
+	ScaleDownCooldown       time.Duration `yaml:"scaleDownCooldown"`
+	ScaleUpStep             int32         `yaml:"scaleUpStep"`
+	ScaleDownStep           int32         `yaml:"scaleDownStep"`
+	ScaleUpThreshold        float64       `yaml:"scaleUpThreshold"`
+	ScaleDownThreshold      float64       `yaml:"scaleDownThreshold"`
 }
 
 // VerticalDefaults holds default vertical scaling parameters.
@@ -164,18 +164,18 @@ func DefaultConfig() *Config {
 			StabilizationWindow:  3 * time.Minute,
 			MaxConcurrentScaling: 5,
 			Horizontal: HorizontalDefaults{
-				MinReplicas:              1,
-				MaxReplicas:              10,
-				TargetCPUUtilization:     70.0,
-				TargetMemoryUtilization:  80.0,
-				TargetConnectionsPerPod:  100,
-				TargetQueryLatencyMs:     100.0,
-				ScaleUpCooldown:          60 * time.Second,
-				ScaleDownCooldown:        300 * time.Second,
-				ScaleUpStep:              2,
-				ScaleDownStep:            1,
-				ScaleUpThreshold:         1.1,
-				ScaleDownThreshold:       0.9,
+				MinReplicas:             1,
+				MaxReplicas:             10,
+				TargetCPUUtilization:    70.0,
+				TargetMemoryUtilization: 80.0,
+				TargetConnectionsPerPod: 100,
+				TargetQueryLatencyMs:    100.0,
+				ScaleUpCooldown:         60 * time.Second,
+				ScaleDownCooldown:       300 * time.Second,
+				ScaleUpStep:             2,
+				ScaleDownStep:           1,
+				ScaleUpThreshold:        1.1,
+				ScaleDownThreshold:      0.9,
 			},
 			Vertical: VerticalDefaults{
 				MinCPU:                  "250m",

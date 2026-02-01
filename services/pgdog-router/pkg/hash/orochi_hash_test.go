@@ -292,9 +292,9 @@ func TestShardDistribution(t *testing.T) {
 // TestHashValueInterface tests the generic HashValue function
 func TestHashValueInterface(t *testing.T) {
 	tests := []struct {
-		name    string
-		value   interface{}
-		wantOk  bool
+		name   string
+		value  interface{}
+		wantOk bool
 	}{
 		{"int16", int16(100), true},
 		{"int32", int32(100), true},
@@ -332,8 +332,8 @@ func TestRouter(t *testing.T) {
 
 	// Test routing methods return valid shard indices
 	tests := []struct {
-		name   string
-		route  func() int32
+		name  string
+		route func() int32
 	}{
 		{"RouteInt32", func() int32 { return router.RouteInt32(12345) }},
 		{"RouteInt64", func() int32 { return router.RouteInt64(9876543210) }},
@@ -405,11 +405,11 @@ func TestEdgeCases(t *testing.T) {
 
 	t.Run("unicode text", func(t *testing.T) {
 		testCases := []string{
-			"",            // Japanese
-			"",            // Chinese
-			"",               // Emoji
-			"Schon",             // German
-			"",             // Russian
+			"",      // Japanese
+			"",      // Chinese
+			"",      // Emoji
+			"Schon", // German
+			"",      // Russian
 		}
 		for _, s := range testCases {
 			hash := HashText(s)
