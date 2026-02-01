@@ -28,8 +28,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy extension source
-COPY extensions/postgres /tmp/orochi
+# Copy extension source (build context is extensions/postgres/)
+COPY . /tmp/orochi
 WORKDIR /tmp/orochi
 
 # Build and install extension
