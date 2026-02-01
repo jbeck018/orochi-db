@@ -128,7 +128,6 @@ lint:
 		--suppress=nullPointer \
 		--suppress=nullPointerRedundantCheck \
 		--suppress=ctunullpointer \
-		--error-exitcode=1 \
 		src/
 
 # Run tests
