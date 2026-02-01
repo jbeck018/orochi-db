@@ -14,11 +14,9 @@ import {
   Network,
   FileCode,
   Settings,
-  Terminal,
   CheckCircle,
   Cpu,
   HardDrive,
-  MemoryStick,
   Info,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -656,10 +654,10 @@ function BenchmarksPage(): React.JSX.Element {
             </div>
             <div className="flex gap-4">
               <Button variant="outline" asChild>
-                <Link to="/docs#benchmarks">
+                <a href="/docs#benchmarks">
                   View Docs
                   <ChevronRight className="ml-2 h-4 w-4" />
-                </Link>
+                </a>
               </Button>
               <Button asChild>
                 <a
