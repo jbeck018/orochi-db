@@ -442,6 +442,12 @@ function LandingPage(): React.JSX.Element {
             >
               Documentation
             </Link>
+            <Link
+              to="/benchmarks"
+              className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Benchmarks
+            </Link>
           </div>
           <div className="flex items-center gap-4">
             <Button variant="ghost" asChild>
@@ -703,6 +709,11 @@ function LandingPage(): React.JSX.Element {
                 <li>
                   <Link to="/docs" className="hover:text-foreground">
                     Documentation
+                  </Link>
+                </li>
+                <li>
+                  <Link to="/benchmarks" className="hover:text-foreground">
+                    Benchmarks
                   </Link>
                 </li>
               </ul>

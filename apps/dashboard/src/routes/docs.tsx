@@ -180,7 +180,7 @@ function DocsPage(): React.JSX.Element {
         <div className="flex gap-8">
           {/* Sidebar */}
           <aside className="hidden lg:block w-64 flex-shrink-0">
-            <div className="sticky top-24 space-y-6">
+            <div className="sticky top-24 space-y-6 max-h-[calc(100vh-6rem)] overflow-y-auto pb-8">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <input
