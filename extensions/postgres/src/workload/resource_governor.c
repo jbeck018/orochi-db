@@ -15,9 +15,12 @@
  *-------------------------------------------------------------------------
  */
 
+
+/* postgres.h must be included first */
+#include "postgres.h"
+
 #include "fmgr.h"
 #include "miscadmin.h"
-#include "postgres.h"
 #include "storage/ipc.h"
 #include "storage/lwlock.h"
 #include "storage/shmem.h"

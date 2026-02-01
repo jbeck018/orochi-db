@@ -18,8 +18,11 @@
  *-------------------------------------------------------------------------
  */
 
-#include "fmgr.h"
+
+/* postgres.h must be included first */
 #include "postgres.h"
+
+#include "fmgr.h"
 #include "utils/memutils.h"
 
 #include <math.h>

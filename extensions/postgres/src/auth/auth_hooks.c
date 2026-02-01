@@ -15,6 +15,10 @@
  *-------------------------------------------------------------------------
  */
 
+
+/* postgres.h must be included first */
+#include "postgres.h"
+
 #include "access/htup_details.h"
 #include "catalog/namespace.h"
 #include "executor/spi.h"
@@ -23,7 +27,6 @@
 #include "libpq/auth.h"
 #include "libpq/libpq-be.h"
 #include "miscadmin.h"
-#include "postgres.h"
 #include "postmaster/bgworker.h"
 #include "storage/ipc.h"
 #include "storage/shmem.h"

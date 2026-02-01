@@ -13,6 +13,10 @@
  *-------------------------------------------------------------------------
  */
 
+
+/* postgres.h must be included first */
+#include "postgres.h"
+
 #include "access/table.h"
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
@@ -23,7 +27,6 @@
 #include "funcapi.h"
 #include "miscadmin.h"
 #include "nodes/bitmapset.h"
-#include "postgres.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"

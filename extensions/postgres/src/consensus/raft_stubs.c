@@ -11,8 +11,11 @@
  *-------------------------------------------------------------------------
  */
 
-#include "fmgr.h"
+
+/* postgres.h must be included first */
 #include "postgres.h"
+
+#include "fmgr.h"
 #include "storage/lwlock.h"
 
 #include "raft.h"

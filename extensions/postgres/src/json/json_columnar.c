@@ -8,6 +8,10 @@
  *-------------------------------------------------------------------------
  */
 
+
+/* postgres.h must be included first */
+#include "postgres.h"
+
 #include "access/htup_details.h"
 #include "access/table.h"
 #include "access/tableam.h"
@@ -16,7 +20,6 @@
 #include "fmgr.h"
 #include "funcapi.h"
 #include "miscadmin.h"
-#include "postgres.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/datum.h"

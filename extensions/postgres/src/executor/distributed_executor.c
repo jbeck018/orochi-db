@@ -8,13 +8,16 @@
  *-------------------------------------------------------------------------
  */
 
+
+/* postgres.h must be included first */
+#include "postgres.h"
+
 #include "access/xact.h"
 #include "catalog/pg_type.h"
 #include "commands/dbcommands.h"
 #include "executor/executor.h"
 #include "libpq-fe.h"
 #include "miscadmin.h"
-#include "postgres.h"
 #include "storage/lwlock.h"
 #include "storage/proc.h"
 #include "utils/builtins.h"

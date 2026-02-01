@@ -18,9 +18,12 @@
  *-------------------------------------------------------------------------
  */
 
+
+/* postgres.h must be included first */
+#include "postgres.h"
+
 #include "fmgr.h"
 #include "lib/stringinfo.h"
-#include "postgres.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "varatt.h"

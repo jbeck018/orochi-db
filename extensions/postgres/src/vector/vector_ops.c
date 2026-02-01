@@ -8,10 +8,13 @@
  *-------------------------------------------------------------------------
  */
 
+
+/* postgres.h must be included first */
+#include "postgres.h"
+
 #include "fmgr.h"
 #include "lib/stringinfo.h"
 #include "libpq/pqformat.h"
-#include "postgres.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"

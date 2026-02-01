@@ -21,12 +21,15 @@
  *-------------------------------------------------------------------------
  */
 
+
+/* postgres.h must be included first */
+#include "postgres.h"
+
 #include "access/xact.h"
 #include "executor/spi.h"
 #include "fmgr.h"
 #include "funcapi.h"
 #include "miscadmin.h"
-#include "postgres.h"
 #include "postmaster/bgworker.h"
 #include "storage/ipc.h"
 #include "storage/latch.h"

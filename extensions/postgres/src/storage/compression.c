@@ -8,8 +8,11 @@
  *-------------------------------------------------------------------------
  */
 
-#include "common/pg_lzcompress.h"
+
+/* postgres.h must be included first */
 #include "postgres.h"
+
+#include "common/pg_lzcompress.h"
 
 #include <string.h>
 

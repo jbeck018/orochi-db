@@ -8,6 +8,10 @@
  *-------------------------------------------------------------------------
  */
 
+
+/* postgres.h must be included first */
+#include "postgres.h"
+
 #include "access/genam.h"
 #include "access/htup_details.h"
 #include "access/table.h"
@@ -27,7 +31,6 @@
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "parser/parse_utilcmd.h"
-#include "postgres.h"
 #include "storage/lmgr.h"
 #include "utils/array.h"
 #include "utils/builtins.h"

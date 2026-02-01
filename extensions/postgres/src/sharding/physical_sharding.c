@@ -12,6 +12,10 @@
  *-------------------------------------------------------------------------
  */
 
+
+/* postgres.h must be included first */
+#include "postgres.h"
+
 #include "access/htup_details.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_trigger.h"
@@ -19,7 +23,6 @@
 #include "executor/spi.h"
 #include "fmgr.h"
 #include "nodes/nodes.h"
-#include "postgres.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"

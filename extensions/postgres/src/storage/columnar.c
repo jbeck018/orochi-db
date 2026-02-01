@@ -8,6 +8,9 @@
  *-------------------------------------------------------------------------
  */
 
+/* postgres.h must be included first */
+#include "postgres.h"
+
 #include "access/heapam.h"
 #include "access/tableam.h"
 #include "access/xact.h"
@@ -20,7 +23,6 @@
 #include "fmgr.h"
 #include "miscadmin.h"
 #include "nodes/primnodes.h"
-#include "postgres.h"
 #include "storage/bufmgr.h"
 #include "storage/smgr.h"
 #include "utils/builtins.h"

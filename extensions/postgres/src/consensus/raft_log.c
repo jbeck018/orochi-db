@@ -18,8 +18,11 @@
  *-------------------------------------------------------------------------
  */
 
-#include "miscadmin.h"
+
+/* postgres.h must be included first */
 #include "postgres.h"
+
+#include "miscadmin.h"
 #include "storage/fd.h"
 #include "utils/memutils.h"
 #include "utils/timestamp.h"

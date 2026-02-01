@@ -14,6 +14,10 @@
  *-------------------------------------------------------------------------
  */
 
+
+/* postgres.h must be included first */
+#include "postgres.h"
+
 #include "access/heapam.h"
 #include "access/tableam.h"
 #include "access/xact.h"
@@ -26,7 +30,6 @@
 #include "funcapi.h"
 #include "miscadmin.h"
 #include "pgstat.h"
-#include "postgres.h"
 #include "postmaster/bgworker.h"
 #include "replication/logical.h"
 #include "replication/origin.h"

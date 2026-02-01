@@ -13,12 +13,15 @@
  *-------------------------------------------------------------------------
  */
 
+
+/* postgres.h must be included first */
+#include "postgres.h"
+
 #include "catalog/namespace.h"
 #include "executor/spi.h"
 #include "fmgr.h"
 #include "funcapi.h"
 #include "miscadmin.h"
-#include "postgres.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"

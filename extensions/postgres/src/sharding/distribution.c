@@ -8,11 +8,14 @@
  *-------------------------------------------------------------------------
  */
 
+
+/* postgres.h must be included first */
+#include "postgres.h"
+
 #include "access/htup_details.h"
 #include "catalog/pg_type.h"
 #include "executor/spi.h"
 #include "fmgr.h"
-#include "postgres.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "utils/syscache.h"

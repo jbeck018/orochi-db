@@ -17,6 +17,10 @@
  *-------------------------------------------------------------------------
  */
 
+
+/* postgres.h must be included first */
+#include "postgres.h"
+
 #include "access/table.h"
 #include "access/tableam.h"
 #include "executor/executor.h"
@@ -25,7 +29,6 @@
 #include "fmgr.h"
 #include "funcapi.h"
 #include "nodes/execnodes.h"
-#include "postgres.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/datum.h"

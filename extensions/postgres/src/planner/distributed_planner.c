@@ -8,6 +8,10 @@
  *-------------------------------------------------------------------------
  */
 
+
+/* postgres.h must be included first */
+#include "postgres.h"
+
 #include "access/htup_details.h"
 #include "access/stratnum.h"
 #include "catalog/pg_attribute.h"
@@ -20,7 +24,6 @@
 #include "optimizer/optimizer.h"
 #include "optimizer/planner.h"
 #include "parser/parsetree.h"
-#include "postgres.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"

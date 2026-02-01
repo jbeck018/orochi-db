@@ -8,6 +8,10 @@
  *-------------------------------------------------------------------------
  */
 
+
+/* postgres.h must be included first */
+#include "postgres.h"
+
 #include "access/xact.h"
 #include "catalog/pg_type.h"
 #include "commands/copy.h"
@@ -16,7 +20,6 @@
 #include "funcapi.h"
 #include "miscadmin.h"
 #include "pgstat.h"
-#include "postgres.h"
 #include "postmaster/bgworker.h"
 #include "storage/ipc.h"
 #include "storage/latch.h"

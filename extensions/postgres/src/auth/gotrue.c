@@ -14,13 +14,16 @@
  *-------------------------------------------------------------------------
  */
 
+
+/* postgres.h must be included first */
+#include "postgres.h"
+
 #include "access/xact.h"
 #include "executor/spi.h"
 #include "fmgr.h"
 #include "funcapi.h"
 #include "mb/pg_wchar.h"
 #include "miscadmin.h"
-#include "postgres.h"
 #include "storage/lwlock.h"
 #include "storage/shmem.h"
 #include "utils/builtins.h"

@@ -8,8 +8,11 @@
  *-------------------------------------------------------------------------
  */
 
-#include "fmgr.h"
+
+/* postgres.h must be included first */
 #include "postgres.h"
+
+#include "fmgr.h"
 #include <float.h>
 
 #include "access/genam.h"

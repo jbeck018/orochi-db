@@ -8,6 +8,10 @@
  *-------------------------------------------------------------------------
  */
 
+
+/* postgres.h must be included first */
+#include "postgres.h"
+
 #include "access/htup_details.h"
 #include "access/tupdesc.h"
 #include "catalog/pg_type.h"
@@ -15,7 +19,6 @@
 #include "fmgr.h"
 #include "miscadmin.h"
 #include "pgstat.h"
-#include "postgres.h"
 #include "postmaster/bgworker.h"
 #include "storage/fd.h"
 #include "storage/ipc.h"

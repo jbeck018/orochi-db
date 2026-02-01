@@ -14,10 +14,13 @@
  *-------------------------------------------------------------------------
  */
 
+
+/* postgres.h must be included first */
+#include "postgres.h"
+
 #include "commands/dbcommands.h"
 #include "libpq-fe.h"
 #include "miscadmin.h"
-#include "postgres.h"
 #include "storage/lwlock.h"
 #include "utils/builtins.h"
 #include "utils/memutils.h"

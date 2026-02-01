@@ -14,10 +14,13 @@
  *-------------------------------------------------------------------------
  */
 
+
+/* postgres.h must be included first */
+#include "postgres.h"
+
 #include "executor/spi.h"
 #include "fmgr.h"
 #include "funcapi.h"
-#include "postgres.h"
 #include "utils/builtins.h"
 #include "utils/jsonb.h"
 #include "utils/timestamp.h"

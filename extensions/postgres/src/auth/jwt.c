@@ -12,11 +12,14 @@
  *-------------------------------------------------------------------------
  */
 
+
+/* postgres.h must be included first */
+#include "postgres.h"
+
 #include "fmgr.h"
 #include "funcapi.h"
 #include "mb/pg_wchar.h"
 #include "miscadmin.h"
-#include "postgres.h"
 #include "utils/builtins.h"
 #include "utils/guc.h"
 #include "utils/jsonb.h"

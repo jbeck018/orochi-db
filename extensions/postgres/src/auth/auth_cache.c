@@ -16,12 +16,15 @@
  *-------------------------------------------------------------------------
  */
 
+
+/* postgres.h must be included first */
+#include "postgres.h"
+
 #include "catalog/pg_type.h"
 #include "executor/spi.h"
 #include "fmgr.h"
 #include "miscadmin.h"
 #include "pgstat.h"
-#include "postgres.h"
 #include "postmaster/bgworker.h"
 #include "postmaster/interrupt.h"
 #include "storage/ipc.h"

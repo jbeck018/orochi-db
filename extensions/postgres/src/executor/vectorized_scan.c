@@ -13,12 +13,15 @@
  *-------------------------------------------------------------------------
  */
 
+
+/* postgres.h must be included first */
+#include "postgres.h"
+
 #include "access/tableam.h"
 #include "catalog/pg_operator.h"
 #include "catalog/pg_type.h"
 #include "fmgr.h"
 #include "nodes/primnodes.h"
-#include "postgres.h"
 #include "utils/builtins.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"

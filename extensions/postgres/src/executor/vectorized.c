@@ -15,9 +15,12 @@
  *-------------------------------------------------------------------------
  */
 
+
+/* postgres.h must be included first */
+#include "postgres.h"
+
 #include "catalog/pg_type.h"
 #include "fmgr.h"
-#include "postgres.h"
 #include "utils/builtins.h"
 #include "utils/memutils.h"
 
