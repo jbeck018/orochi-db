@@ -99,7 +99,44 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // 404
+  // No index.html - generate HTML shell for SPA
+  // Find the main JS and CSS bundles
+  let mainJs = null;
+  let mainCss = null;
+  for (const [path] of fileIndex) {
+    if (path.includes('/assets/main-') && path.endsWith('.js')) {
+      mainJs = path;
+    }
+    if (path.includes('/assets/main-') && path.endsWith('.css')) {
+      mainCss = path;
+    }
+  }
+
+  if (mainJs) {
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HowlerOps Dashboard</title>
+  <meta name="description" content="HowlerOps - OrochiDB Management Platform" />
+  <link rel="icon" type="image/png" href="/assets/howlerops-icon-qz7Q_0BK.png" />
+  ${mainCss ? `<link rel="stylesheet" href="${mainCss}" />` : ''}
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="${mainJs}"></script>
+</body>
+</html>`;
+    res.writeHead(200, {
+      'Content-Type': 'text/html',
+      'Content-Length': Buffer.byteLength(html)
+    });
+    res.end(html);
+    return;
+  }
+
+  // 404 - no index.html and no main.js found
   res.writeHead(404);
   res.end('Not Found');
 });
