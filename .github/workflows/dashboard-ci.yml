@@ -61,7 +61,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.check.outputs.exists == 'true'
-        run: npm ci --legacy-peer-deps
+        run: npm install --legacy-peer-deps
         working-directory: ${{ github.workspace }}
 
       - name: Run TypeScript type checking
@@ -111,7 +111,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.check.outputs.exists == 'true'
-        run: npm ci --legacy-peer-deps
+        run: npm install --legacy-peer-deps
         working-directory: ${{ github.workspace }}
 
       - name: Build application
@@ -170,7 +170,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.check.outputs.exists == 'true'
-        run: npm ci --legacy-peer-deps
+        run: npm install --legacy-peer-deps
         working-directory: ${{ github.workspace }}
 
       - name: Run unit tests
@@ -221,7 +221,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.check.outputs.exists == 'true'
-        run: npm ci --legacy-peer-deps
+        run: npm install --legacy-peer-deps
         working-directory: ${{ github.workspace }}
 
       - name: Download build artifacts
@@ -336,7 +336,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.check.outputs.exists == 'true'
-        run: npm ci --legacy-peer-deps
+        run: npm install --legacy-peer-deps
         working-directory: ${{ github.workspace }}
 
       - name: Download build artifacts
