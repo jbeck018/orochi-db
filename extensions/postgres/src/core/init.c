@@ -15,11 +15,15 @@
  *-------------------------------------------------------------------------
  */
 
+/* postgres.h must be included first */
+#include "postgres.h"
+
 #include "access/xact.h"
+#include "executor/executor.h"
 #include "fmgr.h"
 #include "lib/stringinfo.h"
 #include "miscadmin.h"
-#include "postgres.h"
+#include "optimizer/planner.h"
 #include "postmaster/bgworker.h"
 #include "storage/ipc.h"
 #include "storage/lwlock.h"
