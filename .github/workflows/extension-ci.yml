@@ -288,24 +288,24 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            test/unit/*.o
-            test/unit/run_tests
-          key: unit-tests-${{ runner.os }}-${{ hashFiles('test/unit/**/*.c', 'test/unit/**/*.h', 'test/unit/Makefile') }}
+            extensions/postgres/test/unit/*.o
+            extensions/postgres/test/unit/run_tests
+          key: unit-tests-${{ runner.os }}-${{ hashFiles('extensions/postgres/test/unit/**/*.c', 'extensions/postgres/test/unit/**/*.h', 'extensions/postgres/test/unit/Makefile') }}
           restore-keys: |
             unit-tests-${{ runner.os }}-
 
       - name: Build unit tests
-        working-directory: test/unit
+        working-directory: extensions/postgres/test/unit
         run: |
           make clean || true
           make
 
       - name: Run unit tests
-        working-directory: test/unit
+        working-directory: extensions/postgres/test/unit
         run: ./run_tests
 
       - name: Run unit tests (verbose on failure)
-        working-directory: test/unit
+        working-directory: extensions/postgres/test/unit
         run: ./run_tests --verbose
         if: failure()
 
