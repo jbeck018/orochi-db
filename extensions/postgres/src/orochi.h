@@ -17,13 +17,15 @@
 #ifndef OROCHI_H
 #define OROCHI_H
 
+/* postgres.h must be included first in any PostgreSQL extension */
+#include "postgres.h"
+
 #include "access/heapam.h"
 #include "access/tableam.h"
 #include "catalog/pg_type.h"
 #include "fmgr.h"
 #include "nodes/execnodes.h"
 #include "nodes/pathnodes.h"
-#include "postgres.h"
 #include "storage/lwlock.h"
 #include "utils/relcache.h"
 #include "utils/timestamp.h"

@@ -8,6 +8,9 @@
  *-------------------------------------------------------------------------
  */
 
+/* postgres.h must be included first */
+#include "postgres.h"
+
 #include "access/htup_details.h"
 #include "access/xact.h"
 #include "catalog/namespace.h"
@@ -15,7 +18,6 @@
 #include "commands/extension.h"
 #include "executor/spi.h"
 #include "fmgr.h"
-#include "postgres.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
