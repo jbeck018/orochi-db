@@ -46,11 +46,8 @@
  * For PG16/17, we fall back to the standard PG_MODULE_MAGIC.
  */
 #ifdef PG_MODULE_MAGIC_EXT
-#define OROCHI_MODULE_MAGIC \
-    PG_MODULE_MAGIC_EXT( \
-        .name = "orochi", \
-        .version = OROCHI_VERSION_STRING \
-    )
+#define OROCHI_MODULE_MAGIC                                                    \
+  PG_MODULE_MAGIC_EXT(.name = "orochi", .version = OROCHI_VERSION_STRING)
 #else
 #define OROCHI_MODULE_MAGIC PG_MODULE_MAGIC
 #endif
@@ -184,32 +181,31 @@
  * The LWLock API has been stable across PG16-18, but we define
  * a wrapper for future compatibility.
  */
-#define OROCHI_LWLOCK_REGISTER_TRANCHE(id, tranche) \
-    LWLockRegisterTranche(id, tranche)
+#define OROCHI_LWLOCK_REGISTER_TRANCHE(id, tranche)                            \
+  LWLockRegisterTranche(id, tranche)
 
 /*
  * Memory context compatibility
  *
  * Memory context API is stable across PG16-18.
  */
-#define OROCHI_MEMORY_CONTEXT_SWITCH(ctx) \
-    MemoryContextSwitchTo(ctx)
+#define OROCHI_MEMORY_CONTEXT_SWITCH(ctx) MemoryContextSwitchTo(ctx)
 
 /*
  * Hash table creation compatibility
  *
  * Hash table API is stable across PG16-18.
  */
-#define OROCHI_HASH_CREATE(name, nelem, info, flags) \
-    hash_create(name, nelem, info, flags)
+#define OROCHI_HASH_CREATE(name, nelem, info, flags)                           \
+  hash_create(name, nelem, info, flags)
 
 /*
  * Background worker flags compatibility
  *
  * Background worker API is stable across PG16-18.
  */
-#define OROCHI_BGW_FLAGS \
-    (BGWORKER_SHMEM_ACCESS | BGWORKER_BACKEND_DATABASE_CONNECTION)
+#define OROCHI_BGW_FLAGS                                                       \
+  (BGWORKER_SHMEM_ACCESS | BGWORKER_BACKEND_DATABASE_CONNECTION)
 
 /*
  * GUC context compatibility
@@ -217,7 +213,7 @@
  * GUC API is stable across PG16-18.
  */
 #define OROCHI_GUC_USERSET PGC_USERSET
-#define OROCHI_GUC_SIGHUP  PGC_SIGHUP
+#define OROCHI_GUC_SIGHUP PGC_SIGHUP
 #define OROCHI_GUC_POSTMASTER PGC_POSTMASTER
 
 /*
@@ -227,7 +223,8 @@
  * We define these for documentation and future-proofing.
  */
 #define OROCHI_EXECUTOR_START_HOOK_ARGS QueryDesc *queryDesc, int eflags
-#define OROCHI_EXECUTOR_RUN_HOOK_ARGS QueryDesc *queryDesc, ScanDirection direction, uint64 count, bool execute_once
+#define OROCHI_EXECUTOR_RUN_HOOK_ARGS                                          \
+  QueryDesc *queryDesc, ScanDirection direction, uint64 count, bool execute_once
 #define OROCHI_EXECUTOR_FINISH_HOOK_ARGS QueryDesc *queryDesc
 #define OROCHI_EXECUTOR_END_HOOK_ARGS QueryDesc *queryDesc
 
@@ -236,7 +233,9 @@
  *
  * Planner hooks have been stable across PG16-18.
  */
-#define OROCHI_PLANNER_HOOK_ARGS Query *parse, const char *query_string, int cursorOptions, ParamListInfo boundParams
+#define OROCHI_PLANNER_HOOK_ARGS                                               \
+  Query *parse, const char *query_string, int cursorOptions,                   \
+      ParamListInfo boundParams
 
 /*
  * Utility for runtime version checking
@@ -244,19 +243,15 @@
  * Returns true if the running PostgreSQL version is at least the specified
  * major version.
  */
-static inline bool
-orochi_pg_version_at_least(int major_version)
-{
-    return (PG_VERSION_NUM / 10000) >= major_version;
+static inline bool orochi_pg_version_at_least(int major_version) {
+  return (PG_VERSION_NUM / 10000) >= major_version;
 }
 
 /*
  * Get the PostgreSQL major version number
  */
-static inline int
-orochi_pg_major_version(void)
-{
-    return PG_VERSION_NUM / 10000;
+static inline int orochi_pg_major_version(void) {
+  return PG_VERSION_NUM / 10000;
 }
 
 /*
@@ -264,13 +259,16 @@ orochi_pg_major_version(void)
  *
  * Call this during initialization to log which PG18 features are available.
  */
-#define OROCHI_LOG_COMPAT_INFO() \
-    do { \
-        elog(DEBUG1, "Orochi DB compiled for PostgreSQL %d", PG_VERSION_NUM / 10000); \
-        elog(DEBUG1, "  AIO support: %s", OROCHI_HAS_AIO ? "yes" : "no"); \
-        elog(DEBUG1, "  Temporal constraints: %s", OROCHI_HAS_TEMPORAL_CONSTRAINTS ? "yes" : "no"); \
-        elog(DEBUG1, "  UUIDv7: %s", OROCHI_HAS_UUIDV7 ? "yes" : "no"); \
-        elog(DEBUG1, "  EXPLAIN hooks: %s", OROCHI_HAS_EXPLAIN_HOOKS ? "yes" : "no"); \
-    } while (0)
+#define OROCHI_LOG_COMPAT_INFO()                                               \
+  do {                                                                         \
+    elog(DEBUG1, "Orochi DB compiled for PostgreSQL %d",                       \
+         PG_VERSION_NUM / 10000);                                              \
+    elog(DEBUG1, "  AIO support: %s", OROCHI_HAS_AIO ? "yes" : "no");          \
+    elog(DEBUG1, "  Temporal constraints: %s",                                 \
+         OROCHI_HAS_TEMPORAL_CONSTRAINTS ? "yes" : "no");                      \
+    elog(DEBUG1, "  UUIDv7: %s", OROCHI_HAS_UUIDV7 ? "yes" : "no");            \
+    elog(DEBUG1, "  EXPLAIN hooks: %s",                                        \
+         OROCHI_HAS_EXPLAIN_HOOKS ? "yes" : "no");                             \
+  } while (0)
 
 #endif /* OROCHI_COMPAT_H */

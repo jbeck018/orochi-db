@@ -16,10 +16,10 @@
 #ifndef OROCHI_JSON_INDEX_H
 #define OROCHI_JSON_INDEX_H
 
-#include "postgres.h"
-#include "fmgr.h"
 #include "access/gin.h"
+#include "fmgr.h"
 #include "nodes/pg_list.h"
+#include "postgres.h"
 #include "utils/jsonb.h"
 
 #include "../orochi.h"
@@ -29,19 +29,19 @@
  * ============================================================ */
 
 /* Maximum number of paths to track per table */
-#define JSON_INDEX_MAX_TRACKED_PATHS        1000
+#define JSON_INDEX_MAX_TRACKED_PATHS 1000
 
 /* Minimum access count before suggesting index */
-#define JSON_INDEX_MIN_ACCESS_COUNT         100
+#define JSON_INDEX_MIN_ACCESS_COUNT 100
 
 /* Default selectivity threshold for index recommendation */
-#define JSON_INDEX_DEFAULT_SELECTIVITY      0.1
+#define JSON_INDEX_DEFAULT_SELECTIVITY 0.1
 
 /* Maximum path depth for indexing */
-#define JSON_INDEX_MAX_PATH_DEPTH           16
+#define JSON_INDEX_MAX_PATH_DEPTH 16
 
 /* Path analysis sample size */
-#define JSON_INDEX_SAMPLE_SIZE              10000
+#define JSON_INDEX_SAMPLE_SIZE 10000
 
 /* ============================================================
  * JSON Path Index Types
@@ -50,27 +50,25 @@
 /*
  * JsonIndexType - Type of JSON index
  */
-typedef enum JsonIndexType
-{
-    JSON_INDEX_GIN = 0,           /* GIN index for containment queries */
-    JSON_INDEX_BTREE,             /* B-tree for extracted scalar values */
-    JSON_INDEX_HASH,              /* Hash index for equality on paths */
-    JSON_INDEX_EXPRESSION,        /* Expression index on specific paths */
-    JSON_INDEX_PARTIAL            /* Partial index with JSON condition */
+typedef enum JsonIndexType {
+  JSON_INDEX_GIN = 0,    /* GIN index for containment queries */
+  JSON_INDEX_BTREE,      /* B-tree for extracted scalar values */
+  JSON_INDEX_HASH,       /* Hash index for equality on paths */
+  JSON_INDEX_EXPRESSION, /* Expression index on specific paths */
+  JSON_INDEX_PARTIAL     /* Partial index with JSON condition */
 } JsonIndexType;
 
 /*
  * JsonPathType - Type of value at a JSON path
  */
-typedef enum JsonPathType
-{
-    JSON_PATH_NULL = 0,
-    JSON_PATH_STRING,
-    JSON_PATH_NUMBER,
-    JSON_PATH_BOOLEAN,
-    JSON_PATH_ARRAY,
-    JSON_PATH_OBJECT,
-    JSON_PATH_MIXED               /* Mixed types at this path */
+typedef enum JsonPathType {
+  JSON_PATH_NULL = 0,
+  JSON_PATH_STRING,
+  JSON_PATH_NUMBER,
+  JSON_PATH_BOOLEAN,
+  JSON_PATH_ARRAY,
+  JSON_PATH_OBJECT,
+  JSON_PATH_MIXED /* Mixed types at this path */
 } JsonPathType;
 
 /* ============================================================
@@ -80,32 +78,30 @@ typedef enum JsonPathType
 /*
  * JsonPathStats - Statistics for a single JSON path
  */
-typedef struct JsonPathStats
-{
-    char               *path;               /* JSON path expression */
-    JsonPathType        value_type;         /* Predominant value type */
-    int64               access_count;       /* Number of accesses */
-    int64               null_count;         /* Number of null values */
-    int64               distinct_count;     /* Estimated distinct values */
-    double              selectivity;        /* Estimated selectivity */
-    double              avg_value_size;     /* Average value size in bytes */
-    TimestampTz         first_seen;         /* First access timestamp */
-    TimestampTz         last_accessed;      /* Last access timestamp */
-    bool                is_indexed;         /* Currently indexed? */
-    JsonIndexType       recommended_index;  /* Recommended index type */
+typedef struct JsonPathStats {
+  char *path;                      /* JSON path expression */
+  JsonPathType value_type;         /* Predominant value type */
+  int64 access_count;              /* Number of accesses */
+  int64 null_count;                /* Number of null values */
+  int64 distinct_count;            /* Estimated distinct values */
+  double selectivity;              /* Estimated selectivity */
+  double avg_value_size;           /* Average value size in bytes */
+  TimestampTz first_seen;          /* First access timestamp */
+  TimestampTz last_accessed;       /* Last access timestamp */
+  bool is_indexed;                 /* Currently indexed? */
+  JsonIndexType recommended_index; /* Recommended index type */
 } JsonPathStats;
 
 /*
  * JsonPathStatsCollection - Collection of path statistics for a table
  */
-typedef struct JsonPathStatsCollection
-{
-    Oid                 table_oid;          /* Table OID */
-    int16               column_attnum;      /* JSONB column attribute number */
-    int32               path_count;         /* Number of tracked paths */
-    JsonPathStats      *paths;              /* Array of path statistics */
-    int64               total_rows;         /* Total rows analyzed */
-    TimestampTz         last_analyzed;      /* Last analysis timestamp */
+typedef struct JsonPathStatsCollection {
+  Oid table_oid;             /* Table OID */
+  int16 column_attnum;       /* JSONB column attribute number */
+  int32 path_count;          /* Number of tracked paths */
+  JsonPathStats *paths;      /* Array of path statistics */
+  int64 total_rows;          /* Total rows analyzed */
+  TimestampTz last_analyzed; /* Last analysis timestamp */
 } JsonPathStatsCollection;
 
 /* ============================================================
@@ -115,34 +111,32 @@ typedef struct JsonPathStatsCollection
 /*
  * JsonIndexInfo - Information about a JSON index
  */
-typedef struct JsonIndexInfo
-{
-    Oid                 index_oid;          /* PostgreSQL index OID */
-    Oid                 table_oid;          /* Parent table OID */
-    int16               column_attnum;      /* JSONB column attribute number */
-    char               *index_name;         /* Index name */
-    JsonIndexType       index_type;         /* Type of index */
-    char              **paths;              /* Indexed paths */
-    int32               path_count;         /* Number of indexed paths */
-    bool                is_unique;          /* Is unique index? */
-    bool                is_partial;         /* Is partial index? */
-    char               *partial_predicate; /* Partial index predicate */
-    int64               size_bytes;         /* Index size */
-    TimestampTz         created_at;         /* Creation timestamp */
+typedef struct JsonIndexInfo {
+  Oid index_oid;            /* PostgreSQL index OID */
+  Oid table_oid;            /* Parent table OID */
+  int16 column_attnum;      /* JSONB column attribute number */
+  char *index_name;         /* Index name */
+  JsonIndexType index_type; /* Type of index */
+  char **paths;             /* Indexed paths */
+  int32 path_count;         /* Number of indexed paths */
+  bool is_unique;           /* Is unique index? */
+  bool is_partial;          /* Is partial index? */
+  char *partial_predicate;  /* Partial index predicate */
+  int64 size_bytes;         /* Index size */
+  TimestampTz created_at;   /* Creation timestamp */
 } JsonIndexInfo;
 
 /*
  * JsonIndexRecommendation - Index recommendation from advisor
  */
-typedef struct JsonIndexRecommendation
-{
-    char               *path;               /* JSON path to index */
-    JsonIndexType       index_type;         /* Recommended index type */
-    double              estimated_benefit;  /* Estimated query speedup */
-    int64               estimated_size;     /* Estimated index size */
-    char               *create_statement;   /* DDL to create index */
-    char               *reason;             /* Explanation for recommendation */
-    int32               priority;           /* Priority (1 = highest) */
+typedef struct JsonIndexRecommendation {
+  char *path;               /* JSON path to index */
+  JsonIndexType index_type; /* Recommended index type */
+  double estimated_benefit; /* Estimated query speedup */
+  int64 estimated_size;     /* Estimated index size */
+  char *create_statement;   /* DDL to create index */
+  char *reason;             /* Explanation for recommendation */
+  int32 priority;           /* Priority (1 = highest) */
 } JsonIndexRecommendation;
 
 /* ============================================================
@@ -162,7 +156,8 @@ extern Oid json_index_create(Oid table_oid, int16 column_attnum,
 extern Oid json_index_create_with_options(Oid table_oid, int16 column_attnum,
                                           const char **paths, int path_count,
                                           JsonIndexType index_type,
-                                          bool is_unique, const char *predicate);
+                                          bool is_unique,
+                                          const char *predicate);
 
 /*
  * Drop a JSON path index
@@ -197,9 +192,8 @@ extern void json_index_free_info(JsonIndexInfo *info);
 /*
  * Analyze JSON paths in a table
  */
-extern JsonPathStatsCollection *json_index_analyze_paths(Oid table_oid,
-                                                         int16 column_attnum,
-                                                         int sample_size);
+extern JsonPathStatsCollection *
+json_index_analyze_paths(Oid table_oid, int16 column_attnum, int sample_size);
 
 /*
  * Record path access for statistics
@@ -210,9 +204,8 @@ extern void json_index_record_access(Oid table_oid, int16 column_attnum,
 /*
  * Get path statistics
  */
-extern JsonPathStats *json_index_get_path_stats(Oid table_oid,
-                                                int16 column_attnum,
-                                                const char *path);
+extern JsonPathStats *
+json_index_get_path_stats(Oid table_oid, int16 column_attnum, const char *path);
 
 /*
  * Get all path statistics for a column

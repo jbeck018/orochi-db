@@ -22,50 +22,46 @@
 #ifndef OROCHI_TIERED_STORAGE_H
 #define OROCHI_TIERED_STORAGE_H
 
-#include "postgres.h"
 #include "../orochi.h"
+#include "postgres.h"
 
 /* ============================================================
  * S3 Client Structures
  * ============================================================ */
 
-typedef struct S3Client
-{
-    char               *endpoint;
-    char               *bucket;
-    char               *access_key;
-    char               *secret_key;
-    char               *region;
-    bool                use_ssl;
-    int                 timeout_ms;
-    void               *curl_handle;        /* CURL handle */
+typedef struct S3Client {
+  char *endpoint;
+  char *bucket;
+  char *access_key;
+  char *secret_key;
+  char *region;
+  bool use_ssl;
+  int timeout_ms;
+  void *curl_handle; /* CURL handle */
 } S3Client;
 
-typedef struct S3Object
-{
-    char               *key;
-    char               *etag;
-    int64               size;
-    TimestampTz         last_modified;
-    char               *content_type;
-    char               *storage_class;
+typedef struct S3Object {
+  char *key;
+  char *etag;
+  int64 size;
+  TimestampTz last_modified;
+  char *content_type;
+  char *storage_class;
 } S3Object;
 
-typedef struct S3UploadResult
-{
-    bool                success;
-    char               *etag;
-    char               *error_message;
-    int                 http_status;
+typedef struct S3UploadResult {
+  bool success;
+  char *etag;
+  char *error_message;
+  int http_status;
 } S3UploadResult;
 
-typedef struct S3DownloadResult
-{
-    bool                success;
-    char               *data;
-    int64               size;
-    char               *error_message;
-    int                 http_status;
+typedef struct S3DownloadResult {
+  bool success;
+  char *data;
+  int64 size;
+  char *error_message;
+  int http_status;
 } S3DownloadResult;
 
 /* ============================================================
@@ -75,43 +71,40 @@ typedef struct S3DownloadResult
 /*
  * Data location in tiered storage
  */
-typedef struct TieredLocation
-{
-    OrochiStorageTier   tier;
-    char               *local_path;         /* For HOT/WARM */
-    char               *s3_key;             /* For COLD/FROZEN */
-    int64               size_bytes;
-    bool                is_compressed;
-    OrochiCompressionType compression;
+typedef struct TieredLocation {
+  OrochiStorageTier tier;
+  char *local_path; /* For HOT/WARM */
+  char *s3_key;     /* For COLD/FROZEN */
+  int64 size_bytes;
+  bool is_compressed;
+  OrochiCompressionType compression;
 } TieredLocation;
 
 /*
  * Tier transition record
  */
-typedef struct TierTransition
-{
-    int64               transition_id;
-    int64               chunk_id;
-    OrochiStorageTier   from_tier;
-    OrochiStorageTier   to_tier;
-    TimestampTz         started_at;
-    TimestampTz         completed_at;
-    int64               bytes_moved;
-    bool                success;
-    char               *error_message;
+typedef struct TierTransition {
+  int64 transition_id;
+  int64 chunk_id;
+  OrochiStorageTier from_tier;
+  OrochiStorageTier to_tier;
+  TimestampTz started_at;
+  TimestampTz completed_at;
+  int64 bytes_moved;
+  bool success;
+  char *error_message;
 } TierTransition;
 
 /*
  * Access statistics for tiering decisions
  */
-typedef struct AccessStats
-{
-    int64               chunk_id;
-    int64               read_count;
-    int64               write_count;
-    TimestampTz         last_read;
-    TimestampTz         last_write;
-    TimestampTz         created_at;
+typedef struct AccessStats {
+  int64 chunk_id;
+  int64 read_count;
+  int64 write_count;
+  TimestampTz last_read;
+  TimestampTz last_write;
+  TimestampTz created_at;
 } AccessStats;
 
 /* ============================================================
@@ -122,11 +115,11 @@ typedef struct AccessStats
  * Generate AWS Signature V4 for S3 requests
  * Used internally by S3 upload/download functions
  */
-extern char *generate_aws_signature_v4(S3Client *client, const char *method,
-                                        const char *uri, const char *query_string,
-                                        const char *payload, size_t payload_len,
-                                        const char *date_stamp, const char *amz_date,
-                                        char **out_authorization);
+extern char *
+generate_aws_signature_v4(S3Client *client, const char *method, const char *uri,
+                          const char *query_string, const char *payload,
+                          size_t payload_len, const char *date_stamp,
+                          const char *amz_date, char **out_authorization);
 
 /*
  * Create S3 client from configuration
@@ -178,10 +171,9 @@ extern S3Object *s3_head_object(S3Client *client, const char *key);
 /*
  * Multipart upload part tracking
  */
-typedef struct S3MultipartPart
-{
-    int         part_number;
-    char       *etag;
+typedef struct S3MultipartPart {
+  int part_number;
+  char *etag;
 } S3MultipartPart;
 
 /*
@@ -191,8 +183,8 @@ extern char *s3_multipart_upload_start(S3Client *client, const char *key);
 
 /* Returns ETag on success, NULL on failure - use this for proper uploads */
 extern char *s3_multipart_upload_part_ex(S3Client *client, const char *key,
-                                          const char *upload_id, int part_number,
-                                          const char *data, int64 size);
+                                         const char *upload_id, int part_number,
+                                         const char *data, int64 size);
 
 /* Legacy wrapper - returns bool but doesn't track ETags (deprecated) */
 extern bool s3_multipart_upload_part(S3Client *client, const char *key,
@@ -200,10 +192,11 @@ extern bool s3_multipart_upload_part(S3Client *client, const char *key,
                                      const char *data, int64 size);
 
 /* Complete upload with parts array containing ETags - USE THIS */
-extern bool s3_multipart_upload_complete_with_parts(S3Client *client, const char *key,
-                                                     const char *upload_id,
-                                                     S3MultipartPart *parts,
-                                                     int num_parts);
+extern bool s3_multipart_upload_complete_with_parts(S3Client *client,
+                                                    const char *key,
+                                                    const char *upload_id,
+                                                    S3MultipartPart *parts,
+                                                    int num_parts);
 
 /* Legacy - will fail without ETags (deprecated) */
 extern bool s3_multipart_upload_complete(S3Client *client, const char *key,
@@ -219,8 +212,7 @@ extern void s3_multipart_upload_abort(S3Client *client, const char *key,
 /*
  * Set tiering policy for table
  */
-extern void orochi_set_tiering_policy(Oid table_oid,
-                                      Interval *hot_to_warm,
+extern void orochi_set_tiering_policy(Oid table_oid, Interval *hot_to_warm,
                                       Interval *warm_to_cold,
                                       Interval *cold_to_frozen);
 

@@ -18,8 +18,8 @@
 #ifndef OROCHI_JWT_H
 #define OROCHI_JWT_H
 
-#include "postgres.h"
 #include "fmgr.h"
+#include "postgres.h"
 #include "utils/jsonb.h"
 #include "utils/timestamp.h"
 
@@ -27,153 +27,144 @@
  * JWT Algorithm Types
  * Supported signing algorithms per RFC 7518
  * ============================================================ */
-typedef enum OrochiJwtAlgorithm
-{
-    OROCHI_JWT_ALG_NONE = 0,     /* Unsigned (not recommended) */
-    OROCHI_JWT_HS256,            /* HMAC-SHA256 */
-    OROCHI_JWT_HS384,            /* HMAC-SHA384 */
-    OROCHI_JWT_HS512,            /* HMAC-SHA512 */
-    OROCHI_JWT_RS256,            /* RSA-SHA256 */
-    OROCHI_JWT_RS384,            /* RSA-SHA384 */
-    OROCHI_JWT_RS512,            /* RSA-SHA512 */
-    OROCHI_JWT_ES256,            /* ECDSA-SHA256 */
-    OROCHI_JWT_ES384,            /* ECDSA-SHA384 */
-    OROCHI_JWT_ES512             /* ECDSA-SHA512 */
+typedef enum OrochiJwtAlgorithm {
+  OROCHI_JWT_ALG_NONE = 0, /* Unsigned (not recommended) */
+  OROCHI_JWT_HS256,        /* HMAC-SHA256 */
+  OROCHI_JWT_HS384,        /* HMAC-SHA384 */
+  OROCHI_JWT_HS512,        /* HMAC-SHA512 */
+  OROCHI_JWT_RS256,        /* RSA-SHA256 */
+  OROCHI_JWT_RS384,        /* RSA-SHA384 */
+  OROCHI_JWT_RS512,        /* RSA-SHA512 */
+  OROCHI_JWT_ES256,        /* ECDSA-SHA256 */
+  OROCHI_JWT_ES384,        /* ECDSA-SHA384 */
+  OROCHI_JWT_ES512         /* ECDSA-SHA512 */
 } OrochiJwtAlgorithm;
 
 /* ============================================================
  * JWT Validation Status
  * ============================================================ */
-typedef enum OrochiJwtStatus
-{
-    OROCHI_JWT_STATUS_VALID = 0,
-    OROCHI_JWT_STATUS_INVALID_FORMAT,
-    OROCHI_JWT_STATUS_INVALID_HEADER,
-    OROCHI_JWT_STATUS_INVALID_PAYLOAD,
-    OROCHI_JWT_STATUS_INVALID_SIGNATURE,
-    OROCHI_JWT_STATUS_EXPIRED,
-    OROCHI_JWT_STATUS_NOT_YET_VALID,
-    OROCHI_JWT_STATUS_UNSUPPORTED_ALGORITHM,
-    OROCHI_JWT_STATUS_DECODE_ERROR,
-    OROCHI_JWT_STATUS_VERIFICATION_ERROR
+typedef enum OrochiJwtStatus {
+  OROCHI_JWT_STATUS_VALID = 0,
+  OROCHI_JWT_STATUS_INVALID_FORMAT,
+  OROCHI_JWT_STATUS_INVALID_HEADER,
+  OROCHI_JWT_STATUS_INVALID_PAYLOAD,
+  OROCHI_JWT_STATUS_INVALID_SIGNATURE,
+  OROCHI_JWT_STATUS_EXPIRED,
+  OROCHI_JWT_STATUS_NOT_YET_VALID,
+  OROCHI_JWT_STATUS_UNSUPPORTED_ALGORITHM,
+  OROCHI_JWT_STATUS_DECODE_ERROR,
+  OROCHI_JWT_STATUS_VERIFICATION_ERROR
 } OrochiJwtStatus;
 
 /* ============================================================
  * JWT Header Structure
  * Contains algorithm and token type information
  * ============================================================ */
-typedef struct OrochiJwtHeader
-{
-    OrochiJwtAlgorithm  alg;            /* Signing algorithm */
-    char               *typ;            /* Token type (usually "JWT") */
-    char               *kid;            /* Key ID for key rotation */
-    char               *raw_json;       /* Original JSON string */
+typedef struct OrochiJwtHeader {
+  OrochiJwtAlgorithm alg; /* Signing algorithm */
+  char *typ;              /* Token type (usually "JWT") */
+  char *kid;              /* Key ID for key rotation */
+  char *raw_json;         /* Original JSON string */
 } OrochiJwtHeader;
 
 /* ============================================================
  * Standard JWT Claims (RFC 7519)
  * ============================================================ */
-typedef struct OrochiJwtStandardClaims
-{
-    /* Registered claims */
-    char           *iss;            /* Issuer */
-    char           *sub;            /* Subject (user ID) */
-    char           *aud;            /* Audience */
-    TimestampTz     exp;            /* Expiration time */
-    TimestampTz     nbf;            /* Not before time */
-    TimestampTz     iat;            /* Issued at time */
-    char           *jti;            /* JWT ID (unique identifier) */
+typedef struct OrochiJwtStandardClaims {
+  /* Registered claims */
+  char *iss;       /* Issuer */
+  char *sub;       /* Subject (user ID) */
+  char *aud;       /* Audience */
+  TimestampTz exp; /* Expiration time */
+  TimestampTz nbf; /* Not before time */
+  TimestampTz iat; /* Issued at time */
+  char *jti;       /* JWT ID (unique identifier) */
 
-    /* Unix timestamps for direct comparison */
-    int64           exp_unix;
-    int64           nbf_unix;
-    int64           iat_unix;
+  /* Unix timestamps for direct comparison */
+  int64 exp_unix;
+  int64 nbf_unix;
+  int64 iat_unix;
 } OrochiJwtStandardClaims;
 
 /* ============================================================
  * Custom JWT Claims Structure
  * For application-specific claims (auth context)
  * ============================================================ */
-typedef struct OrochiJwtCustomClaims
-{
-    /* Supabase/GoTrue compatible claims */
-    char           *email;          /* User email */
-    char           *phone;          /* User phone */
-    char           *role;           /* User role */
-    char           *session_id;     /* Session identifier */
-    char           *aal;            /* Authenticator Assurance Level */
+typedef struct OrochiJwtCustomClaims {
+  /* Supabase/GoTrue compatible claims */
+  char *email;      /* User email */
+  char *phone;      /* User phone */
+  char *role;       /* User role */
+  char *session_id; /* Session identifier */
+  char *aal;        /* Authenticator Assurance Level */
 
-    /* Metadata */
-    Jsonb          *app_metadata;   /* Application metadata */
-    Jsonb          *user_metadata;  /* User metadata */
-    Jsonb          *amr;            /* Authentication Methods References */
+  /* Metadata */
+  Jsonb *app_metadata;  /* Application metadata */
+  Jsonb *user_metadata; /* User metadata */
+  Jsonb *amr;           /* Authentication Methods References */
 
-    /* Custom claims container */
-    Jsonb          *custom;         /* Additional custom claims */
+  /* Custom claims container */
+  Jsonb *custom; /* Additional custom claims */
 } OrochiJwtCustomClaims;
 
 /* ============================================================
  * Combined JWT Claims Structure
  * ============================================================ */
-typedef struct OrochiJwtClaims
-{
-    OrochiJwtStandardClaims standard;
-    OrochiJwtCustomClaims   custom;
-    Jsonb                  *raw_payload;    /* Full payload as JSONB */
+typedef struct OrochiJwtClaims {
+  OrochiJwtStandardClaims standard;
+  OrochiJwtCustomClaims custom;
+  Jsonb *raw_payload; /* Full payload as JSONB */
 } OrochiJwtClaims;
 
 /* ============================================================
  * JWT Token Structure
  * Complete parsed and validated token
  * ============================================================ */
-typedef struct OrochiJwt
-{
-    /* Token parts */
-    OrochiJwtHeader    *header;         /* Decoded header */
-    OrochiJwtClaims    *claims;         /* Decoded claims/payload */
-    char               *signature;       /* Raw signature bytes */
-    Size                signature_len;   /* Signature length */
+typedef struct OrochiJwt {
+  /* Token parts */
+  OrochiJwtHeader *header; /* Decoded header */
+  OrochiJwtClaims *claims; /* Decoded claims/payload */
+  char *signature;         /* Raw signature bytes */
+  Size signature_len;      /* Signature length */
 
-    /* Original token parts (for signature verification) */
-    char               *header_b64;      /* Base64URL encoded header */
-    char               *payload_b64;     /* Base64URL encoded payload */
-    char               *signature_b64;   /* Base64URL encoded signature */
+  /* Original token parts (for signature verification) */
+  char *header_b64;    /* Base64URL encoded header */
+  char *payload_b64;   /* Base64URL encoded payload */
+  char *signature_b64; /* Base64URL encoded signature */
 
-    /* Validation state */
-    OrochiJwtStatus     status;          /* Validation status */
-    bool                is_valid;        /* Overall validity flag */
-    char               *error_message;   /* Error description if invalid */
+  /* Validation state */
+  OrochiJwtStatus status; /* Validation status */
+  bool is_valid;          /* Overall validity flag */
+  char *error_message;    /* Error description if invalid */
 
-    /* Memory context for allocations */
-    MemoryContext       context;
+  /* Memory context for allocations */
+  MemoryContext context;
 } OrochiJwt;
 
 /* ============================================================
  * JWT Validation Options
  * ============================================================ */
-typedef struct OrochiJwtValidationOptions
-{
-    bool            verify_signature;   /* Verify cryptographic signature */
-    bool            verify_exp;         /* Verify expiration */
-    bool            verify_nbf;         /* Verify not-before */
-    bool            verify_iat;         /* Verify issued-at */
+typedef struct OrochiJwtValidationOptions {
+  bool verify_signature; /* Verify cryptographic signature */
+  bool verify_exp;       /* Verify expiration */
+  bool verify_nbf;       /* Verify not-before */
+  bool verify_iat;       /* Verify issued-at */
 
-    const char     *required_iss;       /* Required issuer (NULL to skip) */
-    const char     *required_aud;       /* Required audience (NULL to skip) */
+  const char *required_iss; /* Required issuer (NULL to skip) */
+  const char *required_aud; /* Required audience (NULL to skip) */
 
-    int64           clock_skew_seconds; /* Allowed clock skew */
+  int64 clock_skew_seconds; /* Allowed clock skew */
 } OrochiJwtValidationOptions;
 
 /* Default validation options */
-#define OROCHI_JWT_DEFAULT_OPTIONS { \
-    .verify_signature = true,        \
-    .verify_exp = true,              \
-    .verify_nbf = true,              \
-    .verify_iat = false,             \
-    .required_iss = NULL,            \
-    .required_aud = NULL,            \
-    .clock_skew_seconds = 0          \
-}
+#define OROCHI_JWT_DEFAULT_OPTIONS                                             \
+  {.verify_signature = true,                                                   \
+   .verify_exp = true,                                                         \
+   .verify_nbf = true,                                                         \
+   .verify_iat = false,                                                        \
+   .required_iss = NULL,                                                       \
+   .required_aud = NULL,                                                       \
+   .clock_skew_seconds = 0}
 
 /* ============================================================
  * Core JWT Functions
@@ -189,17 +180,16 @@ extern OrochiJwt *orochi_jwt_parse(const char *token);
  * Decode and validate a JWT token
  * Full validation including signature verification
  */
-extern OrochiJwt *orochi_jwt_decode(const char *token,
-                                     const char *secret,
-                                     OrochiJwtAlgorithm expected_alg);
+extern OrochiJwt *orochi_jwt_decode(const char *token, const char *secret,
+                                    OrochiJwtAlgorithm expected_alg);
 
 /*
  * Decode with custom validation options
  */
-extern OrochiJwt *orochi_jwt_decode_with_options(const char *token,
-                                                  const char *secret,
-                                                  OrochiJwtAlgorithm expected_alg,
-                                                  OrochiJwtValidationOptions *options);
+extern OrochiJwt *
+orochi_jwt_decode_with_options(const char *token, const char *secret,
+                               OrochiJwtAlgorithm expected_alg,
+                               OrochiJwtValidationOptions *options);
 
 /*
  * Verify JWT signature
@@ -228,7 +218,8 @@ extern char *orochi_base64url_decode(const char *input, Size *output_len);
 /*
  * Encode bytes to Base64URL string
  */
-extern char *orochi_base64url_encode(const unsigned char *input, Size input_len);
+extern char *orochi_base64url_encode(const unsigned char *input,
+                                     Size input_len);
 
 /* ============================================================
  * JWT Header Functions
@@ -266,7 +257,8 @@ extern char *orochi_jwt_get_claim_text(OrochiJwt *jwt, const char *claim_name);
 /*
  * Get a specific claim value as JSONB
  */
-extern Jsonb *orochi_jwt_get_claim_jsonb(OrochiJwt *jwt, const char *claim_name);
+extern Jsonb *orochi_jwt_get_claim_jsonb(OrochiJwt *jwt,
+                                         const char *claim_name);
 
 /*
  * Check if a claim exists
@@ -277,13 +269,13 @@ extern bool orochi_jwt_has_claim(OrochiJwt *jwt, const char *claim_name);
  * Get claim as integer
  */
 extern int64 orochi_jwt_get_claim_int(OrochiJwt *jwt, const char *claim_name,
-                                       bool *is_null);
+                                      bool *is_null);
 
 /*
  * Get claim as boolean
  */
 extern bool orochi_jwt_get_claim_bool(OrochiJwt *jwt, const char *claim_name,
-                                       bool *is_null);
+                                      bool *is_null);
 
 /* ============================================================
  * PostgreSQL Session Integration
@@ -323,7 +315,8 @@ extern bool orochi_jwt_is_expired(OrochiJwt *jwt, int64 clock_skew_seconds);
 /*
  * Check if token is not yet valid (with optional clock skew)
  */
-extern bool orochi_jwt_is_not_yet_valid(OrochiJwt *jwt, int64 clock_skew_seconds);
+extern bool orochi_jwt_is_not_yet_valid(OrochiJwt *jwt,
+                                        int64 clock_skew_seconds);
 
 /*
  * Convert Unix timestamp to PostgreSQL TimestampTz

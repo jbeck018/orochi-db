@@ -18,23 +18,23 @@
 #ifndef OROCHI_CATALOG_H
 #define OROCHI_CATALOG_H
 
-#include "postgres.h"
 #include "../orochi.h"
+#include "postgres.h"
 
 /* ============================================================
  * Catalog Table Names
  * ============================================================ */
 
-#define OROCHI_TABLES_TABLE           "orochi_tables"
-#define OROCHI_SHARDS_TABLE           "orochi_shards"
+#define OROCHI_TABLES_TABLE "orochi_tables"
+#define OROCHI_SHARDS_TABLE "orochi_shards"
 #define OROCHI_SHARD_PLACEMENTS_TABLE "orochi_shard_placements"
-#define OROCHI_CHUNKS_TABLE           "orochi_chunks"
-#define OROCHI_NODES_TABLE            "orochi_nodes"
-#define OROCHI_STRIPES_TABLE          "orochi_stripes"
-#define OROCHI_COLUMN_CHUNKS_TABLE    "orochi_column_chunks"
+#define OROCHI_CHUNKS_TABLE "orochi_chunks"
+#define OROCHI_NODES_TABLE "orochi_nodes"
+#define OROCHI_STRIPES_TABLE "orochi_stripes"
+#define OROCHI_COLUMN_CHUNKS_TABLE "orochi_column_chunks"
 #define OROCHI_TIERING_POLICIES_TABLE "orochi_tiering_policies"
-#define OROCHI_VECTOR_INDEXES_TABLE   "orochi_vector_indexes"
-#define OROCHI_CONTINUOUS_AGGS_TABLE  "orochi_continuous_aggregates"
+#define OROCHI_VECTOR_INDEXES_TABLE "orochi_vector_indexes"
+#define OROCHI_CONTINUOUS_AGGS_TABLE "orochi_continuous_aggregates"
 #define OROCHI_INVALIDATION_LOG_TABLE "orochi_invalidation_log"
 
 /* ============================================================
@@ -74,7 +74,7 @@ extern OrochiTableInfo *orochi_catalog_get_table(Oid relid);
  * Get table metadata by name
  */
 extern OrochiTableInfo *orochi_catalog_get_table_by_name(const char *schema,
-                                                          const char *table);
+                                                         const char *table);
 
 /*
  * Update table metadata
@@ -119,12 +119,14 @@ extern List *orochi_catalog_get_table_shards(Oid table_oid);
 /*
  * Get shard for a hash value
  */
-extern OrochiShardInfo *orochi_catalog_get_shard_for_hash(Oid table_oid, int32 hash_value);
+extern OrochiShardInfo *orochi_catalog_get_shard_for_hash(Oid table_oid,
+                                                          int32 hash_value);
 
 /*
  * Update shard placement
  */
-extern void orochi_catalog_update_shard_placement(int64 shard_id, int32 node_id);
+extern void orochi_catalog_update_shard_placement(int64 shard_id,
+                                                  int32 node_id);
 
 /*
  * Update shard statistics
@@ -190,12 +192,14 @@ extern List *orochi_catalog_get_chunks_in_range(Oid hypertable_oid,
 /*
  * Update chunk compression status
  */
-extern void orochi_catalog_update_chunk_compression(int64 chunk_id, bool is_compressed);
+extern void orochi_catalog_update_chunk_compression(int64 chunk_id,
+                                                    bool is_compressed);
 
 /*
  * Update chunk storage tier
  */
-extern void orochi_catalog_update_chunk_tier(int64 chunk_id, OrochiStorageTier tier);
+extern void orochi_catalog_update_chunk_tier(int64 chunk_id,
+                                             OrochiStorageTier tier);
 
 /*
  * Delete chunk metadata
@@ -272,8 +276,10 @@ extern List *orochi_catalog_get_table_stripes(Oid table_oid);
 /*
  * Update stripe status
  */
-extern void orochi_catalog_update_stripe_status(int64 stripe_id, bool is_flushed,
-                                                int64 data_size, int64 metadata_size);
+extern void orochi_catalog_update_stripe_status(int64 stripe_id,
+                                                bool is_flushed,
+                                                int64 data_size,
+                                                int64 metadata_size);
 
 /*
  * Create column chunk metadata
@@ -283,7 +289,8 @@ extern void orochi_catalog_create_column_chunk(OrochiColumnChunk *chunk);
 /*
  * Update column chunk min/max statistics
  */
-extern void orochi_catalog_update_column_stats(int64 stripe_id, int16 column_index,
+extern void orochi_catalog_update_column_stats(int64 stripe_id,
+                                               int16 column_index,
                                                Datum min_value, Datum max_value,
                                                Oid type_oid);
 
@@ -297,18 +304,17 @@ extern List *orochi_catalog_get_stripe_columns(int64 stripe_id);
  * Returns the compressed data buffer and sets size.
  * Caller is responsible for freeing the returned buffer.
  */
-extern char *orochi_catalog_read_chunk_data(int64 stripe_id, int32 chunk_group_index,
-                                            int16 column_index, int64 *data_size);
+extern char *orochi_catalog_read_chunk_data(int64 stripe_id,
+                                            int32 chunk_group_index,
+                                            int16 column_index,
+                                            int64 *data_size);
 
 /*
  * Extended version of create_column_chunk that stores the data
  */
-extern void orochi_catalog_create_column_chunk_with_data(int64 stripe_id,
-                                                          int32 chunk_group_index,
-                                                          int16 column_index,
-                                                          OrochiColumnChunk *chunk,
-                                                          const char *data,
-                                                          int64 data_size);
+extern void orochi_catalog_create_column_chunk_with_data(
+    int64 stripe_id, int32 chunk_group_index, int16 column_index,
+    OrochiColumnChunk *chunk, const char *data, int64 data_size);
 
 /* ============================================================
  * Tiering Policy Operations
@@ -365,8 +371,10 @@ extern List *orochi_catalog_get_table_vector_indexes(Oid table_oid);
 /*
  * Register continuous aggregate
  */
-extern int64 orochi_catalog_register_continuous_agg(Oid view_oid, Oid source_table,
-                                                    Oid mat_table, const char *query_text);
+extern int64 orochi_catalog_register_continuous_agg(Oid view_oid,
+                                                    Oid source_table,
+                                                    Oid mat_table,
+                                                    const char *query_text);
 
 /*
  * Get continuous aggregate info by view OID
@@ -381,7 +389,9 @@ extern List *orochi_catalog_get_continuous_aggs(Oid source_table);
 /*
  * Update continuous aggregate refresh timestamp
  */
-extern void orochi_catalog_update_continuous_agg_refresh(int64 agg_id, TimestampTz last_refresh);
+extern void
+orochi_catalog_update_continuous_agg_refresh(int64 agg_id,
+                                             TimestampTz last_refresh);
 
 /*
  * Delete continuous aggregate

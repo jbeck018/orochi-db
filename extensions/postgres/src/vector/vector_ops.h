@@ -17,26 +17,26 @@
 #ifndef OROCHI_VECTOR_OPS_H
 #define OROCHI_VECTOR_OPS_H
 
-#include "postgres.h"
-#include "fmgr.h"
 #include "../orochi.h"
+#include "fmgr.h"
+#include "postgres.h"
 
 /* ============================================================
  * Vector Type Constants
  * ============================================================ */
 
-#define VECTOR_MAX_DIM          16000       /* Maximum dimensions */
-#define VECTOR_SIZE(dim)        (offsetof(Vector, x) + sizeof(float) * (dim))
+#define VECTOR_MAX_DIM 16000 /* Maximum dimensions */
+#define VECTOR_SIZE(dim) (offsetof(Vector, x) + sizeof(float) * (dim))
 
 /* Index types */
-#define VECTOR_INDEX_FLAT       "flat"
-#define VECTOR_INDEX_IVFFLAT    "ivfflat"
-#define VECTOR_INDEX_HNSW       "hnsw"
+#define VECTOR_INDEX_FLAT "flat"
+#define VECTOR_INDEX_IVFFLAT "ivfflat"
+#define VECTOR_INDEX_HNSW "hnsw"
 
 /* Distance functions */
-#define VECTOR_DIST_L2          "l2"
-#define VECTOR_DIST_COSINE      "cosine"
-#define VECTOR_DIST_INNER       "inner_product"
+#define VECTOR_DIST_L2 "l2"
+#define VECTOR_DIST_COSINE "cosine"
+#define VECTOR_DIST_INNER "inner_product"
 
 /* ============================================================
  * Vector Data Type
@@ -45,17 +45,16 @@
 /*
  * Vector - variable-length float array
  */
-typedef struct Vector
-{
-    int32       vl_len_;        /* varlena header */
-    int16       dim;            /* number of dimensions */
-    int16       unused;         /* padding */
-    float       x[FLEXIBLE_ARRAY_MEMBER]; /* vector elements */
+typedef struct Vector {
+  int32 vl_len_;                  /* varlena header */
+  int16 dim;                      /* number of dimensions */
+  int16 unused;                   /* padding */
+  float x[FLEXIBLE_ARRAY_MEMBER]; /* vector elements */
 } Vector;
 
-#define DatumGetVector(x)       ((Vector *) PG_DETOAST_DATUM(x))
-#define PG_GETARG_VECTOR_P(n)   DatumGetVector(PG_GETARG_DATUM(n))
-#define PG_RETURN_VECTOR_P(x)   PG_RETURN_POINTER(x)
+#define DatumGetVector(x) ((Vector *)PG_DETOAST_DATUM(x))
+#define PG_GETARG_VECTOR_P(n) DatumGetVector(PG_GETARG_DATUM(n))
+#define PG_RETURN_VECTOR_P(x) PG_RETURN_POINTER(x)
 
 /* ============================================================
  * Vector Index Structures
@@ -64,32 +63,29 @@ typedef struct Vector
 /*
  * IVF (Inverted File) index parameters
  */
-typedef struct IVFIndexOptions
-{
-    int32       lists;          /* Number of clusters */
-    int32       probes;         /* Clusters to search */
+typedef struct IVFIndexOptions {
+  int32 lists;  /* Number of clusters */
+  int32 probes; /* Clusters to search */
 } IVFIndexOptions;
 
 /*
  * HNSW (Hierarchical Navigable Small World) parameters
  */
-typedef struct HNSWIndexOptions
-{
-    int32       m;              /* Max connections per layer */
-    int32       ef_construction; /* Size of dynamic candidate list */
-    int32       ef_search;      /* Search-time ef */
+typedef struct HNSWIndexOptions {
+  int32 m;               /* Max connections per layer */
+  int32 ef_construction; /* Size of dynamic candidate list */
+  int32 ef_search;       /* Search-time ef */
 } HNSWIndexOptions;
 
 /*
  * Vector index scan state
  */
-typedef struct VectorScanState
-{
-    Oid         index_oid;
-    Vector     *query_vector;
-    int         k;              /* Number of results */
-    char       *distance_type;
-    float       distance_threshold;
+typedef struct VectorScanState {
+  Oid index_oid;
+  Vector *query_vector;
+  int k; /* Number of results */
+  char *distance_type;
+  float distance_threshold;
 } VectorScanState;
 
 /* ============================================================
@@ -247,8 +243,8 @@ extern void vector_batch_l2_distances(Vector *query, Vector **vectors,
 /*
  * Find k nearest neighbors
  */
-extern void vector_knn(Vector *query, Vector **vectors, int count,
-                       int k, int *indices, float *distances,
+extern void vector_knn(Vector *query, Vector **vectors, int count, int k,
+                       int *indices, float *distances,
                        const char *distance_type);
 
 /* ============================================================
@@ -258,13 +254,12 @@ extern void vector_knn(Vector *query, Vector **vectors, int count,
 /*
  * Product quantization parameters
  */
-typedef struct PQParams
-{
-    int         dim;            /* Original dimensions */
-    int         m;              /* Number of subquantizers */
-    int         ksub;           /* Codes per subquantizer (typically 256) */
-    int         dsub;           /* Dimensions per subquantizer */
-    float      *centroids;      /* Codebook [m][ksub][dsub] */
+typedef struct PQParams {
+  int dim;          /* Original dimensions */
+  int m;            /* Number of subquantizers */
+  int ksub;         /* Codes per subquantizer (typically 256) */
+  int dsub;         /* Dimensions per subquantizer */
+  float *centroids; /* Codebook [m][ksub][dsub] */
 } PQParams;
 
 /*

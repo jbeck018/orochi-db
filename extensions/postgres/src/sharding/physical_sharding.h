@@ -16,8 +16,8 @@
 #ifndef OROCHI_PHYSICAL_SHARDING_H
 #define OROCHI_PHYSICAL_SHARDING_H
 
-#include "postgres.h"
 #include "../orochi.h"
+#include "postgres.h"
 
 /* ============================================================
  * Physical Shard Table Management
@@ -57,7 +57,9 @@ extern int64 orochi_redistribute_data(Oid table_oid);
 /*
  * Install INSERT/UPDATE/DELETE routing trigger on parent table
  */
-extern void orochi_install_routing_trigger(Oid table_oid, const char *dist_column, int32 shard_count);
+extern void orochi_install_routing_trigger(Oid table_oid,
+                                           const char *dist_column,
+                                           int32 shard_count);
 
 /*
  * Remove routing triggers from parent table
@@ -68,7 +70,8 @@ extern void orochi_remove_routing_trigger(Oid table_oid);
  * Compute which shard a value belongs to
  * Returns shard index (0-based)
  */
-extern int32 orochi_compute_shard_for_value(Datum value, Oid type_oid, int32 shard_count);
+extern int32 orochi_compute_shard_for_value(Datum value, Oid type_oid,
+                                            int32 shard_count);
 
 /* ============================================================
  * View Management for Transparent Access
@@ -78,7 +81,8 @@ extern int32 orochi_compute_shard_for_value(Datum value, Oid type_oid, int32 sha
  * Create a view that unions all shard tables
  * (Used if parent table is renamed/hidden)
  */
-extern void orochi_create_union_view(Oid table_oid, const char *dist_column, int32 shard_count);
+extern void orochi_create_union_view(Oid table_oid, const char *dist_column,
+                                     int32 shard_count);
 
 /*
  * Drop the union view

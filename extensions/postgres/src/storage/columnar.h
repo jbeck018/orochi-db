@@ -20,10 +20,10 @@
 #ifndef OROCHI_COLUMNAR_H
 #define OROCHI_COLUMNAR_H
 
-#include "postgres.h"
 #include "access/tableam.h"
 #include "access/tupdesc.h"
 #include "nodes/execnodes.h"
+#include "postgres.h"
 #include "storage/bufpage.h"
 
 #include "../orochi.h"
@@ -33,25 +33,25 @@
  * ============================================================ */
 
 /* Default stripe configuration */
-#define COLUMNAR_DEFAULT_STRIPE_ROW_LIMIT       150000
-#define COLUMNAR_MIN_STRIPE_ROW_LIMIT           1000
-#define COLUMNAR_MAX_STRIPE_ROW_LIMIT           10000000
+#define COLUMNAR_DEFAULT_STRIPE_ROW_LIMIT 150000
+#define COLUMNAR_MIN_STRIPE_ROW_LIMIT 1000
+#define COLUMNAR_MAX_STRIPE_ROW_LIMIT 10000000
 
 /* Default chunk group configuration */
-#define COLUMNAR_DEFAULT_CHUNK_GROUP_ROW_LIMIT  10000
-#define COLUMNAR_MIN_CHUNK_GROUP_ROW_LIMIT      1000
-#define COLUMNAR_MAX_CHUNK_GROUP_ROW_LIMIT      100000
+#define COLUMNAR_DEFAULT_CHUNK_GROUP_ROW_LIMIT 10000
+#define COLUMNAR_MIN_CHUNK_GROUP_ROW_LIMIT 1000
+#define COLUMNAR_MAX_CHUNK_GROUP_ROW_LIMIT 100000
 
 /* Maximum decompressed stripe size (1GB) */
-#define COLUMNAR_MAX_STRIPE_SIZE                (1024 * 1024 * 1024)
+#define COLUMNAR_MAX_STRIPE_SIZE (1024 * 1024 * 1024)
 
 /* Vectorized execution batch size */
-#define COLUMNAR_VECTOR_BATCH_SIZE              1024
+#define COLUMNAR_VECTOR_BATCH_SIZE 1024
 
 /* Compression levels */
-#define COLUMNAR_COMPRESSION_LEVEL_DEFAULT      3
-#define COLUMNAR_COMPRESSION_LEVEL_MIN          1
-#define COLUMNAR_COMPRESSION_LEVEL_MAX          19
+#define COLUMNAR_COMPRESSION_LEVEL_DEFAULT 3
+#define COLUMNAR_COMPRESSION_LEVEL_MIN 1
+#define COLUMNAR_COMPRESSION_LEVEL_MAX 19
 
 /* ============================================================
  * Columnar Storage Structures
@@ -60,98 +60,92 @@
 /*
  * ColumnarOptions - Per-table columnar storage options
  */
-typedef struct ColumnarOptions
-{
-    int32               stripe_row_limit;       /* Max rows per stripe */
-    int32               chunk_group_row_limit;  /* Max rows per chunk group */
-    OrochiCompressionType compression_type;     /* Default compression */
-    int32               compression_level;      /* Compression level */
-    bool                enable_vectorization;   /* Enable vectorized ops */
+typedef struct ColumnarOptions {
+  int32 stripe_row_limit;                 /* Max rows per stripe */
+  int32 chunk_group_row_limit;            /* Max rows per chunk group */
+  OrochiCompressionType compression_type; /* Default compression */
+  int32 compression_level;                /* Compression level */
+  bool enable_vectorization;              /* Enable vectorized ops */
 } ColumnarOptions;
 
 /*
  * ColumnarStripe - A stripe contains multiple chunk groups
  */
-typedef struct ColumnarStripe
-{
-    int64               stripe_id;          /* Unique stripe ID */
-    int64               first_row_number;   /* First row in stripe */
-    int64               row_count;          /* Total rows in stripe */
-    int32               chunk_group_count;  /* Number of chunk groups */
-    int32               column_count;       /* Number of columns */
-    int64               data_offset;        /* Offset to data in file */
-    int64               data_size;          /* Compressed data size */
-    int64               metadata_offset;    /* Offset to metadata */
-    int64               metadata_size;      /* Metadata size */
-    bool                is_flushed;         /* Has been written to disk */
+typedef struct ColumnarStripe {
+  int64 stripe_id;         /* Unique stripe ID */
+  int64 first_row_number;  /* First row in stripe */
+  int64 row_count;         /* Total rows in stripe */
+  int32 chunk_group_count; /* Number of chunk groups */
+  int32 column_count;      /* Number of columns */
+  int64 data_offset;       /* Offset to data in file */
+  int64 data_size;         /* Compressed data size */
+  int64 metadata_offset;   /* Offset to metadata */
+  int64 metadata_size;     /* Metadata size */
+  bool is_flushed;         /* Has been written to disk */
 } ColumnarStripe;
 
 /*
  * ColumnarChunkGroup - A group of column chunks
  */
-typedef struct ColumnarChunkGroup
-{
-    int32               chunk_group_index;  /* Index within stripe */
-    int64               row_count;          /* Rows in this group */
-    int64               deleted_rows;       /* Deleted row count */
-    struct ColumnarColumnChunk **columns;   /* Column chunks */
-    int32               column_count;       /* Number of columns */
-    uint8              *deletion_mask;      /* Bit mask for deletions */
+typedef struct ColumnarChunkGroup {
+  int32 chunk_group_index;              /* Index within stripe */
+  int64 row_count;                      /* Rows in this group */
+  int64 deleted_rows;                   /* Deleted row count */
+  struct ColumnarColumnChunk **columns; /* Column chunks */
+  int32 column_count;                   /* Number of columns */
+  uint8 *deletion_mask;                 /* Bit mask for deletions */
 } ColumnarChunkGroup;
 
 /*
  * ColumnarColumnChunk - Individual column data within chunk group
  */
-typedef struct ColumnarColumnChunk
-{
-    int16               column_index;       /* Column position */
-    Oid                 column_type;        /* PostgreSQL type OID */
-    int64               value_count;        /* Number of values */
-    int64               null_count;         /* Number of nulls */
-    bool                has_nulls;          /* Contains null values */
+typedef struct ColumnarColumnChunk {
+  int16 column_index; /* Column position */
+  Oid column_type;    /* PostgreSQL type OID */
+  int64 value_count;  /* Number of values */
+  int64 null_count;   /* Number of nulls */
+  bool has_nulls;     /* Contains null values */
 
-    /* Compression info */
-    OrochiCompressionType compression_type;
-    int64               compressed_size;
-    int64               decompressed_size;
+  /* Compression info */
+  OrochiCompressionType compression_type;
+  int64 compressed_size;
+  int64 decompressed_size;
 
-    /* Data buffers */
-    char               *value_buffer;       /* Compressed values */
-    char               *null_buffer;        /* Null bitmap */
+  /* Data buffers */
+  char *value_buffer; /* Compressed values */
+  char *null_buffer;  /* Null bitmap */
 
-    /* Statistics for predicate pushdown */
-    bool                has_min_max;        /* Min/max available */
-    Datum               min_value;          /* Minimum value */
-    Datum               max_value;          /* Maximum value */
-    bool                min_is_null;
-    bool                max_is_null;
+  /* Statistics for predicate pushdown */
+  bool has_min_max; /* Min/max available */
+  Datum min_value;  /* Minimum value */
+  Datum max_value;  /* Maximum value */
+  bool min_is_null;
+  bool max_is_null;
 
-    /* Bloom filter for equality predicates */
-    void               *bloom_filter;
-    int32               bloom_filter_size;
+  /* Bloom filter for equality predicates */
+  void *bloom_filter;
+  int32 bloom_filter_size;
 } ColumnarColumnChunk;
 
 /*
  * ColumnarSkipList - Skip list entry for chunk elimination
  */
-typedef struct ColumnarSkipListEntry
-{
-    int64               stripe_id;          /* Stripe identifier */
-    int32               chunk_group_index;  /* Chunk group index */
-    int16               column_index;       /* Column index */
-    Datum               min_value;          /* Minimum value */
-    Datum               max_value;          /* Maximum value */
-    int64               row_count;          /* Row count */
-    bool                has_nulls;          /* Contains nulls */
+typedef struct ColumnarSkipListEntry {
+  int64 stripe_id;         /* Stripe identifier */
+  int32 chunk_group_index; /* Chunk group index */
+  int16 column_index;      /* Column index */
+  Datum min_value;         /* Minimum value */
+  Datum max_value;         /* Maximum value */
+  int64 row_count;         /* Row count */
+  bool has_nulls;          /* Contains nulls */
 } ColumnarSkipListEntry;
 
 /*
  * ColumnarSkipList - Complete skip list for a table
  */
-typedef struct ColumnarSkipList
-{
-    int32               entry_count;        /* Number of entries */
-    ColumnarSkipListEntry *entries;         /* Skip list entries */
+typedef struct ColumnarSkipList {
+  int32 entry_count;              /* Number of entries */
+  ColumnarSkipListEntry *entries; /* Skip list entries */
 } ColumnarSkipList;
 
 /* ============================================================
@@ -161,47 +155,46 @@ typedef struct ColumnarSkipList
 /*
  * ColumnarWriteState - State for writing columnar data
  */
-typedef struct ColumnarWriteState
-{
-    Relation            relation;           /* Target relation */
-    TupleDesc           tupdesc;            /* Tuple descriptor */
-    ColumnarOptions     options;            /* Storage options */
+typedef struct ColumnarWriteState {
+  Relation relation;       /* Target relation */
+  TupleDesc tupdesc;       /* Tuple descriptor */
+  ColumnarOptions options; /* Storage options */
 
-    /* Current stripe being written */
-    ColumnarStripe     *current_stripe;
-    int64               stripe_row_count;   /* Rows in current stripe */
+  /* Current stripe being written */
+  ColumnarStripe *current_stripe;
+  int64 stripe_row_count; /* Rows in current stripe */
 
-    /* Current chunk group */
-    ColumnarChunkGroup *current_chunk_group;
-    int64               chunk_group_row_count;
+  /* Current chunk group */
+  ColumnarChunkGroup *current_chunk_group;
+  int64 chunk_group_row_count;
 
-    /* Per-column write buffers */
-    struct ColumnWriteBuffer {
-        Datum          *values;             /* Value buffer */
-        bool           *nulls;              /* Null bitmap */
-        int64           count;              /* Values buffered */
-        int64           capacity;           /* Buffer capacity */
-        Datum           min_value;          /* Running min */
-        Datum           max_value;          /* Running max */
-        bool            has_nulls;
-        /* Compression state */
-        Oid             attr_type;          /* Column data type OID */
-        int64           row_count;          /* Number of rows in buffer */
-        int64           null_count;         /* Number of null values */
-        char           *compressed_data;    /* Compressed column data */
-        int64           compressed_size;    /* Size of compressed data */
-        int64           uncompressed_size;  /* Size of uncompressed data */
-        OrochiCompressionType compression_type; /* Compression algorithm */
-    } *column_buffers;
+  /* Per-column write buffers */
+  struct ColumnWriteBuffer {
+    Datum *values;   /* Value buffer */
+    bool *nulls;     /* Null bitmap */
+    int64 count;     /* Values buffered */
+    int64 capacity;  /* Buffer capacity */
+    Datum min_value; /* Running min */
+    Datum max_value; /* Running max */
+    bool has_nulls;
+    /* Compression state */
+    Oid attr_type;                          /* Column data type OID */
+    int64 row_count;                        /* Number of rows in buffer */
+    int64 null_count;                       /* Number of null values */
+    char *compressed_data;                  /* Compressed column data */
+    int64 compressed_size;                  /* Size of compressed data */
+    int64 uncompressed_size;                /* Size of uncompressed data */
+    OrochiCompressionType compression_type; /* Compression algorithm */
+  } *column_buffers;
 
-    /* Memory context for writes */
-    MemoryContext       write_context;
-    MemoryContext       stripe_context;
+  /* Memory context for writes */
+  MemoryContext write_context;
+  MemoryContext stripe_context;
 
-    /* Statistics */
-    int64               total_rows_written;
-    int64               total_bytes_written;
-    int64               stripes_created;
+  /* Statistics */
+  int64 total_rows_written;
+  int64 total_bytes_written;
+  int64 stripes_created;
 } ColumnarWriteState;
 
 /* ============================================================
@@ -211,50 +204,49 @@ typedef struct ColumnarWriteState
 /*
  * ColumnarReadState - State for reading columnar data
  */
-typedef struct ColumnarReadState
-{
-    Relation            relation;           /* Source relation */
-    TupleDesc           tupdesc;            /* Tuple descriptor */
-    Snapshot            snapshot;           /* Transaction snapshot */
+typedef struct ColumnarReadState {
+  Relation relation; /* Source relation */
+  TupleDesc tupdesc; /* Tuple descriptor */
+  Snapshot snapshot; /* Transaction snapshot */
 
-    /* Stripe navigation */
-    List               *stripe_list;        /* List of ColumnarStripe */
-    int32               current_stripe_index;
-    ColumnarStripe     *current_stripe;
+  /* Stripe navigation */
+  List *stripe_list; /* List of ColumnarStripe */
+  int32 current_stripe_index;
+  ColumnarStripe *current_stripe;
 
-    /* Chunk group navigation */
-    int32               current_chunk_group_index;
-    ColumnarChunkGroup *current_chunk_group;
-    int64               current_row_in_chunk;
+  /* Chunk group navigation */
+  int32 current_chunk_group_index;
+  ColumnarChunkGroup *current_chunk_group;
+  int64 current_row_in_chunk;
 
-    /* Column projection */
-    Bitmapset          *columns_needed;     /* Required columns */
+  /* Column projection */
+  Bitmapset *columns_needed; /* Required columns */
 
-    /* Decompressed column data cache */
-    struct ColumnReadBuffer {
-        Datum          *values;
-        bool           *nulls;
-        int64           row_count;
-        bool            is_loaded;
-    } *column_buffers;
+  /* Decompressed column data cache */
+  struct ColumnReadBuffer {
+    Datum *values;
+    bool *nulls;
+    int64 row_count;
+    bool is_loaded;
+  } *column_buffers;
 
-    /* Vectorization support */
-    bool                enable_vectorization;
-    int32               vector_batch_size;
-    int64               vector_rows_pending;
+  /* Vectorization support */
+  bool enable_vectorization;
+  int32 vector_batch_size;
+  int64 vector_rows_pending;
 
-    /* Skip list for predicate pushdown */
-    ColumnarSkipList   *skip_list;
-    List               *qual_list;          /* Filter predicates */
+  /* Skip list for predicate pushdown */
+  ColumnarSkipList *skip_list;
+  List *qual_list; /* Filter predicates */
 
-    /* Memory context */
-    MemoryContext       read_context;
-    MemoryContext       stripe_context;
+  /* Memory context */
+  MemoryContext read_context;
+  MemoryContext stripe_context;
 
-    /* Statistics */
-    int64               total_rows_read;
-    int64               stripes_scanned;
-    int64               chunks_skipped;
+  /* Statistics */
+  int64 total_rows_read;
+  int64 stripes_scanned;
+  int64 chunks_skipped;
 } ColumnarReadState;
 
 /* ============================================================
@@ -264,12 +256,11 @@ typedef struct ColumnarReadState
 /*
  * CompressionBuffer - Buffer for compression operations
  */
-typedef struct CompressionBuffer
-{
-    char               *data;
-    int64               size;
-    int64               capacity;
-    OrochiCompressionType type;
+typedef struct CompressionBuffer {
+  char *data;
+  int64 size;
+  int64 capacity;
+  OrochiCompressionType type;
 } CompressionBuffer;
 
 /*
@@ -306,8 +297,8 @@ extern ColumnarWriteState *columnar_begin_write(Relation relation,
 /*
  * Write a single row
  */
-extern void columnar_write_row(ColumnarWriteState *state,
-                               Datum *values, bool *nulls);
+extern void columnar_write_row(ColumnarWriteState *state, Datum *values,
+                               bool *nulls);
 
 /*
  * Write multiple rows (batch)
@@ -351,8 +342,7 @@ extern bool columnar_read_next_row(ColumnarReadState *state,
  * Read next vector of rows
  */
 extern int columnar_read_next_vector(ColumnarReadState *state,
-                                     TupleTableSlot *slot,
-                                     int max_rows);
+                                     TupleTableSlot *slot, int max_rows);
 
 /*
  * Seek to specific row number
@@ -403,8 +393,8 @@ extern TableScanDesc columnar_beginscan(Relation relation, Snapshot snapshot,
                                         uint32 flags);
 extern void columnar_endscan(TableScanDesc scan);
 extern void columnar_rescan(TableScanDesc scan, struct ScanKeyData *key,
-                           bool set_params, bool allow_strat, bool allow_sync,
-                           bool allow_pagemode);
+                            bool set_params, bool allow_strat, bool allow_sync,
+                            bool allow_pagemode);
 extern bool columnar_getnextslot(TableScanDesc scan, ScanDirection direction,
                                  TupleTableSlot *slot);
 
@@ -414,11 +404,9 @@ extern bool columnar_getnextslot(TableScanDesc scan, ScanDirection direction,
 extern void columnar_tuple_insert(Relation relation, TupleTableSlot *slot,
                                   CommandId cid, int options,
                                   struct BulkInsertStateData *bistate);
-extern void columnar_tuple_insert_speculative(Relation relation,
-                                              TupleTableSlot *slot,
-                                              CommandId cid, int options,
-                                              struct BulkInsertStateData *bistate,
-                                              uint32 specToken);
+extern void columnar_tuple_insert_speculative(
+    Relation relation, TupleTableSlot *slot, CommandId cid, int options,
+    struct BulkInsertStateData *bistate, uint32 specToken);
 extern void columnar_tuple_complete_speculative(Relation relation,
                                                 TupleTableSlot *slot,
                                                 uint32 specToken,
