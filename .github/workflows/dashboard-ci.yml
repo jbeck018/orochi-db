@@ -366,6 +366,7 @@ jobs:
     if: always()
     steps:
       - name: Check CI Status
+        working-directory: ${{ github.workspace }}
         run: |
           echo "=== Dashboard CI Status ==="
           echo "Lint/Type: ${{ needs.lint-and-typecheck.result }}"
