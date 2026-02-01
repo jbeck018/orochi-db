@@ -106,15 +106,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-          cache-dependency-path: package-lock.json
+          # Disable npm cache to avoid platform-specific optional dependency issues
 
       - name: Install dependencies
         if: steps.check.outputs.exists == 'true'
-        run: |
-          npm install --legacy-peer-deps
-          # Reinstall rollup to ensure platform-specific binaries are present
-          npm rebuild rollup
+        run: npm install --legacy-peer-deps
         working-directory: ${{ github.workspace }}
 
       - name: Build application
