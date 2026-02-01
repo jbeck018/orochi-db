@@ -11,6 +11,8 @@ import {
   ArrowRight,
   Check,
   ChevronRight,
+  Network,
+  Activity,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -63,6 +65,18 @@ const features = [
     description:
       "Create instant copies of your database for development, testing, and staging in seconds using copy-on-write technology.",
   },
+  {
+    icon: Network,
+    title: "Intelligent Connection Pooling",
+    description:
+      "Built-in PgDog connection pooler with automatic query routing, read/write splitting, and scale-to-zero support.",
+  },
+  {
+    icon: Activity,
+    title: "Performance Benchmarks",
+    description:
+      "Comprehensive benchmark suite with real-time dashboards showing TPC-H, time-series, and columnar storage performance.",
+  },
 ];
 
 const useCases = [
@@ -114,6 +128,12 @@ function LandingPage(): React.JSX.Element {
               className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
             >
               Documentation
+            </Link>
+            <Link
+              to="/benchmarks"
+              className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Benchmarks
             </Link>
           </div>
           <div className="flex items-center gap-4">
@@ -258,11 +278,13 @@ function LandingPage(): React.JSX.Element {
                 {[
                   "Full PostgreSQL compatibility - use your existing tools and queries",
                   "Instant database branching for dev/test environments",
+                  "Built-in PgDog connection pooler with intelligent query routing",
                   "Automatic scaling based on workload demands",
                   "Enterprise-grade security with encryption at rest and in transit",
                   "Multi-region deployments for global applications",
                   "Integrated monitoring and alerting",
                   "Instant point-in-time recovery",
+                  "Comprehensive performance benchmarks and analytics",
                 ].map((item, index) => (
                   <div key={index} className="flex items-start gap-3">
                     <Check className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
@@ -377,6 +399,11 @@ function LandingPage(): React.JSX.Element {
                 <li>
                   <Link to="/docs" className="hover:text-foreground">
                     Documentation
+                  </Link>
+                </li>
+                <li>
+                  <Link to="/benchmarks" className="hover:text-foreground">
+                    Benchmarks
                   </Link>
                 </li>
               </ul>

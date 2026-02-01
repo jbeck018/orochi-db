@@ -16,6 +16,9 @@ import {
   ExternalLink,
   Copy,
   Check,
+  Network,
+  Activity,
+  BarChart3,
 } from "lucide-react";
 import howleropsLogo from "@/src/assets/howlerops-icon.png";
 import { Button } from "@/components/ui/button";
@@ -54,6 +57,17 @@ const docSections = [
     ],
   },
   {
+    title: "Connection Pooling",
+    icon: Server,
+    items: [
+      { title: "PgDog Overview", href: "#pgdog-overview" },
+      { title: "Query Routing", href: "#query-routing" },
+      { title: "Read/Write Splitting", href: "#read-write-splitting" },
+      { title: "Scale-to-Zero", href: "#scale-to-zero" },
+      { title: "Multi-tenant Routing", href: "#multi-tenant-routing" },
+    ],
+  },
+  {
     title: "Advanced Features",
     icon: Zap,
     items: [
@@ -61,6 +75,16 @@ const docSections = [
       { title: "Change Data Capture (CDC)", href: "#cdc" },
       { title: "Data Pipelines", href: "#pipelines" },
       { title: "Raft Consensus", href: "#raft" },
+    ],
+  },
+  {
+    title: "Performance",
+    icon: Clock,
+    items: [
+      { title: "Benchmark Results", href: "#benchmarks" },
+      { title: "TPC-H Performance", href: "#tpch" },
+      { title: "Time-Series Benchmarks", href: "#timeseries-benchmarks" },
+      { title: "Columnar Scan Performance", href: "#columnar-benchmarks" },
     ],
   },
   {
@@ -779,6 +803,241 @@ SELECT * FROM pipeline_stats();`}
                   </ul>
                 </div>
               </div>
+            </section>
+
+            {/* PgDog Connection Pooling Section */}
+            <section id="pgdog-overview" className="mb-16 scroll-mt-24">
+              <h2 className="text-2xl font-bold tracking-tight mb-4 flex items-center gap-2">
+                <Network className="h-6 w-6" />
+                PgDog Connection Pooling
+              </h2>
+              <p className="text-muted-foreground mb-6">
+                OrochiDB includes PgDog, an intelligent connection pooler with automatic
+                query routing, read/write splitting, and scale-to-zero support for
+                cost-effective serverless deployments.
+              </p>
+
+              <Tabs defaultValue="overview" className="mb-6">
+                <TabsList>
+                  <TabsTrigger value="overview">Overview</TabsTrigger>
+                  <TabsTrigger value="routing">Query Routing</TabsTrigger>
+                  <TabsTrigger value="scale">Scale-to-Zero</TabsTrigger>
+                  <TabsTrigger value="multitenant">Multi-tenant</TabsTrigger>
+                </TabsList>
+                <TabsContent value="overview" className="mt-4">
+                  <CodeBlock>
+{`# PgDog provides:
+# - Connection pooling with transaction/session modes
+# - Automatic read/write splitting
+# - Query routing to appropriate shards
+# - Scale-to-zero with wake-on-connect
+# - Multi-tenant SNI-based routing
+
+# Connection string format
+postgresql://user:pass@cluster.branch.db.orochi.cloud:5432/mydb
+
+# Connection pooling modes:
+# - Transaction: Connection returned after each transaction (default)
+# - Session: Connection held for entire session
+# - Statement: Connection returned after each statement`}
+                  </CodeBlock>
+                </TabsContent>
+                <TabsContent value="routing" className="mt-4">
+                  <CodeBlock>
+{`-- Read/Write Splitting
+-- Writes automatically route to primary
+INSERT INTO orders (customer_id, total) VALUES (1, 99.99);
+
+-- Reads can be routed to replicas
+-- Use /*+ READ_REPLICA */ hint for explicit replica routing
+SELECT /*+ READ_REPLICA */ * FROM orders WHERE customer_id = 1;
+
+-- Shard-aware routing using orochi_hash()
+-- PgDog automatically routes queries to correct shard
+SELECT * FROM orders WHERE customer_id = 42;
+-- Routes to shard containing hash(42)
+
+-- Cross-shard queries are automatically parallelized
+SELECT COUNT(*) FROM orders;
+-- Executes on all shards and aggregates results`}
+                  </CodeBlock>
+                </TabsContent>
+                <TabsContent value="scale" className="mt-4">
+                  <CodeBlock>
+{`# Scale-to-Zero Configuration
+# Clusters automatically suspend after inactivity
+
+# Default idle timeout: 5 minutes
+# Wake-on-connect: First connection triggers cluster start
+# Connection queued during wake (max 30s timeout)
+
+# Example: Serverless workload
+# 1. No traffic for 5 minutes -> cluster suspends
+# 2. New connection arrives
+# 3. PgDog queues the connection
+# 4. Cluster wakes up (typically 10-20 seconds)
+# 5. Connection completes to now-running cluster
+
+# Configure via Dashboard or CLI:
+orochi cluster update my-cluster --idle-timeout 10m
+orochi cluster update my-cluster --scale-to-zero enabled`}
+                  </CodeBlock>
+                </TabsContent>
+                <TabsContent value="multitenant" className="mt-4">
+                  <CodeBlock>
+{`# Multi-tenant SNI Routing
+# Each tenant gets unique connection endpoint
+
+# Format: cluster.branch.db.orochi.cloud
+# Examples:
+# - prod.main.acme.orochi.cloud       (production, main branch)
+# - dev.feature-x.acme.orochi.cloud   (dev cluster, feature branch)
+
+# Branch-based development workflow:
+# 1. Create branch from production
+orochi branch create prod my-feature
+
+# 2. Connect to branch (copy-on-write, instant)
+psql "postgresql://user@prod.my-feature.db.orochi.cloud/mydb"
+
+# 3. Test changes in isolation
+# 4. Merge or discard branch
+orochi branch merge my-feature
+orochi branch delete my-feature`}
+                  </CodeBlock>
+                </TabsContent>
+              </Tabs>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">PgDog Features</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2 text-sm text-muted-foreground">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <h4 className="font-semibold text-foreground">Connection Management</h4>
+                      <ul className="list-disc pl-6 space-y-1">
+                        <li>Transaction and session pooling modes</li>
+                        <li>Connection queuing and limits</li>
+                        <li>Automatic retry on connection failure</li>
+                        <li>Health checks and failover</li>
+                      </ul>
+                    </div>
+                    <div>
+                      <h4 className="font-semibold text-foreground">Query Intelligence</h4>
+                      <ul className="list-disc pl-6 space-y-1">
+                        <li>Read/write splitting</li>
+                        <li>Shard-aware query routing</li>
+                        <li>Query caching (optional)</li>
+                        <li>2PC transaction support</li>
+                      </ul>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </section>
+
+            {/* Benchmarks Section */}
+            <section id="benchmarks" className="mb-16 scroll-mt-24">
+              <h2 className="text-2xl font-bold tracking-tight mb-4 flex items-center gap-2">
+                <BarChart3 className="h-6 w-6" />
+                Performance Benchmarks
+              </h2>
+              <p className="text-muted-foreground mb-6">
+                OrochiDB includes a comprehensive benchmark suite for measuring
+                performance across different workload types. View real-time results
+                in the dashboard or run your own benchmarks.
+              </p>
+
+              <div className="grid gap-6 md:grid-cols-2 mb-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Activity className="h-4 w-4" />
+                      Time-Series Performance
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Insert Throughput</span>
+                        <span className="font-mono font-semibold">2,000+ ops/s</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Range Query (1hr)</span>
+                        <span className="font-mono font-semibold">0.36ms</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Range Query (1wk)</span>
+                        <span className="font-mono font-semibold">0.72ms</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Anomaly Detection</span>
+                        <span className="font-mono font-semibold">2,914 ops/s</span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Database className="h-4 w-4" />
+                      TPC-H Analytics
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Q1 (Pricing Summary)</span>
+                        <span className="font-mono font-semibold">45ms</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Q6 (Forecast Revenue)</span>
+                        <span className="font-mono font-semibold">12ms</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Columnar Scan</span>
+                        <span className="font-mono font-semibold">25ms</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Distributed Query</span>
+                        <span className="font-mono font-semibold">55ms</span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Run Your Own Benchmarks</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <CodeBlock language="bash">
+{`# Clone the benchmark suite
+git clone https://github.com/jbeck018/orochi-db
+cd orochi-db/extensions/postgres/benchmark
+
+# Run all benchmarks against your cluster
+export PGHOST=your-cluster.orochi.cloud
+export PGUSER=your-user
+export PGPASSWORD=your-password
+export PGDATABASE=your-db
+
+# Run time-series benchmarks
+cd timeseries && ./timeseries_bench
+
+# Run TPC-H benchmarks
+cd ../tpch && ./tpch_bench
+
+# Run columnar storage benchmarks
+cd ../columnar && ./columnar_bench
+
+# Generate dashboard report
+make dashboard`}
+                  </CodeBlock>
+                </CardContent>
+              </Card>
             </section>
 
             {/* Next Steps */}
