@@ -31,10 +31,10 @@
  * ============================================================ */
 
 typedef enum OrochiQueryType {
-  OROCHI_QUERY_LOCAL = 0,    /* Non-distributed query */
-  OROCHI_QUERY_SINGLE_SHARD, /* Routes to single shard */
-  OROCHI_QUERY_MULTI_SHARD,  /* Spans multiple shards */
-  OROCHI_QUERY_COORDINATOR   /* Requires coordinator aggregation */
+    OROCHI_QUERY_LOCAL = 0,    /* Non-distributed query */
+    OROCHI_QUERY_SINGLE_SHARD, /* Routes to single shard */
+    OROCHI_QUERY_MULTI_SHARD,  /* Spans multiple shards */
+    OROCHI_QUERY_COORDINATOR   /* Requires coordinator aggregation */
 } OrochiQueryType;
 
 /* ============================================================
@@ -45,45 +45,45 @@ typedef enum OrochiQueryType {
  * Fragment query - sent to worker nodes
  */
 typedef struct FragmentQuery {
-  int64 shard_id;     /* Target shard */
-  int32 node_id;      /* Target node */
-  char *query_string; /* SQL to execute */
-  List *param_values; /* Parameter values */
-  bool is_read_only;  /* For routing decisions */
+    int64 shard_id;     /* Target shard */
+    int32 node_id;      /* Target node */
+    char *query_string; /* SQL to execute */
+    List *param_values; /* Parameter values */
+    bool is_read_only;  /* For routing decisions */
 } FragmentQuery;
 
 /*
  * Distributed plan - overall execution strategy
  */
 typedef struct DistributedPlan {
-  OrochiQueryType query_type; /* Type of distributed query */
-  List *fragment_queries;     /* List of FragmentQuery */
-  int32 target_shard_count;   /* Shards involved */
-  bool needs_coordination;    /* Requires final aggregation */
-  bool is_modification;       /* INSERT/UPDATE/DELETE */
-  List *target_tables;        /* Tables involved */
-  char *coordinator_query;    /* Final aggregation query */
+    OrochiQueryType query_type; /* Type of distributed query */
+    List *fragment_queries;     /* List of FragmentQuery */
+    int32 target_shard_count;   /* Shards involved */
+    bool needs_coordination;    /* Requires final aggregation */
+    bool is_modification;       /* INSERT/UPDATE/DELETE */
+    List *target_tables;        /* Tables involved */
+    char *coordinator_query;    /* Final aggregation query */
 } DistributedPlan;
 
 /*
  * Shard restriction - predicate-based shard filtering
  */
 typedef struct ShardRestriction {
-  Oid table_oid;             /* Distributed table */
-  char *distribution_column; /* Distribution key */
-  List *shard_ids;           /* Matching shards */
-  bool is_equality;          /* Equality predicate? */
-  Datum equality_value;      /* If equality, the value */
+    Oid table_oid;             /* Distributed table */
+    char *distribution_column; /* Distribution key */
+    List *shard_ids;           /* Matching shards */
+    bool is_equality;          /* Equality predicate? */
+    Datum equality_value;      /* If equality, the value */
 } ShardRestriction;
 
 /*
  * Join analysis result
  */
 typedef struct JoinAnalysis {
-  bool is_colocated;      /* Tables are co-located */
-  bool has_reference;     /* Involves reference table */
-  bool needs_repartition; /* Requires data movement */
-  List *join_keys;        /* Join key columns */
+    bool is_colocated;      /* Tables are co-located */
+    bool has_reference;     /* Involves reference table */
+    bool needs_repartition; /* Requires data movement */
+    List *join_keys;        /* Join key columns */
 } JoinAnalysis;
 
 /* ============================================================
@@ -94,11 +94,11 @@ typedef struct JoinAnalysis {
  * OrochiScan - custom scan for distributed execution
  */
 typedef struct OrochiScanState {
-  CustomScanState css;
-  DistributedPlan *distributed_plan;
-  int current_fragment;
-  List *results;
-  void *connection_state;
+    CustomScanState css;
+    DistributedPlan *distributed_plan;
+    int current_fragment;
+    List *results;
+    void *connection_state;
 } OrochiScanState;
 
 /* ============================================================
@@ -108,8 +108,7 @@ typedef struct OrochiScanState {
 /*
  * Main planner hook
  */
-extern PlannedStmt *orochi_planner_hook(Query *parse, const char *query_string,
-                                        int cursorOptions,
+extern PlannedStmt *orochi_planner_hook(Query *parse, const char *query_string, int cursorOptions,
                                         ParamListInfo boundParams);
 
 /*
@@ -145,8 +144,7 @@ extern List *orochi_analyze_predicates(Query *parse, Oid table_oid);
  * Analyze quals (WHERE clause) for shard pruning
  * Takes raw Node* quals instead of Query*
  */
-extern ShardRestriction *orochi_analyze_quals_for_pruning(Node *quals,
-                                                          Oid table_oid);
+extern ShardRestriction *orochi_analyze_quals_for_pruning(Node *quals, Oid table_oid);
 
 /*
  * Determine shards for query
@@ -189,8 +187,7 @@ extern JoinAnalysis *orochi_analyze_join(Query *parse);
 /*
  * Check if tables can be joined locally
  */
-extern bool orochi_can_join_locally(Oid table1_oid, Oid table2_oid,
-                                    List *join_conditions);
+extern bool orochi_can_join_locally(Oid table1_oid, Oid table2_oid, List *join_conditions);
 
 /*
  * Plan repartition join if needed
@@ -242,12 +239,10 @@ extern void orochi_optimize_fragment_order(DistributedPlan *plan);
 extern CustomScanMethods orochi_scan_methods;
 
 extern Node *orochi_create_scan_state(CustomScan *cscan);
-extern void orochi_begin_custom_scan(CustomScanState *node, EState *estate,
-                                     int eflags);
+extern void orochi_begin_custom_scan(CustomScanState *node, EState *estate, int eflags);
 extern TupleTableSlot *orochi_exec_custom_scan(CustomScanState *node);
 extern void orochi_end_custom_scan(CustomScanState *node);
 extern void orochi_rescan_custom_scan(CustomScanState *node);
-extern void orochi_explain_custom_scan(CustomScanState *node, List *ancestors,
-                                       ExplainState *es);
+extern void orochi_explain_custom_scan(CustomScanState *node, List *ancestors, ExplainState *es);
 
 #endif /* OROCHI_DISTRIBUTED_PLANNER_H */

@@ -27,8 +27,7 @@
  * Create physical shard tables for a distributed table.
  * Creates tables named: schema.tablename_shard_N
  */
-extern void orochi_create_physical_shards(Oid table_oid, int shard_count,
-                                          const char *dist_column);
+extern void orochi_create_physical_shards(Oid table_oid, int shard_count, const char *dist_column);
 
 /*
  * Get the physical shard table name for a given shard index
@@ -57,8 +56,7 @@ extern int64 orochi_redistribute_data(Oid table_oid);
 /*
  * Install INSERT/UPDATE/DELETE routing trigger on parent table
  */
-extern void orochi_install_routing_trigger(Oid table_oid,
-                                           const char *dist_column,
+extern void orochi_install_routing_trigger(Oid table_oid, const char *dist_column,
                                            int32 shard_count);
 
 /*
@@ -70,8 +68,7 @@ extern void orochi_remove_routing_trigger(Oid table_oid);
  * Compute which shard a value belongs to
  * Returns shard index (0-based)
  */
-extern int32 orochi_compute_shard_for_value(Datum value, Oid type_oid,
-                                            int32 shard_count);
+extern int32 orochi_compute_shard_for_value(Datum value, Oid type_oid, int32 shard_count);
 
 /* ============================================================
  * View Management for Transparent Access
@@ -81,8 +78,7 @@ extern int32 orochi_compute_shard_for_value(Datum value, Oid type_oid,
  * Create a view that unions all shard tables
  * (Used if parent table is renamed/hidden)
  */
-extern void orochi_create_union_view(Oid table_oid, const char *dist_column,
-                                     int32 shard_count);
+extern void orochi_create_union_view(Oid table_oid, const char *dist_column, int32 shard_count);
 
 /*
  * Drop the union view

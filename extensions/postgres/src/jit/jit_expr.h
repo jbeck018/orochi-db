@@ -22,26 +22,22 @@
 /*
  * Generate scalar evaluation function for int64 result
  */
-extern JitEvalInt64Fn jit_generate_eval_int64(JitContext *ctx,
-                                              JitExprNode *expr);
+extern JitEvalInt64Fn jit_generate_eval_int64(JitContext *ctx, JitExprNode *expr);
 
 /*
  * Generate scalar evaluation function for int32 result
  */
-extern JitEvalInt32Fn jit_generate_eval_int32(JitContext *ctx,
-                                              JitExprNode *expr);
+extern JitEvalInt32Fn jit_generate_eval_int32(JitContext *ctx, JitExprNode *expr);
 
 /*
  * Generate scalar evaluation function for float64 result
  */
-extern JitEvalFloat64Fn jit_generate_eval_float64(JitContext *ctx,
-                                                  JitExprNode *expr);
+extern JitEvalFloat64Fn jit_generate_eval_float64(JitContext *ctx, JitExprNode *expr);
 
 /*
  * Generate scalar evaluation function for float32 result
  */
-extern JitEvalFloat32Fn jit_generate_eval_float32(JitContext *ctx,
-                                                  JitExprNode *expr);
+extern JitEvalFloat32Fn jit_generate_eval_float32(JitContext *ctx, JitExprNode *expr);
 
 /*
  * Generate scalar evaluation function for boolean result
@@ -51,20 +47,17 @@ extern JitEvalBoolFn jit_generate_eval_bool(JitContext *ctx, JitExprNode *expr);
 /*
  * Generate vectorized batch filter function
  */
-extern JitFilterExprFn jit_generate_batch_filter(JitContext *ctx,
-                                                 JitExprNode *expr);
+extern JitFilterExprFn jit_generate_batch_filter(JitContext *ctx, JitExprNode *expr);
 
 /*
  * Generate specialized sum function for int64
  */
-extern JitSumInt64Fn jit_generate_sum_int64(JitContext *ctx,
-                                            int32 column_index);
+extern JitSumInt64Fn jit_generate_sum_int64(JitContext *ctx, int32 column_index);
 
 /*
  * Generate specialized sum function for float64
  */
-extern JitSumFloat64Fn jit_generate_sum_float64(JitContext *ctx,
-                                                int32 column_index);
+extern JitSumFloat64Fn jit_generate_sum_float64(JitContext *ctx, int32 column_index);
 
 /* ============================================================
  * Expression Tree Utilities
@@ -73,8 +66,8 @@ extern JitSumFloat64Fn jit_generate_sum_float64(JitContext *ctx,
 /*
  * Extract all column references from an expression tree
  */
-extern void jit_extract_column_refs(JitExprNode *expr, int32 *columns,
-                                    int32 *count, int32 max_columns);
+extern void jit_extract_column_refs(JitExprNode *expr, int32 *columns, int32 *count,
+                                    int32 max_columns);
 
 /*
  * Check if expression is a simple constant

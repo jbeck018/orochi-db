@@ -31,8 +31,8 @@
 
 /* Default precision gives ~0.8% error rate with 16KB memory */
 #define HLL_PRECISION_DEFAULT 14
-#define HLL_PRECISION_MIN 4
-#define HLL_PRECISION_MAX 18
+#define HLL_PRECISION_MIN     4
+#define HLL_PRECISION_MAX     18
 
 /* Register count = 2^precision */
 #define HLL_REGISTERS(precision) (1 << (precision))
@@ -45,13 +45,12 @@
 #define HLL_LINEAR_COUNT_THRESHOLD 2.5f
 
 /* MurmurHash3 constants */
-#define MURMUR_C1 0xcc9e2d51
-#define MURMUR_C2 0x1b873593
+#define MURMUR_C1   0xcc9e2d51
+#define MURMUR_C2   0x1b873593
 #define MURMUR_SEED 42
 
 /* Size calculation for memory allocation */
-#define HLL_SIZE(precision)                                                    \
-  (offsetof(HyperLogLog, registers) + HLL_REGISTERS(precision))
+#define HLL_SIZE(precision) (offsetof(HyperLogLog, registers) + HLL_REGISTERS(precision))
 
 /* ============================================================
  * Data Structures
@@ -65,16 +64,16 @@
  * values estimates the total cardinality.
  */
 typedef struct HyperLogLog {
-  int32 vl_len_;                          /* PostgreSQL varlena header */
-  uint8 precision;                        /* Number of bits for buckets (p) */
-  uint8 sparse;                           /* Using sparse representation? */
-  uint16 flags;                           /* Reserved for future use */
-  int64 total_count;                      /* Total elements added */
-  uint8 registers[FLEXIBLE_ARRAY_MEMBER]; /* Max leading zeros per bucket */
+    int32 vl_len_;                          /* PostgreSQL varlena header */
+    uint8 precision;                        /* Number of bits for buckets (p) */
+    uint8 sparse;                           /* Using sparse representation? */
+    uint16 flags;                           /* Reserved for future use */
+    int64 total_count;                      /* Total elements added */
+    uint8 registers[FLEXIBLE_ARRAY_MEMBER]; /* Max leading zeros per bucket */
 } HyperLogLog;
 
 /* Datum conversion macros for PostgreSQL integration */
-#define DatumGetHLL(x) ((HyperLogLog *)PG_DETOAST_DATUM(x))
+#define DatumGetHLL(x)     ((HyperLogLog *)PG_DETOAST_DATUM(x))
 #define PG_GETARG_HLL_P(n) DatumGetHLL(PG_GETARG_DATUM(n))
 #define PG_RETURN_HLL_P(x) PG_RETURN_POINTER(x)
 

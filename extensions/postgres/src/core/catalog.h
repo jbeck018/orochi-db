@@ -25,16 +25,16 @@
  * Catalog Table Names
  * ============================================================ */
 
-#define OROCHI_TABLES_TABLE "orochi_tables"
-#define OROCHI_SHARDS_TABLE "orochi_shards"
+#define OROCHI_TABLES_TABLE           "orochi_tables"
+#define OROCHI_SHARDS_TABLE           "orochi_shards"
 #define OROCHI_SHARD_PLACEMENTS_TABLE "orochi_shard_placements"
-#define OROCHI_CHUNKS_TABLE "orochi_chunks"
-#define OROCHI_NODES_TABLE "orochi_nodes"
-#define OROCHI_STRIPES_TABLE "orochi_stripes"
-#define OROCHI_COLUMN_CHUNKS_TABLE "orochi_column_chunks"
+#define OROCHI_CHUNKS_TABLE           "orochi_chunks"
+#define OROCHI_NODES_TABLE            "orochi_nodes"
+#define OROCHI_STRIPES_TABLE          "orochi_stripes"
+#define OROCHI_COLUMN_CHUNKS_TABLE    "orochi_column_chunks"
 #define OROCHI_TIERING_POLICIES_TABLE "orochi_tiering_policies"
-#define OROCHI_VECTOR_INDEXES_TABLE "orochi_vector_indexes"
-#define OROCHI_CONTINUOUS_AGGS_TABLE "orochi_continuous_aggregates"
+#define OROCHI_VECTOR_INDEXES_TABLE   "orochi_vector_indexes"
+#define OROCHI_CONTINUOUS_AGGS_TABLE  "orochi_continuous_aggregates"
 #define OROCHI_INVALIDATION_LOG_TABLE "orochi_invalidation_log"
 
 /* ============================================================
@@ -73,8 +73,7 @@ extern OrochiTableInfo *orochi_catalog_get_table(Oid relid);
 /*
  * Get table metadata by name
  */
-extern OrochiTableInfo *orochi_catalog_get_table_by_name(const char *schema,
-                                                         const char *table);
+extern OrochiTableInfo *orochi_catalog_get_table_by_name(const char *schema, const char *table);
 
 /*
  * Update table metadata
@@ -119,20 +118,17 @@ extern List *orochi_catalog_get_table_shards(Oid table_oid);
 /*
  * Get shard for a hash value
  */
-extern OrochiShardInfo *orochi_catalog_get_shard_for_hash(Oid table_oid,
-                                                          int32 hash_value);
+extern OrochiShardInfo *orochi_catalog_get_shard_for_hash(Oid table_oid, int32 hash_value);
 
 /*
  * Update shard placement
  */
-extern void orochi_catalog_update_shard_placement(int64 shard_id,
-                                                  int32 node_id);
+extern void orochi_catalog_update_shard_placement(int64 shard_id, int32 node_id);
 
 /*
  * Update shard statistics
  */
-extern void orochi_catalog_update_shard_stats(int64 shard_id, int64 row_count,
-                                              int64 size_bytes);
+extern void orochi_catalog_update_shard_stats(int64 shard_id, int64 row_count, int64 size_bytes);
 
 /*
  * Record shard access for tiering decisions
@@ -142,14 +138,13 @@ extern void orochi_catalog_record_shard_access(int64 shard_id);
 /*
  * Create a single shard
  */
-extern int64 orochi_catalog_create_shard(Oid table_oid, int32 hash_min,
-                                         int32 hash_max, int32 node_id);
+extern int64 orochi_catalog_create_shard(Oid table_oid, int32 hash_min, int32 hash_max,
+                                         int32 node_id);
 
 /*
  * Update shard hash range
  */
-extern void orochi_catalog_update_shard_range(int64 shard_id, int32 hash_min,
-                                              int32 hash_max);
+extern void orochi_catalog_update_shard_range(int64 shard_id, int32 hash_min, int32 hash_max);
 
 /*
  * Delete a shard
@@ -163,8 +158,7 @@ extern void orochi_catalog_delete_shard(int64 shard_id);
 /*
  * Create a new chunk
  */
-extern int64 orochi_catalog_create_chunk(Oid hypertable_oid,
-                                         TimestampTz range_start,
+extern int64 orochi_catalog_create_chunk(Oid hypertable_oid, TimestampTz range_start,
                                          TimestampTz range_end);
 
 /*
@@ -185,21 +179,18 @@ extern int orochi_catalog_get_chunk_count(Oid hypertable_oid);
 /*
  * Get chunks in time range
  */
-extern List *orochi_catalog_get_chunks_in_range(Oid hypertable_oid,
-                                                TimestampTz start,
+extern List *orochi_catalog_get_chunks_in_range(Oid hypertable_oid, TimestampTz start,
                                                 TimestampTz end);
 
 /*
  * Update chunk compression status
  */
-extern void orochi_catalog_update_chunk_compression(int64 chunk_id,
-                                                    bool is_compressed);
+extern void orochi_catalog_update_chunk_compression(int64 chunk_id, bool is_compressed);
 
 /*
  * Update chunk storage tier
  */
-extern void orochi_catalog_update_chunk_tier(int64 chunk_id,
-                                             OrochiStorageTier tier);
+extern void orochi_catalog_update_chunk_tier(int64 chunk_id, OrochiStorageTier tier);
 
 /*
  * Delete chunk metadata
@@ -213,8 +204,7 @@ extern void orochi_catalog_delete_chunk(int64 chunk_id);
 /*
  * Register a new node
  */
-extern int32 orochi_catalog_add_node(const char *hostname, int port,
-                                     OrochiNodeRole role);
+extern int32 orochi_catalog_add_node(const char *hostname, int port, OrochiNodeRole role);
 
 /*
  * Get node information
@@ -239,9 +229,8 @@ extern void orochi_catalog_update_node_status(int32 node_id, bool is_active);
 /*
  * Update node statistics
  */
-extern void orochi_catalog_update_node_stats(int32 node_id, int64 shard_count,
-                                             int64 total_size, double cpu_usage,
-                                             double memory_usage);
+extern void orochi_catalog_update_node_stats(int32 node_id, int64 shard_count, int64 total_size,
+                                             double cpu_usage, double memory_usage);
 
 /*
  * Record node heartbeat
@@ -260,8 +249,8 @@ extern void orochi_catalog_remove_node(int32 node_id);
 /*
  * Create stripe metadata
  */
-extern int64 orochi_catalog_create_stripe(Oid table_oid, int64 first_row,
-                                          int64 row_count, int32 column_count);
+extern int64 orochi_catalog_create_stripe(Oid table_oid, int64 first_row, int64 row_count,
+                                          int32 column_count);
 
 /*
  * Get stripe information
@@ -276,9 +265,7 @@ extern List *orochi_catalog_get_table_stripes(Oid table_oid);
 /*
  * Update stripe status
  */
-extern void orochi_catalog_update_stripe_status(int64 stripe_id,
-                                                bool is_flushed,
-                                                int64 data_size,
+extern void orochi_catalog_update_stripe_status(int64 stripe_id, bool is_flushed, int64 data_size,
                                                 int64 metadata_size);
 
 /*
@@ -289,10 +276,8 @@ extern void orochi_catalog_create_column_chunk(OrochiColumnChunk *chunk);
 /*
  * Update column chunk min/max statistics
  */
-extern void orochi_catalog_update_column_stats(int64 stripe_id,
-                                               int16 column_index,
-                                               Datum min_value, Datum max_value,
-                                               Oid type_oid);
+extern void orochi_catalog_update_column_stats(int64 stripe_id, int16 column_index, Datum min_value,
+                                               Datum max_value, Oid type_oid);
 
 /*
  * Get column chunks for a stripe
@@ -304,17 +289,16 @@ extern List *orochi_catalog_get_stripe_columns(int64 stripe_id);
  * Returns the compressed data buffer and sets size.
  * Caller is responsible for freeing the returned buffer.
  */
-extern char *orochi_catalog_read_chunk_data(int64 stripe_id,
-                                            int32 chunk_group_index,
-                                            int16 column_index,
-                                            int64 *data_size);
+extern char *orochi_catalog_read_chunk_data(int64 stripe_id, int32 chunk_group_index,
+                                            int16 column_index, int64 *data_size);
 
 /*
  * Extended version of create_column_chunk that stores the data
  */
-extern void orochi_catalog_create_column_chunk_with_data(
-    int64 stripe_id, int32 chunk_group_index, int16 column_index,
-    OrochiColumnChunk *chunk, const char *data, int64 data_size);
+extern void orochi_catalog_create_column_chunk_with_data(int64 stripe_id, int32 chunk_group_index,
+                                                         int16 column_index,
+                                                         OrochiColumnChunk *chunk, const char *data,
+                                                         int64 data_size);
 
 /* ============================================================
  * Tiering Policy Operations
@@ -371,9 +355,7 @@ extern List *orochi_catalog_get_table_vector_indexes(Oid table_oid);
 /*
  * Register continuous aggregate
  */
-extern int64 orochi_catalog_register_continuous_agg(Oid view_oid,
-                                                    Oid source_table,
-                                                    Oid mat_table,
+extern int64 orochi_catalog_register_continuous_agg(Oid view_oid, Oid source_table, Oid mat_table,
                                                     const char *query_text);
 
 /*
@@ -389,9 +371,7 @@ extern List *orochi_catalog_get_continuous_aggs(Oid source_table);
 /*
  * Update continuous aggregate refresh timestamp
  */
-extern void
-orochi_catalog_update_continuous_agg_refresh(int64 agg_id,
-                                             TimestampTz last_refresh);
+extern void orochi_catalog_update_continuous_agg_refresh(int64 agg_id, TimestampTz last_refresh);
 
 /*
  * Delete continuous aggregate
@@ -401,8 +381,7 @@ extern void orochi_catalog_delete_continuous_agg(Oid view_oid);
 /*
  * Log invalidation for continuous aggregates
  */
-extern void orochi_catalog_log_invalidation(Oid table_oid, TimestampTz start,
-                                            TimestampTz end);
+extern void orochi_catalog_log_invalidation(Oid table_oid, TimestampTz start, TimestampTz end);
 
 /*
  * Get pending invalidations for an aggregate

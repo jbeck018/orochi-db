@@ -25,18 +25,18 @@
  * Vector Type Constants
  * ============================================================ */
 
-#define VECTOR_MAX_DIM 16000 /* Maximum dimensions */
+#define VECTOR_MAX_DIM   16000 /* Maximum dimensions */
 #define VECTOR_SIZE(dim) (offsetof(Vector, x) + sizeof(float) * (dim))
 
 /* Index types */
-#define VECTOR_INDEX_FLAT "flat"
+#define VECTOR_INDEX_FLAT    "flat"
 #define VECTOR_INDEX_IVFFLAT "ivfflat"
-#define VECTOR_INDEX_HNSW "hnsw"
+#define VECTOR_INDEX_HNSW    "hnsw"
 
 /* Distance functions */
-#define VECTOR_DIST_L2 "l2"
+#define VECTOR_DIST_L2     "l2"
 #define VECTOR_DIST_COSINE "cosine"
-#define VECTOR_DIST_INNER "inner_product"
+#define VECTOR_DIST_INNER  "inner_product"
 
 /* ============================================================
  * Vector Data Type
@@ -46,13 +46,13 @@
  * Vector - variable-length float array
  */
 typedef struct Vector {
-  int32 vl_len_;                  /* varlena header */
-  int16 dim;                      /* number of dimensions */
-  int16 unused;                   /* padding */
-  float x[FLEXIBLE_ARRAY_MEMBER]; /* vector elements */
+    int32 vl_len_;                  /* varlena header */
+    int16 dim;                      /* number of dimensions */
+    int16 unused;                   /* padding */
+    float x[FLEXIBLE_ARRAY_MEMBER]; /* vector elements */
 } Vector;
 
-#define DatumGetVector(x) ((Vector *)PG_DETOAST_DATUM(x))
+#define DatumGetVector(x)     ((Vector *)PG_DETOAST_DATUM(x))
 #define PG_GETARG_VECTOR_P(n) DatumGetVector(PG_GETARG_DATUM(n))
 #define PG_RETURN_VECTOR_P(x) PG_RETURN_POINTER(x)
 
@@ -64,28 +64,28 @@ typedef struct Vector {
  * IVF (Inverted File) index parameters
  */
 typedef struct IVFIndexOptions {
-  int32 lists;  /* Number of clusters */
-  int32 probes; /* Clusters to search */
+    int32 lists;  /* Number of clusters */
+    int32 probes; /* Clusters to search */
 } IVFIndexOptions;
 
 /*
  * HNSW (Hierarchical Navigable Small World) parameters
  */
 typedef struct HNSWIndexOptions {
-  int32 m;               /* Max connections per layer */
-  int32 ef_construction; /* Size of dynamic candidate list */
-  int32 ef_search;       /* Search-time ef */
+    int32 m;               /* Max connections per layer */
+    int32 ef_construction; /* Size of dynamic candidate list */
+    int32 ef_search;       /* Search-time ef */
 } HNSWIndexOptions;
 
 /*
  * Vector index scan state
  */
 typedef struct VectorScanState {
-  Oid index_oid;
-  Vector *query_vector;
-  int k; /* Number of results */
-  char *distance_type;
-  float distance_threshold;
+    Oid index_oid;
+    Vector *query_vector;
+    int k; /* Number of results */
+    char *distance_type;
+    float distance_threshold;
 } VectorScanState;
 
 /* ============================================================
@@ -237,15 +237,13 @@ extern float vector_l2_norm_simd(const float *a, int dim);
 /*
  * Compute distances from query to multiple vectors
  */
-extern void vector_batch_l2_distances(Vector *query, Vector **vectors,
-                                      int count, float *distances);
+extern void vector_batch_l2_distances(Vector *query, Vector **vectors, int count, float *distances);
 
 /*
  * Find k nearest neighbors
  */
-extern void vector_knn(Vector *query, Vector **vectors, int count, int k,
-                       int *indices, float *distances,
-                       const char *distance_type);
+extern void vector_knn(Vector *query, Vector **vectors, int count, int k, int *indices,
+                       float *distances, const char *distance_type);
 
 /* ============================================================
  * Quantization (for compression)
@@ -255,11 +253,11 @@ extern void vector_knn(Vector *query, Vector **vectors, int count, int k,
  * Product quantization parameters
  */
 typedef struct PQParams {
-  int dim;          /* Original dimensions */
-  int m;            /* Number of subquantizers */
-  int ksub;         /* Codes per subquantizer (typically 256) */
-  int dsub;         /* Dimensions per subquantizer */
-  float *centroids; /* Codebook [m][ksub][dsub] */
+    int dim;          /* Original dimensions */
+    int m;            /* Number of subquantizers */
+    int ksub;         /* Codes per subquantizer (typically 256) */
+    int dsub;         /* Dimensions per subquantizer */
+    float *centroids; /* Codebook [m][ksub][dsub] */
 } PQParams;
 
 /*
@@ -289,23 +287,20 @@ extern float pq_distance(PQParams *pq, Vector *query, uint8 *codes);
 /*
  * Create vector index
  */
-extern void orochi_create_vector_index(Oid table_oid, const char *column_name,
-                                       int dimensions, const char *index_type,
-                                       const char *distance_type);
+extern void orochi_create_vector_index(Oid table_oid, const char *column_name, int dimensions,
+                                       const char *index_type, const char *distance_type);
 
 /*
  * Create IVFFlat index
  */
-extern void orochi_create_ivfflat_index(Oid table_oid, const char *column_name,
-                                        int dimensions, int lists,
-                                        const char *distance_type);
+extern void orochi_create_ivfflat_index(Oid table_oid, const char *column_name, int dimensions,
+                                        int lists, const char *distance_type);
 
 /*
  * Create HNSW index
  */
-extern void orochi_create_hnsw_index(Oid table_oid, const char *column_name,
-                                     int dimensions, int m, int ef_construction,
-                                     const char *distance_type);
+extern void orochi_create_hnsw_index(Oid table_oid, const char *column_name, int dimensions, int m,
+                                     int ef_construction, const char *distance_type);
 
 /* ============================================================
  * Vector Search Functions

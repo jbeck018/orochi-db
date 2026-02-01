@@ -32,8 +32,8 @@
 /* Default compression factor (delta) - higher = more centroids = more accuracy
  */
 #define TDIGEST_COMPRESSION_DEFAULT 100.0
-#define TDIGEST_COMPRESSION_MIN 10.0
-#define TDIGEST_COMPRESSION_MAX 1000.0
+#define TDIGEST_COMPRESSION_MIN     10.0
+#define TDIGEST_COMPRESSION_MAX     1000.0
 
 /* Maximum centroids = ceil(compression * PI / 2) */
 #define TDIGEST_MAX_CENTROIDS(delta) ((int)ceil((delta) * 1.5708))
@@ -58,8 +58,8 @@
  * stores the mean of its values and the total weight (count).
  */
 typedef struct Centroid {
-  double mean;   /* Mean value of this centroid */
-  double weight; /* Total weight (count) of values in this centroid */
+    double mean;   /* Mean value of this centroid */
+    double weight; /* Total weight (count) of values in this centroid */
 } Centroid;
 
 /*
@@ -73,44 +73,41 @@ typedef struct Centroid {
  * Accuracy: ~1/compression relative error at median, much better at tails
  */
 typedef struct TDigest {
-  int32 vl_len_;        /* PostgreSQL varlena header */
-  double compression;   /* Compression factor (delta) */
-  int32 num_centroids;  /* Current number of centroids */
-  int32 max_centroids;  /* Maximum centroids capacity */
-  int64 total_weight;   /* Sum of all centroid weights */
-  double min_value;     /* Minimum observed value */
-  double max_value;     /* Maximum observed value */
-  int32 buffer_count;   /* Unmerged values in buffer */
-  uint8 scale_function; /* Which scale function to use */
-  uint8 is_sorted;      /* Are centroids sorted? */
-  uint16 flags;         /* Reserved */
+    int32 vl_len_;        /* PostgreSQL varlena header */
+    double compression;   /* Compression factor (delta) */
+    int32 num_centroids;  /* Current number of centroids */
+    int32 max_centroids;  /* Maximum centroids capacity */
+    int64 total_weight;   /* Sum of all centroid weights */
+    double min_value;     /* Minimum observed value */
+    double max_value;     /* Maximum observed value */
+    int32 buffer_count;   /* Unmerged values in buffer */
+    uint8 scale_function; /* Which scale function to use */
+    uint8 is_sorted;      /* Are centroids sorted? */
+    uint16 flags;         /* Reserved */
 
-  /* Variable-length arrays follow:
-   * Centroid centroids[max_centroids];
-   * double buffer_values[TDIGEST_BUFFER_SIZE];
-   * double buffer_weights[TDIGEST_BUFFER_SIZE];
-   */
+    /* Variable-length arrays follow:
+     * Centroid centroids[max_centroids];
+     * double buffer_values[TDIGEST_BUFFER_SIZE];
+     * double buffer_weights[TDIGEST_BUFFER_SIZE];
+     */
 } TDigest;
 
 /* Size calculation macros */
-#define TDIGEST_HEADER_SIZE offsetof(TDigest, flags) + sizeof(uint16)
+#define TDIGEST_HEADER_SIZE      offsetof(TDigest, flags) + sizeof(uint16)
 #define TDIGEST_CENTROIDS_OFFSET MAXALIGN(TDIGEST_HEADER_SIZE)
-#define TDIGEST_CENTROIDS(td)                                                  \
-  ((Centroid *)((char *)(td) + TDIGEST_CENTROIDS_OFFSET))
-#define TDIGEST_BUFFER_VALUES(td)                                              \
-  ((double *)((char *)(td) + TDIGEST_CENTROIDS_OFFSET +                        \
-              (td)->max_centroids * sizeof(Centroid)))
-#define TDIGEST_BUFFER_WEIGHTS(td)                                             \
-  ((double *)((char *)(td) + TDIGEST_CENTROIDS_OFFSET +                        \
-              (td)->max_centroids * sizeof(Centroid) +                         \
-              TDIGEST_BUFFER_SIZE * sizeof(double)))
+#define TDIGEST_CENTROIDS(td)    ((Centroid *)((char *)(td) + TDIGEST_CENTROIDS_OFFSET))
+#define TDIGEST_BUFFER_VALUES(td) \
+    ((double *)((char *)(td) + TDIGEST_CENTROIDS_OFFSET + (td)->max_centroids * sizeof(Centroid)))
+#define TDIGEST_BUFFER_WEIGHTS(td)                                                                 \
+    ((double *)((char *)(td) + TDIGEST_CENTROIDS_OFFSET + (td)->max_centroids * sizeof(Centroid) + \
+                TDIGEST_BUFFER_SIZE * sizeof(double)))
 
-#define TDIGEST_SIZE(max_centroids)                                            \
-  (TDIGEST_CENTROIDS_OFFSET + (max_centroids) * sizeof(Centroid) +             \
-   TDIGEST_BUFFER_SIZE * sizeof(double) * 2)
+#define TDIGEST_SIZE(max_centroids)                                  \
+    (TDIGEST_CENTROIDS_OFFSET + (max_centroids) * sizeof(Centroid) + \
+     TDIGEST_BUFFER_SIZE * sizeof(double) * 2)
 
 /* Datum conversion macros */
-#define DatumGetTDigest(x) ((TDigest *)PG_DETOAST_DATUM(x))
+#define DatumGetTDigest(x)     ((TDigest *)PG_DETOAST_DATUM(x))
 #define PG_GETARG_TDIGEST_P(n) DatumGetTDigest(PG_GETARG_DATUM(n))
 #define PG_RETURN_TDIGEST_P(x) PG_RETURN_POINTER(x)
 
@@ -134,8 +131,7 @@ extern TDigest *tdigest_create(double compression);
 /*
  * Create T-Digest with explicit scale function selection.
  */
-extern TDigest *tdigest_create_with_scale(double compression,
-                                          int scale_function);
+extern TDigest *tdigest_create_with_scale(double compression, int scale_function);
 
 /*
  * Add a value to the T-Digest.
@@ -173,8 +169,7 @@ extern double tdigest_quantile(TDigest *td, double q);
  * More efficient than calling tdigest_quantile multiple times
  * as it only sorts centroids once.
  */
-extern void tdigest_quantiles(TDigest *td, double *quantiles, double *results,
-                              int count);
+extern void tdigest_quantiles(TDigest *td, double *quantiles, double *results, int count);
 
 /*
  * Get the CDF value (cumulative distribution function) for a value.
@@ -236,8 +231,7 @@ extern double tdigest_mean(TDigest *td);
 /*
  * Get trimmed mean (excluding extreme percentiles).
  */
-extern double tdigest_trimmed_mean(TDigest *td, double lower_fraction,
-                                   double upper_fraction);
+extern double tdigest_trimmed_mean(TDigest *td, double lower_fraction, double upper_fraction);
 
 /* ============================================================
  * Function Prototypes - Serialization
@@ -356,14 +350,12 @@ extern Datum tdigest_out(PG_FUNCTION_ARGS);
  * Scale function k(q) that determines centroid size limits.
  * Different scale functions provide different accuracy tradeoffs.
  */
-extern double tdigest_scale_function(double q, double compression,
-                                     int scale_type);
+extern double tdigest_scale_function(double q, double compression, int scale_type);
 
 /*
  * Inverse scale function k^(-1)(k).
  */
-extern double tdigest_scale_inverse(double k, double compression,
-                                    int scale_type);
+extern double tdigest_scale_inverse(double k, double compression, int scale_type);
 
 /*
  * Sort centroids by mean value.

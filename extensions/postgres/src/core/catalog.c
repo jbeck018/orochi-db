@@ -33,22 +33,22 @@ static Oid OrochiSchemaOid = InvalidOid;
 /*
  * Helper function to format an Interval as SQL literal
  */
-static char *format_interval_literal(Interval *interval) {
-  char *str;
-  StringInfoData buf;
+static char *format_interval_literal(Interval *interval)
+{
+    char *str;
+    StringInfoData buf;
 
-  if (interval == NULL)
-    return "NULL";
+    if (interval == NULL)
+        return "NULL";
 
-  /* Use PostgreSQL's interval_out to get string representation */
-  str = DatumGetCString(
-      DirectFunctionCall1(interval_out, IntervalPGetDatum(interval)));
+    /* Use PostgreSQL's interval_out to get string representation */
+    str = DatumGetCString(DirectFunctionCall1(interval_out, IntervalPGetDatum(interval)));
 
-  initStringInfo(&buf);
-  appendStringInfo(&buf, "INTERVAL '%s'", str);
+    initStringInfo(&buf);
+    appendStringInfo(&buf, "INTERVAL '%s'", str);
 
-  pfree(str);
-  return buf.data;
+    pfree(str);
+    return buf.data;
 }
 
 /* Forward declarations */
@@ -59,730 +59,693 @@ static Datum datum_from_cstring(const char *str);
  * orochi_catalog_init
  *    Create the Orochi schema and all metadata tables
  */
-void orochi_catalog_init(void) {
-  const char *create_schema_sql = "CREATE SCHEMA IF NOT EXISTS orochi";
+void orochi_catalog_init(void)
+{
+    const char *create_schema_sql = "CREATE SCHEMA IF NOT EXISTS orochi";
 
-  const char *create_tables_sql =
-      /* Main table registry */
-      "CREATE TABLE IF NOT EXISTS orochi.orochi_tables ("
-      "    table_oid OID PRIMARY KEY,"
-      "    schema_name TEXT NOT NULL,"
-      "    table_name TEXT NOT NULL,"
-      "    storage_type INTEGER NOT NULL DEFAULT 0,"
-      "    shard_strategy INTEGER NOT NULL DEFAULT 0,"
-      "    shard_count INTEGER NOT NULL DEFAULT 0,"
-      "    distribution_column TEXT,"
-      "    is_distributed BOOLEAN NOT NULL DEFAULT FALSE,"
-      "    is_timeseries BOOLEAN NOT NULL DEFAULT FALSE,"
-      "    time_column TEXT,"
-      "    chunk_interval INTERVAL,"
-      "    compression INTEGER NOT NULL DEFAULT 0,"
-      "    compression_level INTEGER NOT NULL DEFAULT 3,"
-      "    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),"
-      "    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
-      ");"
+    const char *create_tables_sql =
+        /* Main table registry */
+        "CREATE TABLE IF NOT EXISTS orochi.orochi_tables ("
+        "    table_oid OID PRIMARY KEY,"
+        "    schema_name TEXT NOT NULL,"
+        "    table_name TEXT NOT NULL,"
+        "    storage_type INTEGER NOT NULL DEFAULT 0,"
+        "    shard_strategy INTEGER NOT NULL DEFAULT 0,"
+        "    shard_count INTEGER NOT NULL DEFAULT 0,"
+        "    distribution_column TEXT,"
+        "    is_distributed BOOLEAN NOT NULL DEFAULT FALSE,"
+        "    is_timeseries BOOLEAN NOT NULL DEFAULT FALSE,"
+        "    time_column TEXT,"
+        "    chunk_interval INTERVAL,"
+        "    compression INTEGER NOT NULL DEFAULT 0,"
+        "    compression_level INTEGER NOT NULL DEFAULT 3,"
+        "    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),"
+        "    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
+        ");"
 
-      /* Shard metadata */
-      "CREATE TABLE IF NOT EXISTS orochi.orochi_shards ("
-      "    shard_id BIGSERIAL PRIMARY KEY,"
-      "    table_oid OID NOT NULL REFERENCES orochi.orochi_tables(table_oid) "
-      "ON DELETE CASCADE,"
-      "    shard_index INTEGER NOT NULL,"
-      "    hash_min INTEGER NOT NULL,"
-      "    hash_max INTEGER NOT NULL,"
-      "    node_id INTEGER,"
-      "    row_count BIGINT NOT NULL DEFAULT 0,"
-      "    size_bytes BIGINT NOT NULL DEFAULT 0,"
-      "    storage_tier INTEGER NOT NULL DEFAULT 0,"
-      "    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),"
-      "    last_accessed TIMESTAMPTZ NOT NULL DEFAULT NOW(),"
-      "    UNIQUE(table_oid, shard_index)"
-      ");"
+        /* Shard metadata */
+        "CREATE TABLE IF NOT EXISTS orochi.orochi_shards ("
+        "    shard_id BIGSERIAL PRIMARY KEY,"
+        "    table_oid OID NOT NULL REFERENCES orochi.orochi_tables(table_oid) "
+        "ON DELETE CASCADE,"
+        "    shard_index INTEGER NOT NULL,"
+        "    hash_min INTEGER NOT NULL,"
+        "    hash_max INTEGER NOT NULL,"
+        "    node_id INTEGER,"
+        "    row_count BIGINT NOT NULL DEFAULT 0,"
+        "    size_bytes BIGINT NOT NULL DEFAULT 0,"
+        "    storage_tier INTEGER NOT NULL DEFAULT 0,"
+        "    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),"
+        "    last_accessed TIMESTAMPTZ NOT NULL DEFAULT NOW(),"
+        "    UNIQUE(table_oid, shard_index)"
+        ");"
 
-      /* Shard placements (for replication) */
-      "CREATE TABLE IF NOT EXISTS orochi.orochi_shard_placements ("
-      "    placement_id BIGSERIAL PRIMARY KEY,"
-      "    shard_id BIGINT NOT NULL REFERENCES orochi.orochi_shards(shard_id) "
-      "ON DELETE CASCADE,"
-      "    node_id INTEGER NOT NULL,"
-      "    is_primary BOOLEAN NOT NULL DEFAULT TRUE,"
-      "    state INTEGER NOT NULL DEFAULT 0,"
-      "    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
-      ");"
+        /* Shard placements (for replication) */
+        "CREATE TABLE IF NOT EXISTS orochi.orochi_shard_placements ("
+        "    placement_id BIGSERIAL PRIMARY KEY,"
+        "    shard_id BIGINT NOT NULL REFERENCES orochi.orochi_shards(shard_id) "
+        "ON DELETE CASCADE,"
+        "    node_id INTEGER NOT NULL,"
+        "    is_primary BOOLEAN NOT NULL DEFAULT TRUE,"
+        "    state INTEGER NOT NULL DEFAULT 0,"
+        "    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
+        ");"
 
-      /* Time-series chunks */
-      "CREATE TABLE IF NOT EXISTS orochi.orochi_chunks ("
-      "    chunk_id BIGSERIAL PRIMARY KEY,"
-      "    hypertable_oid OID NOT NULL REFERENCES "
-      "orochi.orochi_tables(table_oid) ON DELETE CASCADE,"
-      "    dimension_id INTEGER NOT NULL DEFAULT 0,"
-      "    chunk_table_oid OID,"
-      "    range_start TIMESTAMPTZ NOT NULL,"
-      "    range_end TIMESTAMPTZ NOT NULL,"
-      "    row_count BIGINT NOT NULL DEFAULT 0,"
-      "    size_bytes BIGINT NOT NULL DEFAULT 0,"
-      "    is_compressed BOOLEAN NOT NULL DEFAULT FALSE,"
-      "    storage_tier INTEGER NOT NULL DEFAULT 0,"
-      "    tablespace_name TEXT,"
-      "    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),"
-      "    UNIQUE(hypertable_oid, range_start)"
-      ");"
+        /* Time-series chunks */
+        "CREATE TABLE IF NOT EXISTS orochi.orochi_chunks ("
+        "    chunk_id BIGSERIAL PRIMARY KEY,"
+        "    hypertable_oid OID NOT NULL REFERENCES "
+        "orochi.orochi_tables(table_oid) ON DELETE CASCADE,"
+        "    dimension_id INTEGER NOT NULL DEFAULT 0,"
+        "    chunk_table_oid OID,"
+        "    range_start TIMESTAMPTZ NOT NULL,"
+        "    range_end TIMESTAMPTZ NOT NULL,"
+        "    row_count BIGINT NOT NULL DEFAULT 0,"
+        "    size_bytes BIGINT NOT NULL DEFAULT 0,"
+        "    is_compressed BOOLEAN NOT NULL DEFAULT FALSE,"
+        "    storage_tier INTEGER NOT NULL DEFAULT 0,"
+        "    tablespace_name TEXT,"
+        "    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),"
+        "    UNIQUE(hypertable_oid, range_start)"
+        ");"
 
-      /* Cluster nodes */
-      "CREATE TABLE IF NOT EXISTS orochi.orochi_nodes ("
-      "    node_id SERIAL PRIMARY KEY,"
-      "    hostname TEXT NOT NULL,"
-      "    port INTEGER NOT NULL DEFAULT 5432,"
-      "    role INTEGER NOT NULL DEFAULT 1,"
-      "    is_active BOOLEAN NOT NULL DEFAULT TRUE,"
-      "    shard_count BIGINT NOT NULL DEFAULT 0,"
-      "    total_size BIGINT NOT NULL DEFAULT 0,"
-      "    cpu_usage DOUBLE PRECISION NOT NULL DEFAULT 0.0,"
-      "    memory_usage DOUBLE PRECISION NOT NULL DEFAULT 0.0,"
-      "    last_heartbeat TIMESTAMPTZ NOT NULL DEFAULT NOW(),"
-      "    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),"
-      "    UNIQUE(hostname, port)"
-      ");"
+        /* Cluster nodes */
+        "CREATE TABLE IF NOT EXISTS orochi.orochi_nodes ("
+        "    node_id SERIAL PRIMARY KEY,"
+        "    hostname TEXT NOT NULL,"
+        "    port INTEGER NOT NULL DEFAULT 5432,"
+        "    role INTEGER NOT NULL DEFAULT 1,"
+        "    is_active BOOLEAN NOT NULL DEFAULT TRUE,"
+        "    shard_count BIGINT NOT NULL DEFAULT 0,"
+        "    total_size BIGINT NOT NULL DEFAULT 0,"
+        "    cpu_usage DOUBLE PRECISION NOT NULL DEFAULT 0.0,"
+        "    memory_usage DOUBLE PRECISION NOT NULL DEFAULT 0.0,"
+        "    last_heartbeat TIMESTAMPTZ NOT NULL DEFAULT NOW(),"
+        "    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),"
+        "    UNIQUE(hostname, port)"
+        ");"
 
-      /* Columnar stripes */
-      "CREATE TABLE IF NOT EXISTS orochi.orochi_stripes ("
-      "    stripe_id BIGSERIAL PRIMARY KEY,"
-      "    table_oid OID NOT NULL REFERENCES orochi.orochi_tables(table_oid) "
-      "ON DELETE CASCADE,"
-      "    first_row BIGINT NOT NULL,"
-      "    row_count BIGINT NOT NULL,"
-      "    column_count INTEGER NOT NULL,"
-      "    data_size BIGINT NOT NULL DEFAULT 0,"
-      "    metadata_size BIGINT NOT NULL DEFAULT 0,"
-      "    compression INTEGER NOT NULL DEFAULT 0,"
-      "    is_flushed BOOLEAN NOT NULL DEFAULT FALSE,"
-      "    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
-      ");"
+        /* Columnar stripes */
+        "CREATE TABLE IF NOT EXISTS orochi.orochi_stripes ("
+        "    stripe_id BIGSERIAL PRIMARY KEY,"
+        "    table_oid OID NOT NULL REFERENCES orochi.orochi_tables(table_oid) "
+        "ON DELETE CASCADE,"
+        "    first_row BIGINT NOT NULL,"
+        "    row_count BIGINT NOT NULL,"
+        "    column_count INTEGER NOT NULL,"
+        "    data_size BIGINT NOT NULL DEFAULT 0,"
+        "    metadata_size BIGINT NOT NULL DEFAULT 0,"
+        "    compression INTEGER NOT NULL DEFAULT 0,"
+        "    is_flushed BOOLEAN NOT NULL DEFAULT FALSE,"
+        "    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
+        ");"
 
-      /* Column chunks within stripes */
-      "CREATE TABLE IF NOT EXISTS orochi.orochi_column_chunks ("
-      "    chunk_id BIGSERIAL PRIMARY KEY,"
-      "    stripe_id BIGINT NOT NULL REFERENCES "
-      "orochi.orochi_stripes(stripe_id) ON DELETE CASCADE,"
-      "    chunk_group_index INTEGER NOT NULL DEFAULT 0,"
-      "    column_index SMALLINT NOT NULL,"
-      "    column_type OID NOT NULL DEFAULT 0,"
-      "    value_count BIGINT NOT NULL,"
-      "    null_count BIGINT NOT NULL DEFAULT 0,"
-      "    compressed_size BIGINT NOT NULL,"
-      "    decompressed_size BIGINT NOT NULL,"
-      "    compression INTEGER NOT NULL DEFAULT 0,"
-      "    min_value BYTEA,"
-      "    max_value BYTEA,"
-      "    has_nulls BOOLEAN NOT NULL DEFAULT FALSE,"
-      "    min_is_null BOOLEAN NOT NULL DEFAULT FALSE,"
-      "    max_is_null BOOLEAN NOT NULL DEFAULT FALSE,"
-      "    chunk_data BYTEA,"
-      "    null_bitmap BYTEA,"
-      "    UNIQUE(stripe_id, chunk_group_index, column_index)"
-      ");"
+        /* Column chunks within stripes */
+        "CREATE TABLE IF NOT EXISTS orochi.orochi_column_chunks ("
+        "    chunk_id BIGSERIAL PRIMARY KEY,"
+        "    stripe_id BIGINT NOT NULL REFERENCES "
+        "orochi.orochi_stripes(stripe_id) ON DELETE CASCADE,"
+        "    chunk_group_index INTEGER NOT NULL DEFAULT 0,"
+        "    column_index SMALLINT NOT NULL,"
+        "    column_type OID NOT NULL DEFAULT 0,"
+        "    value_count BIGINT NOT NULL,"
+        "    null_count BIGINT NOT NULL DEFAULT 0,"
+        "    compressed_size BIGINT NOT NULL,"
+        "    decompressed_size BIGINT NOT NULL,"
+        "    compression INTEGER NOT NULL DEFAULT 0,"
+        "    min_value BYTEA,"
+        "    max_value BYTEA,"
+        "    has_nulls BOOLEAN NOT NULL DEFAULT FALSE,"
+        "    min_is_null BOOLEAN NOT NULL DEFAULT FALSE,"
+        "    max_is_null BOOLEAN NOT NULL DEFAULT FALSE,"
+        "    chunk_data BYTEA,"
+        "    null_bitmap BYTEA,"
+        "    UNIQUE(stripe_id, chunk_group_index, column_index)"
+        ");"
 
-      /* Tiering policies */
-      "CREATE TABLE IF NOT EXISTS orochi.orochi_tiering_policies ("
-      "    policy_id BIGSERIAL PRIMARY KEY,"
-      "    table_oid OID NOT NULL REFERENCES orochi.orochi_tables(table_oid) "
-      "ON DELETE CASCADE,"
-      "    hot_to_warm INTERVAL,"
-      "    warm_to_cold INTERVAL,"
-      "    cold_to_frozen INTERVAL,"
-      "    compress_on_tier BOOLEAN NOT NULL DEFAULT TRUE,"
-      "    enabled BOOLEAN NOT NULL DEFAULT TRUE,"
-      "    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),"
-      "    UNIQUE(table_oid)"
-      ");"
+        /* Tiering policies */
+        "CREATE TABLE IF NOT EXISTS orochi.orochi_tiering_policies ("
+        "    policy_id BIGSERIAL PRIMARY KEY,"
+        "    table_oid OID NOT NULL REFERENCES orochi.orochi_tables(table_oid) "
+        "ON DELETE CASCADE,"
+        "    hot_to_warm INTERVAL,"
+        "    warm_to_cold INTERVAL,"
+        "    cold_to_frozen INTERVAL,"
+        "    compress_on_tier BOOLEAN NOT NULL DEFAULT TRUE,"
+        "    enabled BOOLEAN NOT NULL DEFAULT TRUE,"
+        "    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),"
+        "    UNIQUE(table_oid)"
+        ");"
 
-      /* Vector indexes */
-      "CREATE TABLE IF NOT EXISTS orochi.orochi_vector_indexes ("
-      "    index_oid OID PRIMARY KEY,"
-      "    table_oid OID NOT NULL REFERENCES orochi.orochi_tables(table_oid) "
-      "ON DELETE CASCADE,"
-      "    vector_column SMALLINT NOT NULL,"
-      "    dimensions INTEGER NOT NULL,"
-      "    lists INTEGER NOT NULL DEFAULT 100,"
-      "    probes INTEGER NOT NULL DEFAULT 10,"
-      "    distance_type TEXT NOT NULL DEFAULT 'l2',"
-      "    index_type TEXT NOT NULL DEFAULT 'ivfflat',"
-      "    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
-      ");"
+        /* Vector indexes */
+        "CREATE TABLE IF NOT EXISTS orochi.orochi_vector_indexes ("
+        "    index_oid OID PRIMARY KEY,"
+        "    table_oid OID NOT NULL REFERENCES orochi.orochi_tables(table_oid) "
+        "ON DELETE CASCADE,"
+        "    vector_column SMALLINT NOT NULL,"
+        "    dimensions INTEGER NOT NULL,"
+        "    lists INTEGER NOT NULL DEFAULT 100,"
+        "    probes INTEGER NOT NULL DEFAULT 10,"
+        "    distance_type TEXT NOT NULL DEFAULT 'l2',"
+        "    index_type TEXT NOT NULL DEFAULT 'ivfflat',"
+        "    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
+        ");"
 
-      /* Continuous aggregates */
-      "CREATE TABLE IF NOT EXISTS orochi.orochi_continuous_aggregates ("
-      "    agg_id BIGSERIAL PRIMARY KEY,"
-      "    view_oid OID NOT NULL,"
-      "    source_table_oid OID NOT NULL REFERENCES "
-      "orochi.orochi_tables(table_oid) ON DELETE CASCADE,"
-      "    materialization_table_oid OID,"
-      "    query_text TEXT NOT NULL,"
-      "    refresh_interval INTERVAL,"
-      "    last_refresh TIMESTAMPTZ,"
-      "    enabled BOOLEAN NOT NULL DEFAULT TRUE,"
-      "    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),"
-      "    UNIQUE(view_oid)"
-      ");"
+        /* Continuous aggregates */
+        "CREATE TABLE IF NOT EXISTS orochi.orochi_continuous_aggregates ("
+        "    agg_id BIGSERIAL PRIMARY KEY,"
+        "    view_oid OID NOT NULL,"
+        "    source_table_oid OID NOT NULL REFERENCES "
+        "orochi.orochi_tables(table_oid) ON DELETE CASCADE,"
+        "    materialization_table_oid OID,"
+        "    query_text TEXT NOT NULL,"
+        "    refresh_interval INTERVAL,"
+        "    last_refresh TIMESTAMPTZ,"
+        "    enabled BOOLEAN NOT NULL DEFAULT TRUE,"
+        "    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),"
+        "    UNIQUE(view_oid)"
+        ");"
 
-      /* Invalidation log for continuous aggregates */
-      "CREATE TABLE IF NOT EXISTS orochi.orochi_invalidation_log ("
-      "    log_id BIGSERIAL PRIMARY KEY,"
-      "    agg_id BIGINT NOT NULL REFERENCES "
-      "orochi.orochi_continuous_aggregates(agg_id) ON DELETE CASCADE,"
-      "    range_start TIMESTAMPTZ NOT NULL,"
-      "    range_end TIMESTAMPTZ NOT NULL,"
-      "    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
-      ");"
+        /* Invalidation log for continuous aggregates */
+        "CREATE TABLE IF NOT EXISTS orochi.orochi_invalidation_log ("
+        "    log_id BIGSERIAL PRIMARY KEY,"
+        "    agg_id BIGINT NOT NULL REFERENCES "
+        "orochi.orochi_continuous_aggregates(agg_id) ON DELETE CASCADE,"
+        "    range_start TIMESTAMPTZ NOT NULL,"
+        "    range_end TIMESTAMPTZ NOT NULL,"
+        "    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
+        ");"
 
-      /* Create indexes for performance */
-      "CREATE INDEX IF NOT EXISTS idx_shards_table ON "
-      "orochi.orochi_shards(table_oid);"
-      "CREATE INDEX IF NOT EXISTS idx_shards_node ON "
-      "orochi.orochi_shards(node_id);"
-      "CREATE INDEX IF NOT EXISTS idx_chunks_hypertable ON "
-      "orochi.orochi_chunks(hypertable_oid);"
-      "CREATE INDEX IF NOT EXISTS idx_chunks_range ON "
-      "orochi.orochi_chunks(range_start, range_end);"
-      "CREATE INDEX IF NOT EXISTS idx_stripes_table ON "
-      "orochi.orochi_stripes(table_oid);"
-      "CREATE INDEX IF NOT EXISTS idx_column_chunks_stripe ON "
-      "orochi.orochi_column_chunks(stripe_id);"
-      "CREATE INDEX IF NOT EXISTS idx_invalidation_agg ON "
-      "orochi.orochi_invalidation_log(agg_id);";
+        /* Create indexes for performance */
+        "CREATE INDEX IF NOT EXISTS idx_shards_table ON "
+        "orochi.orochi_shards(table_oid);"
+        "CREATE INDEX IF NOT EXISTS idx_shards_node ON "
+        "orochi.orochi_shards(node_id);"
+        "CREATE INDEX IF NOT EXISTS idx_chunks_hypertable ON "
+        "orochi.orochi_chunks(hypertable_oid);"
+        "CREATE INDEX IF NOT EXISTS idx_chunks_range ON "
+        "orochi.orochi_chunks(range_start, range_end);"
+        "CREATE INDEX IF NOT EXISTS idx_stripes_table ON "
+        "orochi.orochi_stripes(table_oid);"
+        "CREATE INDEX IF NOT EXISTS idx_column_chunks_stripe ON "
+        "orochi.orochi_column_chunks(stripe_id);"
+        "CREATE INDEX IF NOT EXISTS idx_invalidation_agg ON "
+        "orochi.orochi_invalidation_log(agg_id);";
 
-  int ret;
+    int ret;
 
-  /* Connect to SPI */
-  SPI_connect();
+    /* Connect to SPI */
+    SPI_connect();
 
-  /* Create schema */
-  ret = SPI_execute(create_schema_sql, false, 0);
-  if (ret != SPI_OK_UTILITY)
-    elog(ERROR, "Failed to create orochi schema");
+    /* Create schema */
+    ret = SPI_execute(create_schema_sql, false, 0);
+    if (ret != SPI_OK_UTILITY)
+        elog(ERROR, "Failed to create orochi schema");
 
-  /* Create tables */
-  ret = SPI_execute(create_tables_sql, false, 0);
-  if (ret != SPI_OK_UTILITY)
-    elog(ERROR, "Failed to create orochi catalog tables");
+    /* Create tables */
+    ret = SPI_execute(create_tables_sql, false, 0);
+    if (ret != SPI_OK_UTILITY)
+        elog(ERROR, "Failed to create orochi catalog tables");
 
-  SPI_finish();
+    SPI_finish();
 
-  /* Cache schema OID */
-  OrochiSchemaOid = get_namespace_oid(OROCHI_SCHEMA_NAME, false);
+    /* Cache schema OID */
+    OrochiSchemaOid = get_namespace_oid(OROCHI_SCHEMA_NAME, false);
 
-  elog(LOG, "Orochi catalog initialized");
+    elog(LOG, "Orochi catalog initialized");
 }
 
 /*
  * orochi_catalog_exists
  *    Check if the catalog schema exists
  */
-bool orochi_catalog_exists(void) {
-  Oid schema_oid = get_namespace_oid(OROCHI_SCHEMA_NAME, true);
-  return OidIsValid(schema_oid);
+bool orochi_catalog_exists(void)
+{
+    Oid schema_oid = get_namespace_oid(OROCHI_SCHEMA_NAME, true);
+    return OidIsValid(schema_oid);
 }
 
 /*
  * orochi_get_schema_oid
  *    Get the Orochi schema OID
  */
-Oid orochi_get_schema_oid(void) {
-  if (!OidIsValid(OrochiSchemaOid))
-    OrochiSchemaOid = get_namespace_oid(OROCHI_SCHEMA_NAME, false);
-  return OrochiSchemaOid;
+Oid orochi_get_schema_oid(void)
+{
+    if (!OidIsValid(OrochiSchemaOid))
+        OrochiSchemaOid = get_namespace_oid(OROCHI_SCHEMA_NAME, false);
+    return OrochiSchemaOid;
 }
 
 /*
  * ensure_catalog_initialized
  *    Make sure catalog exists before operations
  */
-static void ensure_catalog_initialized(void) {
-  if (!orochi_catalog_exists())
-    orochi_catalog_init();
+static void ensure_catalog_initialized(void)
+{
+    if (!orochi_catalog_exists())
+        orochi_catalog_init();
 }
 
 /* ============================================================
  * Table Metadata Operations
  * ============================================================ */
 
-void orochi_catalog_register_table(OrochiTableInfo *table_info) {
-  StringInfoData query;
-  int ret;
+void orochi_catalog_register_table(OrochiTableInfo *table_info)
+{
+    StringInfoData query;
+    int ret;
 
-  ensure_catalog_initialized();
+    ensure_catalog_initialized();
 
-  initStringInfo(&query);
-  appendStringInfo(
-      &query,
-      "INSERT INTO orochi.orochi_tables "
-      "(table_oid, schema_name, table_name, storage_type, shard_strategy, "
-      "shard_count, distribution_column, is_distributed, is_timeseries, "
-      "time_column, chunk_interval, compression, compression_level) "
-      "VALUES (%u, %s, %s, %d, %d, %d, %s, %s, %s, %s, %s, %d, %d) "
-      "ON CONFLICT (table_oid) DO UPDATE SET "
-      "storage_type = EXCLUDED.storage_type, "
-      "shard_strategy = EXCLUDED.shard_strategy, "
-      "shard_count = EXCLUDED.shard_count, "
-      "distribution_column = EXCLUDED.distribution_column, "
-      "is_distributed = EXCLUDED.is_distributed, "
-      "is_timeseries = EXCLUDED.is_timeseries, "
-      "time_column = EXCLUDED.time_column, "
-      "chunk_interval = EXCLUDED.chunk_interval, "
-      "compression = EXCLUDED.compression, "
-      "compression_level = EXCLUDED.compression_level, "
-      "updated_at = NOW()",
-      table_info->relid,
-      table_info->schema_name ? quote_literal_cstr(table_info->schema_name)
-                              : "NULL",
-      table_info->table_name ? quote_literal_cstr(table_info->table_name)
-                             : "NULL",
-      (int)table_info->storage_type, (int)table_info->shard_strategy,
-      table_info->shard_count,
-      table_info->distribution_column
-          ? quote_literal_cstr(table_info->distribution_column)
-          : "NULL",
-      table_info->is_distributed ? "TRUE" : "FALSE",
-      table_info->is_timeseries ? "TRUE" : "FALSE",
-      table_info->time_column ? quote_literal_cstr(table_info->time_column)
-                              : "NULL",
-      format_interval_literal(table_info->chunk_interval),
-      (int)table_info->compression, table_info->compression_level);
+    initStringInfo(&query);
+    appendStringInfo(
+        &query,
+        "INSERT INTO orochi.orochi_tables "
+        "(table_oid, schema_name, table_name, storage_type, shard_strategy, "
+        "shard_count, distribution_column, is_distributed, is_timeseries, "
+        "time_column, chunk_interval, compression, compression_level) "
+        "VALUES (%u, %s, %s, %d, %d, %d, %s, %s, %s, %s, %s, %d, %d) "
+        "ON CONFLICT (table_oid) DO UPDATE SET "
+        "storage_type = EXCLUDED.storage_type, "
+        "shard_strategy = EXCLUDED.shard_strategy, "
+        "shard_count = EXCLUDED.shard_count, "
+        "distribution_column = EXCLUDED.distribution_column, "
+        "is_distributed = EXCLUDED.is_distributed, "
+        "is_timeseries = EXCLUDED.is_timeseries, "
+        "time_column = EXCLUDED.time_column, "
+        "chunk_interval = EXCLUDED.chunk_interval, "
+        "compression = EXCLUDED.compression, "
+        "compression_level = EXCLUDED.compression_level, "
+        "updated_at = NOW()",
+        table_info->relid,
+        table_info->schema_name ? quote_literal_cstr(table_info->schema_name) : "NULL",
+        table_info->table_name ? quote_literal_cstr(table_info->table_name) : "NULL",
+        (int)table_info->storage_type, (int)table_info->shard_strategy, table_info->shard_count,
+        table_info->distribution_column ? quote_literal_cstr(table_info->distribution_column)
+                                        : "NULL",
+        table_info->is_distributed ? "TRUE" : "FALSE", table_info->is_timeseries ? "TRUE" : "FALSE",
+        table_info->time_column ? quote_literal_cstr(table_info->time_column) : "NULL",
+        format_interval_literal(table_info->chunk_interval), (int)table_info->compression,
+        table_info->compression_level);
 
-  SPI_connect();
-  ret = SPI_execute(query.data, false, 0);
-  if (ret != SPI_OK_INSERT && ret != SPI_OK_UPDATE)
-    elog(ERROR, "Failed to register table in Orochi catalog");
-  SPI_finish();
+    SPI_connect();
+    ret = SPI_execute(query.data, false, 0);
+    if (ret != SPI_OK_INSERT && ret != SPI_OK_UPDATE)
+        elog(ERROR, "Failed to register table in Orochi catalog");
+    SPI_finish();
 
-  pfree(query.data);
+    pfree(query.data);
 }
 
-OrochiTableInfo *orochi_catalog_get_table(Oid relid) {
-  StringInfoData query;
-  OrochiTableInfo *info = NULL;
-  int ret;
+OrochiTableInfo *orochi_catalog_get_table(Oid relid)
+{
+    StringInfoData query;
+    OrochiTableInfo *info = NULL;
+    int ret;
 
-  if (!orochi_catalog_exists())
-    return NULL;
+    if (!orochi_catalog_exists())
+        return NULL;
 
-  initStringInfo(&query);
-  appendStringInfo(
-      &query,
-      "SELECT table_oid, schema_name, table_name, storage_type, "
-      "shard_strategy, "
-      "shard_count, distribution_column, is_distributed, is_timeseries, "
-      "time_column, compression, compression_level "
-      "FROM orochi.orochi_tables WHERE table_oid = %u",
-      relid);
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "SELECT table_oid, schema_name, table_name, storage_type, "
+                     "shard_strategy, "
+                     "shard_count, distribution_column, is_distributed, is_timeseries, "
+                     "time_column, compression, compression_level "
+                     "FROM orochi.orochi_tables WHERE table_oid = %u",
+                     relid);
 
-  SPI_connect();
-  ret = SPI_execute(query.data, true, 1);
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 1);
 
-  if (ret == SPI_OK_SELECT && SPI_processed > 0) {
-    HeapTuple tuple = SPI_tuptable->vals[0];
-    TupleDesc tupdesc = SPI_tuptable->tupdesc;
-    bool isnull;
+    if (ret == SPI_OK_SELECT && SPI_processed > 0) {
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        bool isnull;
 
-    info = (OrochiTableInfo *)palloc0(sizeof(OrochiTableInfo));
+        info = (OrochiTableInfo *)palloc0(sizeof(OrochiTableInfo));
 
-    info->relid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 1, &isnull));
-    info->schema_name = SPI_getvalue(tuple, tupdesc, 2);
-    info->table_name = SPI_getvalue(tuple, tupdesc, 3);
-    info->storage_type =
-        DatumGetInt32(SPI_getbinval(tuple, tupdesc, 4, &isnull));
-    info->shard_strategy =
-        DatumGetInt32(SPI_getbinval(tuple, tupdesc, 5, &isnull));
-    info->shard_count =
-        DatumGetInt32(SPI_getbinval(tuple, tupdesc, 6, &isnull));
-    info->distribution_column = SPI_getvalue(tuple, tupdesc, 7);
-    info->is_distributed =
-        DatumGetBool(SPI_getbinval(tuple, tupdesc, 8, &isnull));
-    info->is_timeseries =
-        DatumGetBool(SPI_getbinval(tuple, tupdesc, 9, &isnull));
-    info->time_column = SPI_getvalue(tuple, tupdesc, 10);
-    info->compression =
-        DatumGetInt32(SPI_getbinval(tuple, tupdesc, 11, &isnull));
-    info->compression_level =
-        DatumGetInt32(SPI_getbinval(tuple, tupdesc, 12, &isnull));
-  }
+        info->relid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+        info->schema_name = SPI_getvalue(tuple, tupdesc, 2);
+        info->table_name = SPI_getvalue(tuple, tupdesc, 3);
+        info->storage_type = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 4, &isnull));
+        info->shard_strategy = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 5, &isnull));
+        info->shard_count = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 6, &isnull));
+        info->distribution_column = SPI_getvalue(tuple, tupdesc, 7);
+        info->is_distributed = DatumGetBool(SPI_getbinval(tuple, tupdesc, 8, &isnull));
+        info->is_timeseries = DatumGetBool(SPI_getbinval(tuple, tupdesc, 9, &isnull));
+        info->time_column = SPI_getvalue(tuple, tupdesc, 10);
+        info->compression = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 11, &isnull));
+        info->compression_level = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 12, &isnull));
+    }
 
-  SPI_finish();
-  pfree(query.data);
+    SPI_finish();
+    pfree(query.data);
 
-  return info;
+    return info;
 }
 
-bool orochi_catalog_is_orochi_table(Oid relid) {
-  return orochi_catalog_get_table(relid) != NULL;
+bool orochi_catalog_is_orochi_table(Oid relid)
+{
+    return orochi_catalog_get_table(relid) != NULL;
 }
 
-void orochi_catalog_remove_table(Oid relid) {
-  StringInfoData query;
-  int ret;
+void orochi_catalog_remove_table(Oid relid)
+{
+    StringInfoData query;
+    int ret;
 
-  initStringInfo(&query);
-  appendStringInfo(
-      &query, "DELETE FROM orochi.orochi_tables WHERE table_oid = %u", relid);
+    initStringInfo(&query);
+    appendStringInfo(&query, "DELETE FROM orochi.orochi_tables WHERE table_oid = %u", relid);
 
-  SPI_connect();
-  ret = SPI_execute(query.data, false, 0);
-  if (ret != SPI_OK_DELETE)
-    elog(WARNING, "Failed to remove table from Orochi catalog");
-  SPI_finish();
+    SPI_connect();
+    ret = SPI_execute(query.data, false, 0);
+    if (ret != SPI_OK_DELETE)
+        elog(WARNING, "Failed to remove table from Orochi catalog");
+    SPI_finish();
 
-  pfree(query.data);
+    pfree(query.data);
 }
 
 /* ============================================================
  * Shard Operations
  * ============================================================ */
 
-void orochi_catalog_create_shards(Oid table_oid, int shard_count,
-                                  OrochiShardStrategy strategy) {
-  StringInfoData query;
-  int i;
-  int hash_range = INT32_MAX / shard_count;
-  int ret;
+void orochi_catalog_create_shards(Oid table_oid, int shard_count, OrochiShardStrategy strategy)
+{
+    StringInfoData query;
+    int i;
+    int hash_range = INT32_MAX / shard_count;
+    int ret;
 
-  ensure_catalog_initialized();
+    ensure_catalog_initialized();
 
-  SPI_connect();
+    SPI_connect();
 
-  for (i = 0; i < shard_count; i++) {
-    int32 hash_min = (i == 0) ? INT32_MIN : (INT32_MIN + (i * hash_range));
-    int32 hash_max = (i == shard_count - 1)
-                         ? INT32_MAX
-                         : (INT32_MIN + ((i + 1) * hash_range) - 1);
+    for (i = 0; i < shard_count; i++) {
+        int32 hash_min = (i == 0) ? INT32_MIN : (INT32_MIN + (i * hash_range));
+        int32 hash_max =
+            (i == shard_count - 1) ? INT32_MAX : (INT32_MIN + ((i + 1) * hash_range) - 1);
+
+        initStringInfo(&query);
+        appendStringInfo(&query,
+                         "INSERT INTO orochi.orochi_shards "
+                         "(table_oid, shard_index, hash_min, hash_max, storage_tier) "
+                         "VALUES (%u, %d, %d, %d, 0)",
+                         table_oid, i, hash_min, hash_max);
+
+        ret = SPI_execute(query.data, false, 0);
+        if (ret != SPI_OK_INSERT)
+            elog(ERROR, "Failed to create shard %d for table %u", i, table_oid);
+
+        pfree(query.data);
+    }
+
+    SPI_finish();
+}
+
+OrochiShardInfo *orochi_catalog_get_shard(int64 shard_id)
+{
+    StringInfoData query;
+    OrochiShardInfo *info = NULL;
+    int ret;
 
     initStringInfo(&query);
-    appendStringInfo(
-        &query,
-        "INSERT INTO orochi.orochi_shards "
-        "(table_oid, shard_index, hash_min, hash_max, storage_tier) "
-        "VALUES (%u, %d, %d, %d, 0)",
-        table_oid, i, hash_min, hash_max);
+    appendStringInfo(&query,
+                     "SELECT shard_id, table_oid, shard_index, hash_min, hash_max, "
+                     "node_id, row_count, size_bytes, storage_tier, created_at, last_accessed "
+                     "FROM orochi.orochi_shards WHERE shard_id = %ld",
+                     shard_id);
 
-    ret = SPI_execute(query.data, false, 0);
-    if (ret != SPI_OK_INSERT)
-      elog(ERROR, "Failed to create shard %d for table %u", i, table_oid);
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 1);
 
-    pfree(query.data);
-  }
+    if (ret == SPI_OK_SELECT && SPI_processed > 0) {
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        bool isnull;
 
-  SPI_finish();
-}
+        info = (OrochiShardInfo *)palloc0(sizeof(OrochiShardInfo));
 
-OrochiShardInfo *orochi_catalog_get_shard(int64 shard_id) {
-  StringInfoData query;
-  OrochiShardInfo *info = NULL;
-  int ret;
-
-  initStringInfo(&query);
-  appendStringInfo(
-      &query,
-      "SELECT shard_id, table_oid, shard_index, hash_min, hash_max, "
-      "node_id, row_count, size_bytes, storage_tier, created_at, last_accessed "
-      "FROM orochi.orochi_shards WHERE shard_id = %ld",
-      shard_id);
-
-  SPI_connect();
-  ret = SPI_execute(query.data, true, 1);
-
-  if (ret == SPI_OK_SELECT && SPI_processed > 0) {
-    HeapTuple tuple = SPI_tuptable->vals[0];
-    TupleDesc tupdesc = SPI_tuptable->tupdesc;
-    bool isnull;
-
-    info = (OrochiShardInfo *)palloc0(sizeof(OrochiShardInfo));
-
-    info->shard_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
-    info->table_oid =
-        DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 2, &isnull));
-    info->shard_index =
-        DatumGetInt32(SPI_getbinval(tuple, tupdesc, 3, &isnull));
-    info->hash_min = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 4, &isnull));
-    info->hash_max = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 5, &isnull));
-    info->node_id =
-        isnull ? -1 : DatumGetInt32(SPI_getbinval(tuple, tupdesc, 6, &isnull));
-    info->row_count = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 7, &isnull));
-    info->size_bytes = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 8, &isnull));
-    info->storage_tier =
-        DatumGetInt32(SPI_getbinval(tuple, tupdesc, 9, &isnull));
-    info->created_at =
-        DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 10, &isnull));
-    info->last_accessed =
-        DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 11, &isnull));
-  }
-
-  SPI_finish();
-  pfree(query.data);
-
-  return info;
-}
-
-List *orochi_catalog_get_table_shards(Oid table_oid) {
-  StringInfoData query;
-  List *shards = NIL;
-  int ret;
-  uint64 i;
-
-  initStringInfo(&query);
-  appendStringInfo(
-      &query,
-      "SELECT shard_id, table_oid, shard_index, hash_min, hash_max, "
-      "node_id, row_count, size_bytes, storage_tier, created_at, last_accessed "
-      "FROM orochi.orochi_shards WHERE table_oid = %u ORDER BY shard_index",
-      table_oid);
-
-  SPI_connect();
-  ret = SPI_execute(query.data, true, 0);
-
-  if (ret == SPI_OK_SELECT) {
-    for (i = 0; i < SPI_processed; i++) {
-      HeapTuple tuple = SPI_tuptable->vals[i];
-      TupleDesc tupdesc = SPI_tuptable->tupdesc;
-      bool isnull;
-      OrochiShardInfo *info;
-
-      info = (OrochiShardInfo *)palloc0(sizeof(OrochiShardInfo));
-
-      info->shard_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
-      info->table_oid =
-          DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 2, &isnull));
-      info->shard_index =
-          DatumGetInt32(SPI_getbinval(tuple, tupdesc, 3, &isnull));
-      info->hash_min = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 4, &isnull));
-      info->hash_max = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 5, &isnull));
-      info->node_id =
-          isnull ? -1
-                 : DatumGetInt32(SPI_getbinval(tuple, tupdesc, 6, &isnull));
-      info->row_count =
-          DatumGetInt64(SPI_getbinval(tuple, tupdesc, 7, &isnull));
-      info->size_bytes =
-          DatumGetInt64(SPI_getbinval(tuple, tupdesc, 8, &isnull));
-      info->storage_tier =
-          DatumGetInt32(SPI_getbinval(tuple, tupdesc, 9, &isnull));
-      info->created_at =
-          DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 10, &isnull));
-      info->last_accessed =
-          DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 11, &isnull));
-
-      shards = lappend(shards, info);
+        info->shard_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+        info->table_oid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 2, &isnull));
+        info->shard_index = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 3, &isnull));
+        info->hash_min = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 4, &isnull));
+        info->hash_max = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 5, &isnull));
+        info->node_id = isnull ? -1 : DatumGetInt32(SPI_getbinval(tuple, tupdesc, 6, &isnull));
+        info->row_count = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 7, &isnull));
+        info->size_bytes = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 8, &isnull));
+        info->storage_tier = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 9, &isnull));
+        info->created_at = DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 10, &isnull));
+        info->last_accessed = DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 11, &isnull));
     }
-  }
 
-  SPI_finish();
-  pfree(query.data);
+    SPI_finish();
+    pfree(query.data);
 
-  return shards;
+    return info;
 }
 
-OrochiShardInfo *orochi_catalog_get_shard_for_hash(Oid table_oid,
-                                                   int32 hash_value) {
-  StringInfoData query;
-  OrochiShardInfo *info = NULL;
-  int ret;
+List *orochi_catalog_get_table_shards(Oid table_oid)
+{
+    StringInfoData query;
+    List *shards = NIL;
+    int ret;
+    uint64 i;
 
-  initStringInfo(&query);
-  appendStringInfo(
-      &query,
-      "SELECT shard_id, table_oid, shard_index, hash_min, hash_max, "
-      "node_id, row_count, size_bytes, storage_tier, created_at, last_accessed "
-      "FROM orochi.orochi_shards "
-      "WHERE table_oid = %u AND hash_min <= %d AND hash_max >= %d",
-      table_oid, hash_value, hash_value);
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "SELECT shard_id, table_oid, shard_index, hash_min, hash_max, "
+                     "node_id, row_count, size_bytes, storage_tier, created_at, last_accessed "
+                     "FROM orochi.orochi_shards WHERE table_oid = %u ORDER BY shard_index",
+                     table_oid);
 
-  SPI_connect();
-  ret = SPI_execute(query.data, true, 1);
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 0);
 
-  if (ret == SPI_OK_SELECT && SPI_processed > 0) {
-    HeapTuple tuple = SPI_tuptable->vals[0];
-    TupleDesc tupdesc = SPI_tuptable->tupdesc;
-    bool isnull;
+    if (ret == SPI_OK_SELECT) {
+        for (i = 0; i < SPI_processed; i++) {
+            HeapTuple tuple = SPI_tuptable->vals[i];
+            TupleDesc tupdesc = SPI_tuptable->tupdesc;
+            bool isnull;
+            OrochiShardInfo *info;
 
-    info = (OrochiShardInfo *)palloc0(sizeof(OrochiShardInfo));
+            info = (OrochiShardInfo *)palloc0(sizeof(OrochiShardInfo));
 
-    info->shard_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
-    info->table_oid =
-        DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 2, &isnull));
-    info->shard_index =
-        DatumGetInt32(SPI_getbinval(tuple, tupdesc, 3, &isnull));
-    info->hash_min = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 4, &isnull));
-    info->hash_max = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 5, &isnull));
-    info->node_id =
-        isnull ? -1 : DatumGetInt32(SPI_getbinval(tuple, tupdesc, 6, &isnull));
-    info->row_count = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 7, &isnull));
-    info->size_bytes = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 8, &isnull));
-    info->storage_tier =
-        DatumGetInt32(SPI_getbinval(tuple, tupdesc, 9, &isnull));
-  }
+            info->shard_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+            info->table_oid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 2, &isnull));
+            info->shard_index = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 3, &isnull));
+            info->hash_min = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 4, &isnull));
+            info->hash_max = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 5, &isnull));
+            info->node_id = isnull ? -1 : DatumGetInt32(SPI_getbinval(tuple, tupdesc, 6, &isnull));
+            info->row_count = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 7, &isnull));
+            info->size_bytes = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 8, &isnull));
+            info->storage_tier = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 9, &isnull));
+            info->created_at = DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 10, &isnull));
+            info->last_accessed = DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 11, &isnull));
 
-  SPI_finish();
-  pfree(query.data);
+            shards = lappend(shards, info);
+        }
+    }
 
-  return info;
+    SPI_finish();
+    pfree(query.data);
+
+    return shards;
+}
+
+OrochiShardInfo *orochi_catalog_get_shard_for_hash(Oid table_oid, int32 hash_value)
+{
+    StringInfoData query;
+    OrochiShardInfo *info = NULL;
+    int ret;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "SELECT shard_id, table_oid, shard_index, hash_min, hash_max, "
+                     "node_id, row_count, size_bytes, storage_tier, created_at, last_accessed "
+                     "FROM orochi.orochi_shards "
+                     "WHERE table_oid = %u AND hash_min <= %d AND hash_max >= %d",
+                     table_oid, hash_value, hash_value);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 1);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0) {
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        bool isnull;
+
+        info = (OrochiShardInfo *)palloc0(sizeof(OrochiShardInfo));
+
+        info->shard_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+        info->table_oid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 2, &isnull));
+        info->shard_index = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 3, &isnull));
+        info->hash_min = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 4, &isnull));
+        info->hash_max = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 5, &isnull));
+        info->node_id = isnull ? -1 : DatumGetInt32(SPI_getbinval(tuple, tupdesc, 6, &isnull));
+        info->row_count = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 7, &isnull));
+        info->size_bytes = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 8, &isnull));
+        info->storage_tier = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 9, &isnull));
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
+    return info;
 }
 
 /* ============================================================
  * Node Operations
  * ============================================================ */
 
-int32 orochi_catalog_add_node(const char *hostname, int port,
-                              OrochiNodeRole role) {
-  StringInfoData query;
-  int ret;
-  int32 node_id = -1;
+int32 orochi_catalog_add_node(const char *hostname, int port, OrochiNodeRole role)
+{
+    StringInfoData query;
+    int ret;
+    int32 node_id = -1;
 
-  ensure_catalog_initialized();
+    ensure_catalog_initialized();
 
-  initStringInfo(&query);
-  appendStringInfo(&query,
-                   "INSERT INTO orochi.orochi_nodes (hostname, port, role) "
-                   "VALUES (%s, %d, %d) "
-                   "ON CONFLICT (hostname, port) DO UPDATE SET role = "
-                   "EXCLUDED.role, is_active = TRUE "
-                   "RETURNING node_id",
-                   quote_literal_cstr(hostname), port, (int)role);
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "INSERT INTO orochi.orochi_nodes (hostname, port, role) "
+                     "VALUES (%s, %d, %d) "
+                     "ON CONFLICT (hostname, port) DO UPDATE SET role = "
+                     "EXCLUDED.role, is_active = TRUE "
+                     "RETURNING node_id",
+                     quote_literal_cstr(hostname), port, (int)role);
 
-  SPI_connect();
-  ret = SPI_execute(query.data, false, 1);
+    SPI_connect();
+    ret = SPI_execute(query.data, false, 1);
 
-  if (ret == SPI_OK_INSERT_RETURNING && SPI_processed > 0) {
-    HeapTuple tuple = SPI_tuptable->vals[0];
-    TupleDesc tupdesc = SPI_tuptable->tupdesc;
-    bool isnull;
-    node_id = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 1, &isnull));
-  }
-
-  SPI_finish();
-  pfree(query.data);
-
-  return node_id;
-}
-
-List *orochi_catalog_get_active_nodes(void) {
-  const char *query =
-      "SELECT node_id, hostname, port, role, is_active, "
-      "shard_count, total_size, cpu_usage, memory_usage, last_heartbeat "
-      "FROM orochi.orochi_nodes WHERE is_active = TRUE ORDER BY node_id";
-  List *nodes = NIL;
-  int ret;
-  uint64 i;
-
-  SPI_connect();
-  ret = SPI_execute(query, true, 0);
-
-  if (ret == SPI_OK_SELECT) {
-    for (i = 0; i < SPI_processed; i++) {
-      HeapTuple tuple = SPI_tuptable->vals[i];
-      TupleDesc tupdesc = SPI_tuptable->tupdesc;
-      bool isnull;
-      OrochiNodeInfo *info;
-
-      info = (OrochiNodeInfo *)palloc0(sizeof(OrochiNodeInfo));
-
-      info->node_id = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 1, &isnull));
-      info->hostname = SPI_getvalue(tuple, tupdesc, 2);
-      info->port = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 3, &isnull));
-      info->role = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 4, &isnull));
-      info->is_active = DatumGetBool(SPI_getbinval(tuple, tupdesc, 5, &isnull));
-      info->shard_count =
-          DatumGetInt64(SPI_getbinval(tuple, tupdesc, 6, &isnull));
-      info->total_size =
-          DatumGetInt64(SPI_getbinval(tuple, tupdesc, 7, &isnull));
-      info->cpu_usage =
-          DatumGetFloat8(SPI_getbinval(tuple, tupdesc, 8, &isnull));
-      info->memory_usage =
-          DatumGetFloat8(SPI_getbinval(tuple, tupdesc, 9, &isnull));
-      info->last_heartbeat =
-          DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 10, &isnull));
-
-      nodes = lappend(nodes, info);
+    if (ret == SPI_OK_INSERT_RETURNING && SPI_processed > 0) {
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        bool isnull;
+        node_id = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 1, &isnull));
     }
-  }
 
-  SPI_finish();
+    SPI_finish();
+    pfree(query.data);
 
-  return nodes;
+    return node_id;
 }
 
-OrochiNodeInfo *orochi_catalog_get_node(int32 node_id) {
-  StringInfoData query;
-  OrochiNodeInfo *info = NULL;
-  int ret;
+List *orochi_catalog_get_active_nodes(void)
+{
+    const char *query = "SELECT node_id, hostname, port, role, is_active, "
+                        "shard_count, total_size, cpu_usage, memory_usage, last_heartbeat "
+                        "FROM orochi.orochi_nodes WHERE is_active = TRUE ORDER BY node_id";
+    List *nodes = NIL;
+    int ret;
+    uint64 i;
 
-  initStringInfo(&query);
-  appendStringInfo(
-      &query,
-      "SELECT node_id, hostname, port, role, is_active, "
-      "shard_count, total_size, cpu_usage, memory_usage, last_heartbeat "
-      "FROM orochi.orochi_nodes WHERE node_id = %d",
-      node_id);
+    SPI_connect();
+    ret = SPI_execute(query, true, 0);
 
-  SPI_connect();
-  ret = SPI_execute(query.data, true, 1);
+    if (ret == SPI_OK_SELECT) {
+        for (i = 0; i < SPI_processed; i++) {
+            HeapTuple tuple = SPI_tuptable->vals[i];
+            TupleDesc tupdesc = SPI_tuptable->tupdesc;
+            bool isnull;
+            OrochiNodeInfo *info;
 
-  if (ret == SPI_OK_SELECT && SPI_processed > 0) {
-    HeapTuple tuple = SPI_tuptable->vals[0];
-    TupleDesc tupdesc = SPI_tuptable->tupdesc;
-    bool isnull;
+            info = (OrochiNodeInfo *)palloc0(sizeof(OrochiNodeInfo));
 
-    info = (OrochiNodeInfo *)palloc0(sizeof(OrochiNodeInfo));
+            info->node_id = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+            info->hostname = SPI_getvalue(tuple, tupdesc, 2);
+            info->port = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 3, &isnull));
+            info->role = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 4, &isnull));
+            info->is_active = DatumGetBool(SPI_getbinval(tuple, tupdesc, 5, &isnull));
+            info->shard_count = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 6, &isnull));
+            info->total_size = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 7, &isnull));
+            info->cpu_usage = DatumGetFloat8(SPI_getbinval(tuple, tupdesc, 8, &isnull));
+            info->memory_usage = DatumGetFloat8(SPI_getbinval(tuple, tupdesc, 9, &isnull));
+            info->last_heartbeat = DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 10, &isnull));
 
-    info->node_id = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 1, &isnull));
-    info->hostname = pstrdup(SPI_getvalue(tuple, tupdesc, 2));
-    info->port = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 3, &isnull));
-    info->role = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 4, &isnull));
-    info->is_active = DatumGetBool(SPI_getbinval(tuple, tupdesc, 5, &isnull));
-    info->shard_count =
-        DatumGetInt64(SPI_getbinval(tuple, tupdesc, 6, &isnull));
-    info->total_size = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 7, &isnull));
-    info->cpu_usage = DatumGetFloat8(SPI_getbinval(tuple, tupdesc, 8, &isnull));
-    info->memory_usage =
-        DatumGetFloat8(SPI_getbinval(tuple, tupdesc, 9, &isnull));
-    info->last_heartbeat =
-        DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 10, &isnull));
-  }
+            nodes = lappend(nodes, info);
+        }
+    }
 
-  SPI_finish();
-  pfree(query.data);
+    SPI_finish();
 
-  return info;
+    return nodes;
 }
 
-void orochi_catalog_record_heartbeat(int32 node_id) {
-  StringInfoData query;
-  int ret;
+OrochiNodeInfo *orochi_catalog_get_node(int32 node_id)
+{
+    StringInfoData query;
+    OrochiNodeInfo *info = NULL;
+    int ret;
 
-  initStringInfo(&query);
-  appendStringInfo(&query,
-                   "UPDATE orochi.orochi_nodes SET last_heartbeat = NOW() "
-                   "WHERE node_id = %d",
-                   node_id);
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "SELECT node_id, hostname, port, role, is_active, "
+                     "shard_count, total_size, cpu_usage, memory_usage, last_heartbeat "
+                     "FROM orochi.orochi_nodes WHERE node_id = %d",
+                     node_id);
 
-  SPI_connect();
-  ret = SPI_execute(query.data, false, 0);
-  SPI_finish();
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 1);
 
-  pfree(query.data);
+    if (ret == SPI_OK_SELECT && SPI_processed > 0) {
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        bool isnull;
+
+        info = (OrochiNodeInfo *)palloc0(sizeof(OrochiNodeInfo));
+
+        info->node_id = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+        info->hostname = pstrdup(SPI_getvalue(tuple, tupdesc, 2));
+        info->port = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 3, &isnull));
+        info->role = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 4, &isnull));
+        info->is_active = DatumGetBool(SPI_getbinval(tuple, tupdesc, 5, &isnull));
+        info->shard_count = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 6, &isnull));
+        info->total_size = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 7, &isnull));
+        info->cpu_usage = DatumGetFloat8(SPI_getbinval(tuple, tupdesc, 8, &isnull));
+        info->memory_usage = DatumGetFloat8(SPI_getbinval(tuple, tupdesc, 9, &isnull));
+        info->last_heartbeat = DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 10, &isnull));
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
+    return info;
 }
 
-void orochi_catalog_update_node_status(int32 node_id, bool is_active) {
-  StringInfoData query;
-  int ret;
+void orochi_catalog_record_heartbeat(int32 node_id)
+{
+    StringInfoData query;
+    int ret;
 
-  initStringInfo(&query);
-  appendStringInfo(
-      &query,
-      "UPDATE orochi.orochi_nodes SET is_active = %s WHERE node_id = %d",
-      is_active ? "TRUE" : "FALSE", node_id);
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "UPDATE orochi.orochi_nodes SET last_heartbeat = NOW() "
+                     "WHERE node_id = %d",
+                     node_id);
 
-  SPI_connect();
-  ret = SPI_execute(query.data, false, 0);
-  SPI_finish();
+    SPI_connect();
+    ret = SPI_execute(query.data, false, 0);
+    SPI_finish();
 
-  pfree(query.data);
+    pfree(query.data);
+}
+
+void orochi_catalog_update_node_status(int32 node_id, bool is_active)
+{
+    StringInfoData query;
+    int ret;
+
+    initStringInfo(&query);
+    appendStringInfo(&query, "UPDATE orochi.orochi_nodes SET is_active = %s WHERE node_id = %d",
+                     is_active ? "TRUE" : "FALSE", node_id);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, false, 0);
+    SPI_finish();
+
+    pfree(query.data);
 }
 
 /* ============================================================
@@ -790,756 +753,731 @@ void orochi_catalog_update_node_status(int32 node_id, bool is_active) {
  * ============================================================ */
 
 int64 orochi_catalog_create_chunk(Oid hypertable_oid, TimestampTz range_start,
-                                  TimestampTz range_end) {
-  StringInfoData query;
-  int ret;
-  int64 chunk_id = -1;
+                                  TimestampTz range_end)
+{
+    StringInfoData query;
+    int ret;
+    int64 chunk_id = -1;
 
-  ensure_catalog_initialized();
+    ensure_catalog_initialized();
 
-  initStringInfo(&query);
-  appendStringInfo(&query,
-                   "INSERT INTO orochi.orochi_chunks "
-                   "(hypertable_oid, range_start, range_end) "
-                   "VALUES (%u, '%s'::timestamptz, '%s'::timestamptz) "
-                   "ON CONFLICT (hypertable_oid, range_start) DO NOTHING "
-                   "RETURNING chunk_id",
-                   hypertable_oid, timestamptz_to_str(range_start),
-                   timestamptz_to_str(range_end));
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "INSERT INTO orochi.orochi_chunks "
+                     "(hypertable_oid, range_start, range_end) "
+                     "VALUES (%u, '%s'::timestamptz, '%s'::timestamptz) "
+                     "ON CONFLICT (hypertable_oid, range_start) DO NOTHING "
+                     "RETURNING chunk_id",
+                     hypertable_oid, timestamptz_to_str(range_start),
+                     timestamptz_to_str(range_end));
 
-  SPI_connect();
-  ret = SPI_execute(query.data, false, 1);
+    SPI_connect();
+    ret = SPI_execute(query.data, false, 1);
 
-  if (ret == SPI_OK_INSERT_RETURNING && SPI_processed > 0) {
-    HeapTuple tuple = SPI_tuptable->vals[0];
-    TupleDesc tupdesc = SPI_tuptable->tupdesc;
-    bool isnull;
-    chunk_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
-  }
-
-  SPI_finish();
-  pfree(query.data);
-
-  return chunk_id;
-}
-
-List *orochi_catalog_get_chunks_in_range(Oid hypertable_oid, TimestampTz start,
-                                         TimestampTz end) {
-  StringInfoData query;
-  List *chunks = NIL;
-  int ret;
-  uint64 i;
-
-  initStringInfo(&query);
-  appendStringInfo(
-      &query,
-      "SELECT chunk_id, hypertable_oid, dimension_id, range_start, range_end, "
-      "row_count, size_bytes, is_compressed, storage_tier, tablespace_name "
-      "FROM orochi.orochi_chunks "
-      "WHERE hypertable_oid = %u "
-      "AND range_start < '%s'::timestamptz "
-      "AND range_end > '%s'::timestamptz "
-      "ORDER BY range_start",
-      hypertable_oid, timestamptz_to_str(end), timestamptz_to_str(start));
-
-  SPI_connect();
-  ret = SPI_execute(query.data, true, 0);
-
-  if (ret == SPI_OK_SELECT) {
-    for (i = 0; i < SPI_processed; i++) {
-      HeapTuple tuple = SPI_tuptable->vals[i];
-      TupleDesc tupdesc = SPI_tuptable->tupdesc;
-      bool isnull;
-      OrochiChunkInfo *info;
-
-      info = (OrochiChunkInfo *)palloc0(sizeof(OrochiChunkInfo));
-
-      info->chunk_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
-      info->hypertable_oid =
-          DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 2, &isnull));
-      info->dimension_id =
-          DatumGetInt32(SPI_getbinval(tuple, tupdesc, 3, &isnull));
-      info->range_start =
-          DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 4, &isnull));
-      info->range_end =
-          DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 5, &isnull));
-      info->row_count =
-          DatumGetInt64(SPI_getbinval(tuple, tupdesc, 6, &isnull));
-      info->size_bytes =
-          DatumGetInt64(SPI_getbinval(tuple, tupdesc, 7, &isnull));
-      info->is_compressed =
-          DatumGetBool(SPI_getbinval(tuple, tupdesc, 8, &isnull));
-      info->storage_tier =
-          DatumGetInt32(SPI_getbinval(tuple, tupdesc, 9, &isnull));
-      info->tablespace = SPI_getvalue(tuple, tupdesc, 10);
-
-      chunks = lappend(chunks, info);
+    if (ret == SPI_OK_INSERT_RETURNING && SPI_processed > 0) {
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        bool isnull;
+        chunk_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
     }
-  }
 
-  SPI_finish();
-  pfree(query.data);
+    SPI_finish();
+    pfree(query.data);
 
-  return chunks;
+    return chunk_id;
 }
 
-int orochi_catalog_get_chunk_count(Oid hypertable_oid) {
-  StringInfoData query;
-  int ret;
-  int count = 0;
+List *orochi_catalog_get_chunks_in_range(Oid hypertable_oid, TimestampTz start, TimestampTz end)
+{
+    StringInfoData query;
+    List *chunks = NIL;
+    int ret;
+    uint64 i;
 
-  initStringInfo(&query);
-  appendStringInfo(
-      &query,
-      "SELECT COUNT(*) FROM orochi.orochi_chunks WHERE hypertable_oid = %u",
-      hypertable_oid);
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "SELECT chunk_id, hypertable_oid, dimension_id, range_start, range_end, "
+                     "row_count, size_bytes, is_compressed, storage_tier, tablespace_name "
+                     "FROM orochi.orochi_chunks "
+                     "WHERE hypertable_oid = %u "
+                     "AND range_start < '%s'::timestamptz "
+                     "AND range_end > '%s'::timestamptz "
+                     "ORDER BY range_start",
+                     hypertable_oid, timestamptz_to_str(end), timestamptz_to_str(start));
 
-  SPI_connect();
-  ret = SPI_execute(query.data, true, 0);
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 0);
 
-  if (ret == SPI_OK_SELECT && SPI_processed > 0) {
-    HeapTuple tuple = SPI_tuptable->vals[0];
-    TupleDesc tupdesc = SPI_tuptable->tupdesc;
-    bool isnull;
+    if (ret == SPI_OK_SELECT) {
+        for (i = 0; i < SPI_processed; i++) {
+            HeapTuple tuple = SPI_tuptable->vals[i];
+            TupleDesc tupdesc = SPI_tuptable->tupdesc;
+            bool isnull;
+            OrochiChunkInfo *info;
 
-    count = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 1, &isnull));
-    if (isnull)
-      count = 0;
-  }
+            info = (OrochiChunkInfo *)palloc0(sizeof(OrochiChunkInfo));
 
-  SPI_finish();
-  pfree(query.data);
+            info->chunk_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+            info->hypertable_oid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 2, &isnull));
+            info->dimension_id = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 3, &isnull));
+            info->range_start = DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 4, &isnull));
+            info->range_end = DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 5, &isnull));
+            info->row_count = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 6, &isnull));
+            info->size_bytes = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 7, &isnull));
+            info->is_compressed = DatumGetBool(SPI_getbinval(tuple, tupdesc, 8, &isnull));
+            info->storage_tier = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 9, &isnull));
+            info->tablespace = SPI_getvalue(tuple, tupdesc, 10);
 
-  return count;
+            chunks = lappend(chunks, info);
+        }
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
+    return chunks;
 }
 
-void orochi_catalog_update_chunk_tier(int64 chunk_id, OrochiStorageTier tier) {
-  StringInfoData query;
-  int ret;
+int orochi_catalog_get_chunk_count(Oid hypertable_oid)
+{
+    StringInfoData query;
+    int ret;
+    int count = 0;
 
-  initStringInfo(&query);
-  appendStringInfo(
-      &query,
-      "UPDATE orochi.orochi_chunks SET storage_tier = %d WHERE chunk_id = %ld",
-      (int)tier, chunk_id);
+    initStringInfo(&query);
+    appendStringInfo(&query, "SELECT COUNT(*) FROM orochi.orochi_chunks WHERE hypertable_oid = %u",
+                     hypertable_oid);
 
-  SPI_connect();
-  ret = SPI_execute(query.data, false, 0);
-  SPI_finish();
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 0);
 
-  pfree(query.data);
+    if (ret == SPI_OK_SELECT && SPI_processed > 0) {
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        bool isnull;
+
+        count = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+        if (isnull)
+            count = 0;
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
+    return count;
+}
+
+void orochi_catalog_update_chunk_tier(int64 chunk_id, OrochiStorageTier tier)
+{
+    StringInfoData query;
+    int ret;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "UPDATE orochi.orochi_chunks SET storage_tier = %d WHERE chunk_id = %ld",
+                     (int)tier, chunk_id);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, false, 0);
+    SPI_finish();
+
+    pfree(query.data);
 }
 
 /* ============================================================
  * Stripe Operations
  * ============================================================ */
 
-int64 orochi_catalog_create_stripe(Oid table_oid, int64 first_row,
-                                   int64 row_count, int32 column_count) {
-  StringInfoData query;
-  int ret;
-  int64 stripe_id = -1;
+int64 orochi_catalog_create_stripe(Oid table_oid, int64 first_row, int64 row_count,
+                                   int32 column_count)
+{
+    StringInfoData query;
+    int ret;
+    int64 stripe_id = -1;
 
-  ensure_catalog_initialized();
+    ensure_catalog_initialized();
 
-  initStringInfo(&query);
-  appendStringInfo(&query,
-                   "INSERT INTO orochi.orochi_stripes "
-                   "(table_oid, first_row, row_count, column_count) "
-                   "VALUES (%u, %ld, %ld, %d) "
-                   "RETURNING stripe_id",
-                   table_oid, first_row, row_count, column_count);
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "INSERT INTO orochi.orochi_stripes "
+                     "(table_oid, first_row, row_count, column_count) "
+                     "VALUES (%u, %ld, %ld, %d) "
+                     "RETURNING stripe_id",
+                     table_oid, first_row, row_count, column_count);
 
-  SPI_connect();
-  ret = SPI_execute(query.data, false, 1);
+    SPI_connect();
+    ret = SPI_execute(query.data, false, 1);
 
-  if (ret == SPI_OK_INSERT_RETURNING && SPI_processed > 0) {
-    HeapTuple tuple = SPI_tuptable->vals[0];
-    TupleDesc tupdesc = SPI_tuptable->tupdesc;
-    bool isnull;
-    stripe_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
-  }
+    if (ret == SPI_OK_INSERT_RETURNING && SPI_processed > 0) {
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        bool isnull;
+        stripe_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+    }
 
-  SPI_finish();
-  pfree(query.data);
+    SPI_finish();
+    pfree(query.data);
 
-  return stripe_id;
+    return stripe_id;
 }
 
-void orochi_catalog_update_stripe_status(int64 stripe_id, bool is_flushed,
-                                         int64 data_size, int64 metadata_size) {
-  StringInfoData query;
-  int ret;
+void orochi_catalog_update_stripe_status(int64 stripe_id, bool is_flushed, int64 data_size,
+                                         int64 metadata_size)
+{
+    StringInfoData query;
+    int ret;
 
-  initStringInfo(&query);
-  appendStringInfo(&query,
-                   "UPDATE orochi.orochi_stripes "
-                   "SET is_flushed = %s, data_size = %ld, metadata_size = %ld "
-                   "WHERE stripe_id = %ld",
-                   is_flushed ? "TRUE" : "FALSE", data_size, metadata_size,
-                   stripe_id);
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "UPDATE orochi.orochi_stripes "
+                     "SET is_flushed = %s, data_size = %ld, metadata_size = %ld "
+                     "WHERE stripe_id = %ld",
+                     is_flushed ? "TRUE" : "FALSE", data_size, metadata_size, stripe_id);
 
-  SPI_connect();
-  ret = SPI_execute(query.data, false, 0);
-  SPI_finish();
+    SPI_connect();
+    ret = SPI_execute(query.data, false, 0);
+    SPI_finish();
 
-  pfree(query.data);
+    pfree(query.data);
 }
 
 /* ============================================================
  * Tiering Policy Operations
  * ============================================================ */
 
-int64 orochi_catalog_create_tiering_policy(OrochiTieringPolicy *policy) {
-  StringInfoData query;
-  int ret;
-  int64 policy_id = -1;
+int64 orochi_catalog_create_tiering_policy(OrochiTieringPolicy *policy)
+{
+    StringInfoData query;
+    int ret;
+    int64 policy_id = -1;
 
-  ensure_catalog_initialized();
+    ensure_catalog_initialized();
 
-  initStringInfo(&query);
-  appendStringInfo(&query,
-                   "INSERT INTO orochi.orochi_tiering_policies "
-                   "(table_oid, hot_to_warm, warm_to_cold, cold_to_frozen, "
-                   "compress_on_tier, enabled) "
-                   "VALUES (%u, %s, %s, %s, %s, %s) "
-                   "ON CONFLICT (table_oid) DO UPDATE SET "
-                   "hot_to_warm = EXCLUDED.hot_to_warm, "
-                   "warm_to_cold = EXCLUDED.warm_to_cold, "
-                   "cold_to_frozen = EXCLUDED.cold_to_frozen, "
-                   "compress_on_tier = EXCLUDED.compress_on_tier, "
-                   "enabled = EXCLUDED.enabled "
-                   "RETURNING policy_id",
-                   policy->table_oid,
-                   format_interval_literal(policy->hot_to_warm),
-                   format_interval_literal(policy->warm_to_cold),
-                   format_interval_literal(policy->cold_to_frozen),
-                   policy->compress_on_tier ? "TRUE" : "FALSE",
-                   policy->enabled ? "TRUE" : "FALSE");
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "INSERT INTO orochi.orochi_tiering_policies "
+                     "(table_oid, hot_to_warm, warm_to_cold, cold_to_frozen, "
+                     "compress_on_tier, enabled) "
+                     "VALUES (%u, %s, %s, %s, %s, %s) "
+                     "ON CONFLICT (table_oid) DO UPDATE SET "
+                     "hot_to_warm = EXCLUDED.hot_to_warm, "
+                     "warm_to_cold = EXCLUDED.warm_to_cold, "
+                     "cold_to_frozen = EXCLUDED.cold_to_frozen, "
+                     "compress_on_tier = EXCLUDED.compress_on_tier, "
+                     "enabled = EXCLUDED.enabled "
+                     "RETURNING policy_id",
+                     policy->table_oid, format_interval_literal(policy->hot_to_warm),
+                     format_interval_literal(policy->warm_to_cold),
+                     format_interval_literal(policy->cold_to_frozen),
+                     policy->compress_on_tier ? "TRUE" : "FALSE",
+                     policy->enabled ? "TRUE" : "FALSE");
 
-  SPI_connect();
-  ret = SPI_execute(query.data, false, 1);
+    SPI_connect();
+    ret = SPI_execute(query.data, false, 1);
 
-  if ((ret == SPI_OK_INSERT_RETURNING || ret == SPI_OK_UPDATE_RETURNING) &&
-      SPI_processed > 0) {
-    HeapTuple tuple = SPI_tuptable->vals[0];
-    TupleDesc tupdesc = SPI_tuptable->tupdesc;
-    bool isnull;
-    policy_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
-  }
+    if ((ret == SPI_OK_INSERT_RETURNING || ret == SPI_OK_UPDATE_RETURNING) && SPI_processed > 0) {
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        bool isnull;
+        policy_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+    }
 
-  SPI_finish();
-  pfree(query.data);
+    SPI_finish();
+    pfree(query.data);
 
-  return policy_id;
+    return policy_id;
 }
 
 /* ============================================================
  * Vector Index Operations
  * ============================================================ */
 
-void orochi_catalog_register_vector_index(OrochiVectorIndex *index_info) {
-  StringInfoData query;
-  int ret;
+void orochi_catalog_register_vector_index(OrochiVectorIndex *index_info)
+{
+    StringInfoData query;
+    int ret;
 
-  ensure_catalog_initialized();
+    ensure_catalog_initialized();
 
-  initStringInfo(&query);
-  appendStringInfo(&query,
-                   "INSERT INTO orochi.orochi_vector_indexes "
-                   "(index_oid, table_oid, vector_column, dimensions, lists, "
-                   "probes, distance_type, index_type) "
-                   "VALUES (%u, %u, %d, %d, %d, %d, %s, %s) "
-                   "ON CONFLICT (index_oid) DO UPDATE SET "
-                   "lists = EXCLUDED.lists, "
-                   "probes = EXCLUDED.probes",
-                   index_info->index_oid, index_info->table_oid,
-                   index_info->vector_column, index_info->dimensions,
-                   index_info->lists, index_info->probes,
-                   quote_literal_cstr(index_info->distance_type),
-                   quote_literal_cstr(index_info->index_type));
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "INSERT INTO orochi.orochi_vector_indexes "
+                     "(index_oid, table_oid, vector_column, dimensions, lists, "
+                     "probes, distance_type, index_type) "
+                     "VALUES (%u, %u, %d, %d, %d, %d, %s, %s) "
+                     "ON CONFLICT (index_oid) DO UPDATE SET "
+                     "lists = EXCLUDED.lists, "
+                     "probes = EXCLUDED.probes",
+                     index_info->index_oid, index_info->table_oid, index_info->vector_column,
+                     index_info->dimensions, index_info->lists, index_info->probes,
+                     quote_literal_cstr(index_info->distance_type),
+                     quote_literal_cstr(index_info->index_type));
 
-  SPI_connect();
-  ret = SPI_execute(query.data, false, 0);
-  SPI_finish();
+    SPI_connect();
+    ret = SPI_execute(query.data, false, 0);
+    SPI_finish();
 
-  pfree(query.data);
+    pfree(query.data);
 }
 
 /* ============================================================
  * Additional Catalog Operations
  * ============================================================ */
 
-void orochi_catalog_update_chunk_compression(int64 chunk_id,
-                                             bool is_compressed) {
-  StringInfoData query;
+void orochi_catalog_update_chunk_compression(int64 chunk_id, bool is_compressed)
+{
+    StringInfoData query;
 
-  initStringInfo(&query);
-  appendStringInfo(
-      &query,
-      "UPDATE orochi.orochi_chunks SET is_compressed = %s WHERE chunk_id = %ld",
-      is_compressed ? "TRUE" : "FALSE", chunk_id);
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "UPDATE orochi.orochi_chunks SET is_compressed = %s WHERE chunk_id = %ld",
+                     is_compressed ? "TRUE" : "FALSE", chunk_id);
 
-  SPI_connect();
-  SPI_execute(query.data, false, 0);
-  SPI_finish();
-  pfree(query.data);
+    SPI_connect();
+    SPI_execute(query.data, false, 0);
+    SPI_finish();
+    pfree(query.data);
 }
 
-void orochi_catalog_delete_chunk(int64 chunk_id) {
-  StringInfoData query;
+void orochi_catalog_delete_chunk(int64 chunk_id)
+{
+    StringInfoData query;
 
-  initStringInfo(&query);
-  appendStringInfo(&query,
-                   "DELETE FROM orochi.orochi_chunks WHERE chunk_id = %ld",
-                   chunk_id);
+    initStringInfo(&query);
+    appendStringInfo(&query, "DELETE FROM orochi.orochi_chunks WHERE chunk_id = %ld", chunk_id);
 
-  SPI_connect();
-  SPI_execute(query.data, false, 0);
-  SPI_finish();
-  pfree(query.data);
+    SPI_connect();
+    SPI_execute(query.data, false, 0);
+    SPI_finish();
+    pfree(query.data);
 }
 
-void orochi_catalog_update_shard_placement(int64 shard_id, int32 node_id) {
-  StringInfoData query;
+void orochi_catalog_update_shard_placement(int64 shard_id, int32 node_id)
+{
+    StringInfoData query;
 
-  initStringInfo(&query);
-  appendStringInfo(
-      &query,
-      "UPDATE orochi.orochi_shards SET node_id = %d WHERE shard_id = %ld",
-      node_id, shard_id);
+    initStringInfo(&query);
+    appendStringInfo(&query, "UPDATE orochi.orochi_shards SET node_id = %d WHERE shard_id = %ld",
+                     node_id, shard_id);
 
-  SPI_connect();
-  SPI_execute(query.data, false, 0);
-  SPI_finish();
-  pfree(query.data);
+    SPI_connect();
+    SPI_execute(query.data, false, 0);
+    SPI_finish();
+    pfree(query.data);
 }
 
-void orochi_catalog_update_shard_stats(int64 shard_id, int64 row_count,
-                                       int64 size_bytes) {
-  StringInfoData query;
+void orochi_catalog_update_shard_stats(int64 shard_id, int64 row_count, int64 size_bytes)
+{
+    StringInfoData query;
 
-  initStringInfo(&query);
-  appendStringInfo(&query,
-                   "UPDATE orochi.orochi_shards SET row_count = %ld, "
-                   "size_bytes = %ld WHERE shard_id = %ld",
-                   row_count, size_bytes, shard_id);
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "UPDATE orochi.orochi_shards SET row_count = %ld, "
+                     "size_bytes = %ld WHERE shard_id = %ld",
+                     row_count, size_bytes, shard_id);
 
-  SPI_connect();
-  SPI_execute(query.data, false, 0);
-  SPI_finish();
-  pfree(query.data);
+    SPI_connect();
+    SPI_execute(query.data, false, 0);
+    SPI_finish();
+    pfree(query.data);
 }
 
-void orochi_catalog_record_shard_access(int64 shard_id) {
-  StringInfoData query;
+void orochi_catalog_record_shard_access(int64 shard_id)
+{
+    StringInfoData query;
 
-  initStringInfo(&query);
-  appendStringInfo(&query,
-                   "UPDATE orochi.orochi_shards SET last_accessed = NOW() "
-                   "WHERE shard_id = %ld",
-                   shard_id);
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "UPDATE orochi.orochi_shards SET last_accessed = NOW() "
+                     "WHERE shard_id = %ld",
+                     shard_id);
 
-  SPI_connect();
-  SPI_execute(query.data, false, 0);
-  SPI_finish();
-  pfree(query.data);
+    SPI_connect();
+    SPI_execute(query.data, false, 0);
+    SPI_finish();
+    pfree(query.data);
 }
 
-int64 orochi_catalog_create_shard(Oid table_oid, int32 hash_min, int32 hash_max,
-                                  int32 node_id) {
-  StringInfoData query;
-  int ret;
-  int64 shard_id = -1;
+int64 orochi_catalog_create_shard(Oid table_oid, int32 hash_min, int32 hash_max, int32 node_id)
+{
+    StringInfoData query;
+    int ret;
+    int64 shard_id = -1;
 
-  initStringInfo(&query);
-  appendStringInfo(&query,
-                   "INSERT INTO orochi.orochi_shards "
-                   "(table_oid, hash_min, hash_max, node_id, storage_tier) "
-                   "VALUES (%u, %d, %d, %d, 0) "
-                   "RETURNING shard_id",
-                   table_oid, hash_min, hash_max, node_id);
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "INSERT INTO orochi.orochi_shards "
+                     "(table_oid, hash_min, hash_max, node_id, storage_tier) "
+                     "VALUES (%u, %d, %d, %d, 0) "
+                     "RETURNING shard_id",
+                     table_oid, hash_min, hash_max, node_id);
 
-  SPI_connect();
-  ret = SPI_execute(query.data, false, 1);
+    SPI_connect();
+    ret = SPI_execute(query.data, false, 1);
 
-  if (ret == SPI_OK_INSERT_RETURNING && SPI_processed > 0) {
-    bool isnull;
-    shard_id = DatumGetInt64(SPI_getbinval(SPI_tuptable->vals[0],
-                                           SPI_tuptable->tupdesc, 1, &isnull));
-  }
-
-  SPI_finish();
-  pfree(query.data);
-
-  return shard_id;
-}
-
-void orochi_catalog_update_shard_range(int64 shard_id, int32 hash_min,
-                                       int32 hash_max) {
-  StringInfoData query;
-
-  initStringInfo(&query);
-  appendStringInfo(
-      &query,
-      "UPDATE orochi.orochi_shards SET hash_min = %d, hash_max = %d "
-      "WHERE shard_id = %ld",
-      hash_min, hash_max, shard_id);
-
-  SPI_connect();
-  SPI_execute(query.data, false, 0);
-  SPI_finish();
-  pfree(query.data);
-}
-
-void orochi_catalog_delete_shard(int64 shard_id) {
-  StringInfoData query;
-
-  initStringInfo(&query);
-  appendStringInfo(&query,
-                   "DELETE FROM orochi.orochi_shards WHERE shard_id = %ld",
-                   shard_id);
-
-  SPI_connect();
-  SPI_execute(query.data, false, 0);
-  SPI_finish();
-  pfree(query.data);
-}
-
-void orochi_catalog_update_node_stats(int32 node_id, int64 shard_count,
-                                      int64 total_size, double cpu_usage,
-                                      double memory_usage) {
-  StringInfoData query;
-
-  initStringInfo(&query);
-  appendStringInfo(
-      &query,
-      "UPDATE orochi.orochi_nodes SET shard_count = %ld, total_size = %ld, "
-      "cpu_usage = %f, memory_usage = %f, last_heartbeat = NOW() WHERE node_id "
-      "= %d",
-      shard_count, total_size, cpu_usage, memory_usage, node_id);
-
-  SPI_connect();
-  SPI_execute(query.data, false, 0);
-  SPI_finish();
-  pfree(query.data);
-}
-
-void orochi_catalog_remove_node(int32 node_id) {
-  StringInfoData query;
-
-  initStringInfo(&query);
-  appendStringInfo(&query, "DELETE FROM orochi.orochi_nodes WHERE node_id = %d",
-                   node_id);
-
-  SPI_connect();
-  SPI_execute(query.data, false, 0);
-  SPI_finish();
-  pfree(query.data);
-}
-
-void orochi_catalog_update_table(OrochiTableInfo *table_info) {
-  orochi_catalog_register_table(table_info);
-}
-
-void orochi_catalog_log_invalidation(Oid table_oid, TimestampTz start,
-                                     TimestampTz end) {
-  StringInfoData query;
-  int ret;
-
-  ensure_catalog_initialized();
-
-  /*
-   * Log invalidation for all continuous aggregates that depend on this table.
-   * This is called when data in a hypertable changes.
-   */
-  initStringInfo(&query);
-  appendStringInfo(&query,
-                   "INSERT INTO orochi.orochi_invalidation_log (agg_id, "
-                   "range_start, range_end) "
-                   "SELECT agg_id, '%s'::timestamptz, '%s'::timestamptz "
-                   "FROM orochi.orochi_continuous_aggregates "
-                   "WHERE source_table_oid = %u AND enabled = TRUE",
-                   timestamptz_to_str(start), timestamptz_to_str(end),
-                   table_oid);
-
-  SPI_connect();
-  ret = SPI_execute(query.data, false, 0);
-  SPI_finish();
-
-  pfree(query.data);
-
-  elog(DEBUG1, "Logged invalidation for table %u from %s to %s", table_oid,
-       timestamptz_to_str(start), timestamptz_to_str(end));
-}
-
-void orochi_catalog_clear_invalidations(Oid agg_oid, TimestampTz up_to) {
-  StringInfoData query;
-  int ret;
-
-  initStringInfo(&query);
-  appendStringInfo(&query,
-                   "DELETE FROM orochi.orochi_invalidation_log "
-                   "WHERE agg_id = %u AND range_end <= '%s'::timestamptz",
-                   agg_oid, timestamptz_to_str(up_to));
-
-  SPI_connect();
-  ret = SPI_execute(query.data, false, 0);
-  SPI_finish();
-
-  pfree(query.data);
-}
-
-List *orochi_catalog_get_pending_invalidations(Oid agg_oid) {
-  StringInfoData query;
-  List *invalidations = NIL;
-  int ret;
-  uint64 i;
-
-  initStringInfo(&query);
-  appendStringInfo(&query,
-                   "SELECT log_id, agg_id, range_start, range_end "
-                   "FROM orochi.orochi_invalidation_log "
-                   "WHERE agg_id = %u "
-                   "ORDER BY range_start",
-                   agg_oid);
-
-  SPI_connect();
-  ret = SPI_execute(query.data, true, 0);
-
-  if (ret == SPI_OK_SELECT) {
-    for (i = 0; i < SPI_processed; i++) {
-      HeapTuple tuple = SPI_tuptable->vals[i];
-      TupleDesc tupdesc = SPI_tuptable->tupdesc;
-      bool isnull;
-      OrochiInvalidationEntry *entry;
-
-      entry =
-          (OrochiInvalidationEntry *)palloc0(sizeof(OrochiInvalidationEntry));
-
-      entry->log_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
-      entry->agg_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 2, &isnull));
-      entry->range_start =
-          DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 3, &isnull));
-      entry->range_end =
-          DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 4, &isnull));
-
-      invalidations = lappend(invalidations, entry);
+    if (ret == SPI_OK_INSERT_RETURNING && SPI_processed > 0) {
+        bool isnull;
+        shard_id =
+            DatumGetInt64(SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull));
     }
-  }
 
-  SPI_finish();
-  pfree(query.data);
+    SPI_finish();
+    pfree(query.data);
 
-  return invalidations;
+    return shard_id;
 }
 
-List *orochi_catalog_get_continuous_aggs(Oid source_table) {
-  StringInfoData query;
-  List *aggs = NIL;
-  int ret;
-  uint64 i;
+void orochi_catalog_update_shard_range(int64 shard_id, int32 hash_min, int32 hash_max)
+{
+    StringInfoData query;
 
-  initStringInfo(&query);
-  appendStringInfo(
-      &query,
-      "SELECT agg_id, view_oid, source_table_oid, materialization_table_oid, "
-      "query_text, refresh_interval, last_refresh, enabled "
-      "FROM orochi.orochi_continuous_aggregates "
-      "WHERE source_table_oid = %u",
-      source_table);
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "UPDATE orochi.orochi_shards SET hash_min = %d, hash_max = %d "
+                     "WHERE shard_id = %ld",
+                     hash_min, hash_max, shard_id);
 
-  SPI_connect();
-  ret = SPI_execute(query.data, true, 0);
+    SPI_connect();
+    SPI_execute(query.data, false, 0);
+    SPI_finish();
+    pfree(query.data);
+}
 
-  if (ret == SPI_OK_SELECT) {
-    for (i = 0; i < SPI_processed; i++) {
-      HeapTuple tuple = SPI_tuptable->vals[i];
-      TupleDesc tupdesc = SPI_tuptable->tupdesc;
-      bool isnull;
-      OrochiContinuousAggInfo *info;
+void orochi_catalog_delete_shard(int64 shard_id)
+{
+    StringInfoData query;
 
-      info =
-          (OrochiContinuousAggInfo *)palloc0(sizeof(OrochiContinuousAggInfo));
+    initStringInfo(&query);
+    appendStringInfo(&query, "DELETE FROM orochi.orochi_shards WHERE shard_id = %ld", shard_id);
 
-      info->agg_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
-      info->view_oid =
-          DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 2, &isnull));
-      info->source_table_oid =
-          DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 3, &isnull));
-      info->materialization_table_oid =
-          isnull ? InvalidOid
-                 : DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 4, &isnull));
-      info->query_text = SPI_getvalue(tuple, tupdesc, 5);
-      /* refresh_interval and last_refresh handled separately */
-      info->enabled = DatumGetBool(SPI_getbinval(tuple, tupdesc, 8, &isnull));
+    SPI_connect();
+    SPI_execute(query.data, false, 0);
+    SPI_finish();
+    pfree(query.data);
+}
 
-      aggs = lappend(aggs, info);
+void orochi_catalog_update_node_stats(int32 node_id, int64 shard_count, int64 total_size,
+                                      double cpu_usage, double memory_usage)
+{
+    StringInfoData query;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "UPDATE orochi.orochi_nodes SET shard_count = %ld, total_size = %ld, "
+                     "cpu_usage = %f, memory_usage = %f, last_heartbeat = NOW() WHERE node_id "
+                     "= %d",
+                     shard_count, total_size, cpu_usage, memory_usage, node_id);
+
+    SPI_connect();
+    SPI_execute(query.data, false, 0);
+    SPI_finish();
+    pfree(query.data);
+}
+
+void orochi_catalog_remove_node(int32 node_id)
+{
+    StringInfoData query;
+
+    initStringInfo(&query);
+    appendStringInfo(&query, "DELETE FROM orochi.orochi_nodes WHERE node_id = %d", node_id);
+
+    SPI_connect();
+    SPI_execute(query.data, false, 0);
+    SPI_finish();
+    pfree(query.data);
+}
+
+void orochi_catalog_update_table(OrochiTableInfo *table_info)
+{
+    orochi_catalog_register_table(table_info);
+}
+
+void orochi_catalog_log_invalidation(Oid table_oid, TimestampTz start, TimestampTz end)
+{
+    StringInfoData query;
+    int ret;
+
+    ensure_catalog_initialized();
+
+    /*
+     * Log invalidation for all continuous aggregates that depend on this table.
+     * This is called when data in a hypertable changes.
+     */
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "INSERT INTO orochi.orochi_invalidation_log (agg_id, "
+                     "range_start, range_end) "
+                     "SELECT agg_id, '%s'::timestamptz, '%s'::timestamptz "
+                     "FROM orochi.orochi_continuous_aggregates "
+                     "WHERE source_table_oid = %u AND enabled = TRUE",
+                     timestamptz_to_str(start), timestamptz_to_str(end), table_oid);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, false, 0);
+    SPI_finish();
+
+    pfree(query.data);
+
+    elog(DEBUG1, "Logged invalidation for table %u from %s to %s", table_oid,
+         timestamptz_to_str(start), timestamptz_to_str(end));
+}
+
+void orochi_catalog_clear_invalidations(Oid agg_oid, TimestampTz up_to)
+{
+    StringInfoData query;
+    int ret;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "DELETE FROM orochi.orochi_invalidation_log "
+                     "WHERE agg_id = %u AND range_end <= '%s'::timestamptz",
+                     agg_oid, timestamptz_to_str(up_to));
+
+    SPI_connect();
+    ret = SPI_execute(query.data, false, 0);
+    SPI_finish();
+
+    pfree(query.data);
+}
+
+List *orochi_catalog_get_pending_invalidations(Oid agg_oid)
+{
+    StringInfoData query;
+    List *invalidations = NIL;
+    int ret;
+    uint64 i;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "SELECT log_id, agg_id, range_start, range_end "
+                     "FROM orochi.orochi_invalidation_log "
+                     "WHERE agg_id = %u "
+                     "ORDER BY range_start",
+                     agg_oid);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 0);
+
+    if (ret == SPI_OK_SELECT) {
+        for (i = 0; i < SPI_processed; i++) {
+            HeapTuple tuple = SPI_tuptable->vals[i];
+            TupleDesc tupdesc = SPI_tuptable->tupdesc;
+            bool isnull;
+            OrochiInvalidationEntry *entry;
+
+            entry = (OrochiInvalidationEntry *)palloc0(sizeof(OrochiInvalidationEntry));
+
+            entry->log_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+            entry->agg_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 2, &isnull));
+            entry->range_start = DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 3, &isnull));
+            entry->range_end = DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 4, &isnull));
+
+            invalidations = lappend(invalidations, entry);
+        }
     }
-  }
 
-  SPI_finish();
-  pfree(query.data);
+    SPI_finish();
+    pfree(query.data);
 
-  return aggs;
+    return invalidations;
 }
 
-int64 orochi_catalog_register_continuous_agg(Oid view_oid, Oid source_table,
-                                             Oid mat_table,
-                                             const char *query_text) {
-  StringInfoData query;
-  int ret;
-  int64 agg_id = -1;
+List *orochi_catalog_get_continuous_aggs(Oid source_table)
+{
+    StringInfoData query;
+    List *aggs = NIL;
+    int ret;
+    uint64 i;
 
-  ensure_catalog_initialized();
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "SELECT agg_id, view_oid, source_table_oid, materialization_table_oid, "
+                     "query_text, refresh_interval, last_refresh, enabled "
+                     "FROM orochi.orochi_continuous_aggregates "
+                     "WHERE source_table_oid = %u",
+                     source_table);
 
-  initStringInfo(&query);
-  appendStringInfo(
-      &query,
-      "INSERT INTO orochi.orochi_continuous_aggregates "
-      "(view_oid, source_table_oid, materialization_table_oid, query_text, "
-      "enabled) "
-      "VALUES (%u, %u, %u, %s, TRUE) "
-      "ON CONFLICT (view_oid) DO UPDATE SET "
-      "query_text = EXCLUDED.query_text, "
-      "materialization_table_oid = EXCLUDED.materialization_table_oid "
-      "RETURNING agg_id",
-      view_oid, source_table, mat_table, quote_literal_cstr(query_text));
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 0);
 
-  SPI_connect();
-  ret = SPI_execute(query.data, false, 1);
+    if (ret == SPI_OK_SELECT) {
+        for (i = 0; i < SPI_processed; i++) {
+            HeapTuple tuple = SPI_tuptable->vals[i];
+            TupleDesc tupdesc = SPI_tuptable->tupdesc;
+            bool isnull;
+            OrochiContinuousAggInfo *info;
 
-  if ((ret == SPI_OK_INSERT_RETURNING || ret == SPI_OK_UPDATE_RETURNING) &&
-      SPI_processed > 0) {
-    HeapTuple tuple = SPI_tuptable->vals[0];
-    TupleDesc tupdesc = SPI_tuptable->tupdesc;
-    bool isnull;
-    agg_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
-  }
+            info = (OrochiContinuousAggInfo *)palloc0(sizeof(OrochiContinuousAggInfo));
 
-  SPI_finish();
-  pfree(query.data);
+            info->agg_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+            info->view_oid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 2, &isnull));
+            info->source_table_oid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 3, &isnull));
+            info->materialization_table_oid =
+                isnull ? InvalidOid : DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 4, &isnull));
+            info->query_text = SPI_getvalue(tuple, tupdesc, 5);
+            /* refresh_interval and last_refresh handled separately */
+            info->enabled = DatumGetBool(SPI_getbinval(tuple, tupdesc, 8, &isnull));
 
-  elog(DEBUG1, "Registered continuous aggregate %u on table %u (agg_id=%ld)",
-       view_oid, source_table, agg_id);
+            aggs = lappend(aggs, info);
+        }
+    }
 
-  return agg_id;
+    SPI_finish();
+    pfree(query.data);
+
+    return aggs;
 }
 
-OrochiContinuousAggInfo *orochi_catalog_get_continuous_agg(Oid view_oid) {
-  StringInfoData query;
-  OrochiContinuousAggInfo *info = NULL;
-  int ret;
+int64 orochi_catalog_register_continuous_agg(Oid view_oid, Oid source_table, Oid mat_table,
+                                             const char *query_text)
+{
+    StringInfoData query;
+    int ret;
+    int64 agg_id = -1;
 
-  initStringInfo(&query);
-  appendStringInfo(
-      &query,
-      "SELECT agg_id, view_oid, source_table_oid, materialization_table_oid, "
-      "query_text, refresh_interval, last_refresh, enabled "
-      "FROM orochi.orochi_continuous_aggregates "
-      "WHERE view_oid = %u",
-      view_oid);
+    ensure_catalog_initialized();
 
-  SPI_connect();
-  ret = SPI_execute(query.data, true, 1);
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "INSERT INTO orochi.orochi_continuous_aggregates "
+                     "(view_oid, source_table_oid, materialization_table_oid, query_text, "
+                     "enabled) "
+                     "VALUES (%u, %u, %u, %s, TRUE) "
+                     "ON CONFLICT (view_oid) DO UPDATE SET "
+                     "query_text = EXCLUDED.query_text, "
+                     "materialization_table_oid = EXCLUDED.materialization_table_oid "
+                     "RETURNING agg_id",
+                     view_oid, source_table, mat_table, quote_literal_cstr(query_text));
 
-  if (ret == SPI_OK_SELECT && SPI_processed > 0) {
-    HeapTuple tuple = SPI_tuptable->vals[0];
-    TupleDesc tupdesc = SPI_tuptable->tupdesc;
-    bool isnull;
+    SPI_connect();
+    ret = SPI_execute(query.data, false, 1);
 
-    info = (OrochiContinuousAggInfo *)palloc0(sizeof(OrochiContinuousAggInfo));
+    if ((ret == SPI_OK_INSERT_RETURNING || ret == SPI_OK_UPDATE_RETURNING) && SPI_processed > 0) {
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        bool isnull;
+        agg_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+    }
 
-    info->agg_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
-    info->view_oid =
-        DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 2, &isnull));
-    info->source_table_oid =
-        DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 3, &isnull));
-    info->materialization_table_oid =
-        isnull ? InvalidOid
-               : DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 4, &isnull));
-    info->query_text = SPI_getvalue(tuple, tupdesc, 5);
-    info->enabled = DatumGetBool(SPI_getbinval(tuple, tupdesc, 8, &isnull));
-  }
+    SPI_finish();
+    pfree(query.data);
 
-  SPI_finish();
-  pfree(query.data);
+    elog(DEBUG1, "Registered continuous aggregate %u on table %u (agg_id=%ld)", view_oid,
+         source_table, agg_id);
 
-  return info;
+    return agg_id;
 }
 
-void orochi_catalog_update_continuous_agg_refresh(int64 agg_id,
-                                                  TimestampTz last_refresh) {
-  StringInfoData query;
+OrochiContinuousAggInfo *orochi_catalog_get_continuous_agg(Oid view_oid)
+{
+    StringInfoData query;
+    OrochiContinuousAggInfo *info = NULL;
+    int ret;
 
-  initStringInfo(&query);
-  appendStringInfo(&query,
-                   "UPDATE orochi.orochi_continuous_aggregates "
-                   "SET last_refresh = '%s'::timestamptz "
-                   "WHERE agg_id = %ld",
-                   timestamptz_to_str(last_refresh), agg_id);
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "SELECT agg_id, view_oid, source_table_oid, materialization_table_oid, "
+                     "query_text, refresh_interval, last_refresh, enabled "
+                     "FROM orochi.orochi_continuous_aggregates "
+                     "WHERE view_oid = %u",
+                     view_oid);
 
-  SPI_connect();
-  SPI_execute(query.data, false, 0);
-  SPI_finish();
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 1);
 
-  pfree(query.data);
+    if (ret == SPI_OK_SELECT && SPI_processed > 0) {
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        bool isnull;
+
+        info = (OrochiContinuousAggInfo *)palloc0(sizeof(OrochiContinuousAggInfo));
+
+        info->agg_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+        info->view_oid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 2, &isnull));
+        info->source_table_oid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 3, &isnull));
+        info->materialization_table_oid =
+            isnull ? InvalidOid : DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 4, &isnull));
+        info->query_text = SPI_getvalue(tuple, tupdesc, 5);
+        info->enabled = DatumGetBool(SPI_getbinval(tuple, tupdesc, 8, &isnull));
+    }
+
+    SPI_finish();
+    pfree(query.data);
+
+    return info;
 }
 
-void orochi_catalog_delete_continuous_agg(Oid view_oid) {
-  StringInfoData query;
+void orochi_catalog_update_continuous_agg_refresh(int64 agg_id, TimestampTz last_refresh)
+{
+    StringInfoData query;
 
-  initStringInfo(&query);
-  appendStringInfo(
-      &query,
-      "DELETE FROM orochi.orochi_continuous_aggregates WHERE view_oid = %u",
-      view_oid);
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "UPDATE orochi.orochi_continuous_aggregates "
+                     "SET last_refresh = '%s'::timestamptz "
+                     "WHERE agg_id = %ld",
+                     timestamptz_to_str(last_refresh), agg_id);
 
-  SPI_connect();
-  SPI_execute(query.data, false, 0);
-  SPI_finish();
+    SPI_connect();
+    SPI_execute(query.data, false, 0);
+    SPI_finish();
 
-  pfree(query.data);
+    pfree(query.data);
 }
 
-void orochi_catalog_create_column_chunk(OrochiColumnChunk *chunk) {
-  StringInfoData query;
-  int ret;
+void orochi_catalog_delete_continuous_agg(Oid view_oid)
+{
+    StringInfoData query;
 
-  if (chunk == NULL)
-    return;
+    initStringInfo(&query);
+    appendStringInfo(&query, "DELETE FROM orochi.orochi_continuous_aggregates WHERE view_oid = %u",
+                     view_oid);
 
-  initStringInfo(&query);
+    SPI_connect();
+    SPI_execute(query.data, false, 0);
+    SPI_finish();
 
-  /* Convert min/max Datum values to bytea for storage */
-  appendStringInfo(
-      &query,
-      "INSERT INTO orochi.orochi_column_chunks "
-      "(stripe_id, chunk_group_index, column_index, column_type, "
-      "value_count, null_count, has_nulls, compressed_size, decompressed_size, "
-      "compression, min_is_null, max_is_null) "
-      "VALUES (%ld, 0, %d, %u, %ld, %ld, %s, %ld, %ld, %d, %s, %s) "
-      "ON CONFLICT (stripe_id, chunk_group_index, column_index) DO UPDATE SET "
-      "value_count = EXCLUDED.value_count, "
-      "null_count = EXCLUDED.null_count, "
-      "has_nulls = EXCLUDED.has_nulls, "
-      "compressed_size = EXCLUDED.compressed_size, "
-      "decompressed_size = EXCLUDED.decompressed_size, "
-      "compression = EXCLUDED.compression",
-      chunk->stripe_id, chunk->column_index,
-      (unsigned int)INT8OID, /* Default to int8 for now */
-      chunk->value_count, chunk->null_count,
-      chunk->has_nulls ? "TRUE" : "FALSE", chunk->compressed_size,
-      chunk->decompressed_size, (int)chunk->compression, "FALSE", "FALSE");
+    pfree(query.data);
+}
 
-  SPI_connect();
-  ret = SPI_execute(query.data, false, 0);
-  if (ret != SPI_OK_INSERT && ret != SPI_OK_UPDATE) {
-    ereport(WARNING, (errcode(ERRCODE_INTERNAL_ERROR),
-                      errmsg("failed to create column chunk: %d", ret)));
-  }
-  SPI_finish();
-  pfree(query.data);
+void orochi_catalog_create_column_chunk(OrochiColumnChunk *chunk)
+{
+    StringInfoData query;
+    int ret;
+
+    if (chunk == NULL)
+        return;
+
+    initStringInfo(&query);
+
+    /* Convert min/max Datum values to bytea for storage */
+    appendStringInfo(&query,
+                     "INSERT INTO orochi.orochi_column_chunks "
+                     "(stripe_id, chunk_group_index, column_index, column_type, "
+                     "value_count, null_count, has_nulls, compressed_size, decompressed_size, "
+                     "compression, min_is_null, max_is_null) "
+                     "VALUES (%ld, 0, %d, %u, %ld, %ld, %s, %ld, %ld, %d, %s, %s) "
+                     "ON CONFLICT (stripe_id, chunk_group_index, column_index) DO UPDATE SET "
+                     "value_count = EXCLUDED.value_count, "
+                     "null_count = EXCLUDED.null_count, "
+                     "has_nulls = EXCLUDED.has_nulls, "
+                     "compressed_size = EXCLUDED.compressed_size, "
+                     "decompressed_size = EXCLUDED.decompressed_size, "
+                     "compression = EXCLUDED.compression",
+                     chunk->stripe_id, chunk->column_index,
+                     (unsigned int)INT8OID, /* Default to int8 for now */
+                     chunk->value_count, chunk->null_count, chunk->has_nulls ? "TRUE" : "FALSE",
+                     chunk->compressed_size, chunk->decompressed_size, (int)chunk->compression,
+                     "FALSE", "FALSE");
+
+    SPI_connect();
+    ret = SPI_execute(query.data, false, 0);
+    if (ret != SPI_OK_INSERT && ret != SPI_OK_UPDATE) {
+        ereport(WARNING, (errcode(ERRCODE_INTERNAL_ERROR),
+                          errmsg("failed to create column chunk: %d", ret)));
+    }
+    SPI_finish();
+    pfree(query.data);
 }
 
 /*
@@ -1547,50 +1485,48 @@ void orochi_catalog_create_column_chunk(OrochiColumnChunk *chunk) {
  *
  * Update min/max statistics for a column chunk.
  */
-void orochi_catalog_update_column_stats(int64 stripe_id, int16 column_index,
-                                        Datum min_value, Datum max_value,
-                                        Oid type_oid) {
-  StringInfoData query;
-  int ret;
-  char *min_str = NULL;
-  char *max_str = NULL;
-  Oid out_func;
-  bool is_varlena;
+void orochi_catalog_update_column_stats(int64 stripe_id, int16 column_index, Datum min_value,
+                                        Datum max_value, Oid type_oid)
+{
+    StringInfoData query;
+    int ret;
+    char *min_str = NULL;
+    char *max_str = NULL;
+    Oid out_func;
+    bool is_varlena;
 
-  /* Get the output function for the type */
-  getTypeOutputInfo(type_oid, &out_func, &is_varlena);
+    /* Get the output function for the type */
+    getTypeOutputInfo(type_oid, &out_func, &is_varlena);
 
-  /* Convert Datum values to text representation */
-  min_str = OidOutputFunctionCall(out_func, min_value);
-  max_str = OidOutputFunctionCall(out_func, max_value);
+    /* Convert Datum values to text representation */
+    min_str = OidOutputFunctionCall(out_func, min_value);
+    max_str = OidOutputFunctionCall(out_func, max_value);
 
-  initStringInfo(&query);
-  appendStringInfo(&query,
-                   "UPDATE orochi.orochi_column_chunks SET "
-                   "column_type = %u, "
-                   "min_value = E'\\\\x%s', "
-                   "max_value = E'\\\\x%s', "
-                   "min_is_null = FALSE, "
-                   "max_is_null = FALSE "
-                   "WHERE stripe_id = %ld AND column_index = %d",
-                   (unsigned int)type_oid, min_str, max_str, stripe_id,
-                   column_index);
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "UPDATE orochi.orochi_column_chunks SET "
+                     "column_type = %u, "
+                     "min_value = E'\\\\x%s', "
+                     "max_value = E'\\\\x%s', "
+                     "min_is_null = FALSE, "
+                     "max_is_null = FALSE "
+                     "WHERE stripe_id = %ld AND column_index = %d",
+                     (unsigned int)type_oid, min_str, max_str, stripe_id, column_index);
 
-  SPI_connect();
-  ret = SPI_execute(query.data, false, 0);
-  if (ret != SPI_OK_UPDATE) {
-    ereport(WARNING,
-            (errcode(ERRCODE_INTERNAL_ERROR),
-             errmsg("failed to update column stats for stripe %ld column %d",
-                    stripe_id, column_index)));
-  }
-  SPI_finish();
+    SPI_connect();
+    ret = SPI_execute(query.data, false, 0);
+    if (ret != SPI_OK_UPDATE) {
+        ereport(WARNING, (errcode(ERRCODE_INTERNAL_ERROR),
+                          errmsg("failed to update column stats for stripe %ld column %d",
+                                 stripe_id, column_index)));
+    }
+    SPI_finish();
 
-  pfree(query.data);
-  if (min_str)
-    pfree(min_str);
-  if (max_str)
-    pfree(max_str);
+    pfree(query.data);
+    if (min_str)
+        pfree(min_str);
+    if (max_str)
+        pfree(max_str);
 }
 
 /*
@@ -1598,253 +1534,236 @@ void orochi_catalog_update_column_stats(int64 stripe_id, int16 column_index,
  *
  * Get all column chunks for a stripe.
  */
-List *orochi_catalog_get_stripe_columns(int64 stripe_id) {
-  StringInfoData query;
-  List *result = NIL;
-  int ret;
-  uint64 i;
+List *orochi_catalog_get_stripe_columns(int64 stripe_id)
+{
+    StringInfoData query;
+    List *result = NIL;
+    int ret;
+    uint64 i;
 
-  initStringInfo(&query);
-  appendStringInfo(
-      &query,
-      "SELECT chunk_id, stripe_id, chunk_group_index, column_index, "
-      "column_type, "
-      "value_count, null_count, has_nulls, compressed_size, decompressed_size, "
-      "compression, min_value, max_value, min_is_null, max_is_null "
-      "FROM orochi.orochi_column_chunks WHERE stripe_id = %ld "
-      "ORDER BY chunk_group_index, column_index",
-      stripe_id);
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "SELECT chunk_id, stripe_id, chunk_group_index, column_index, "
+                     "column_type, "
+                     "value_count, null_count, has_nulls, compressed_size, decompressed_size, "
+                     "compression, min_value, max_value, min_is_null, max_is_null "
+                     "FROM orochi.orochi_column_chunks WHERE stripe_id = %ld "
+                     "ORDER BY chunk_group_index, column_index",
+                     stripe_id);
 
-  SPI_connect();
-  ret = SPI_execute(query.data, true, 0);
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 0);
 
-  if (ret == SPI_OK_SELECT && SPI_processed > 0) {
-    for (i = 0; i < SPI_processed; i++) {
-      HeapTuple tuple = SPI_tuptable->vals[i];
-      TupleDesc tupdesc = SPI_tuptable->tupdesc;
-      bool isnull;
-      OrochiColumnChunk *chunk;
+    if (ret == SPI_OK_SELECT && SPI_processed > 0) {
+        for (i = 0; i < SPI_processed; i++) {
+            HeapTuple tuple = SPI_tuptable->vals[i];
+            TupleDesc tupdesc = SPI_tuptable->tupdesc;
+            bool isnull;
+            OrochiColumnChunk *chunk;
 
-      chunk = (OrochiColumnChunk *)palloc0(sizeof(OrochiColumnChunk));
+            chunk = (OrochiColumnChunk *)palloc0(sizeof(OrochiColumnChunk));
 
-      chunk->chunk_id =
-          DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
-      chunk->stripe_id =
-          DatumGetInt64(SPI_getbinval(tuple, tupdesc, 2, &isnull));
-      /* chunk_group_index at col 3 */
-      chunk->column_index =
-          DatumGetInt16(SPI_getbinval(tuple, tupdesc, 4, &isnull));
-      /* column_type at col 5 - not in struct currently */
-      chunk->value_count =
-          DatumGetInt64(SPI_getbinval(tuple, tupdesc, 6, &isnull));
-      chunk->null_count =
-          DatumGetInt64(SPI_getbinval(tuple, tupdesc, 7, &isnull));
-      chunk->has_nulls =
-          DatumGetBool(SPI_getbinval(tuple, tupdesc, 8, &isnull));
-      chunk->compressed_size =
-          DatumGetInt64(SPI_getbinval(tuple, tupdesc, 9, &isnull));
-      chunk->decompressed_size =
-          DatumGetInt64(SPI_getbinval(tuple, tupdesc, 10, &isnull));
-      chunk->compression =
-          DatumGetInt32(SPI_getbinval(tuple, tupdesc, 11, &isnull));
+            chunk->chunk_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+            chunk->stripe_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 2, &isnull));
+            /* chunk_group_index at col 3 */
+            chunk->column_index = DatumGetInt16(SPI_getbinval(tuple, tupdesc, 4, &isnull));
+            /* column_type at col 5 - not in struct currently */
+            chunk->value_count = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 6, &isnull));
+            chunk->null_count = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 7, &isnull));
+            chunk->has_nulls = DatumGetBool(SPI_getbinval(tuple, tupdesc, 8, &isnull));
+            chunk->compressed_size = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 9, &isnull));
+            chunk->decompressed_size = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 10, &isnull));
+            chunk->compression = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 11, &isnull));
 
-      /* min_value and max_value need special handling for BYTEA to Datum */
-      /* For now, leave them as 0 - proper implementation would decode bytea */
+            /* min_value and max_value need special handling for BYTEA to Datum */
+            /* For now, leave them as 0 - proper implementation would decode bytea */
 
-      result = lappend(result, chunk);
+            result = lappend(result, chunk);
+        }
     }
-  }
 
-  SPI_finish();
-  pfree(query.data);
+    SPI_finish();
+    pfree(query.data);
 
-  return result;
+    return result;
 }
 
-void orochi_catalog_delete_tiering_policy(int64 policy_id) {
-  StringInfoData query;
+void orochi_catalog_delete_tiering_policy(int64 policy_id)
+{
+    StringInfoData query;
 
-  initStringInfo(&query);
-  appendStringInfo(
-      &query,
-      "DELETE FROM orochi.orochi_tiering_policies WHERE policy_id = %ld",
-      policy_id);
+    initStringInfo(&query);
+    appendStringInfo(&query, "DELETE FROM orochi.orochi_tiering_policies WHERE policy_id = %ld",
+                     policy_id);
 
-  SPI_connect();
-  SPI_execute(query.data, false, 0);
-  SPI_finish();
-  pfree(query.data);
+    SPI_connect();
+    SPI_execute(query.data, false, 0);
+    SPI_finish();
+    pfree(query.data);
 }
 
-void orochi_catalog_update_tiering_policy(OrochiTieringPolicy *policy) {
-  orochi_catalog_create_tiering_policy(policy);
+void orochi_catalog_update_tiering_policy(OrochiTieringPolicy *policy)
+{
+    orochi_catalog_create_tiering_policy(policy);
 }
 
-OrochiTieringPolicy *orochi_catalog_get_tiering_policy(Oid table_oid) {
-  StringInfoData query;
-  OrochiTieringPolicy *policy = NULL;
-  int ret;
+OrochiTieringPolicy *orochi_catalog_get_tiering_policy(Oid table_oid)
+{
+    StringInfoData query;
+    OrochiTieringPolicy *policy = NULL;
+    int ret;
 
-  initStringInfo(&query);
-  appendStringInfo(&query,
-                   "SELECT policy_id, table_oid, "
-                   "EXTRACT(EPOCH FROM hot_to_warm)::bigint, "
-                   "EXTRACT(EPOCH FROM warm_to_cold)::bigint, "
-                   "EXTRACT(EPOCH FROM cold_to_frozen)::bigint, "
-                   "compress_on_tier, enabled "
-                   "FROM orochi.orochi_tiering_policies "
-                   "WHERE table_oid = %u",
-                   table_oid);
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "SELECT policy_id, table_oid, "
+                     "EXTRACT(EPOCH FROM hot_to_warm)::bigint, "
+                     "EXTRACT(EPOCH FROM warm_to_cold)::bigint, "
+                     "EXTRACT(EPOCH FROM cold_to_frozen)::bigint, "
+                     "compress_on_tier, enabled "
+                     "FROM orochi.orochi_tiering_policies "
+                     "WHERE table_oid = %u",
+                     table_oid);
 
-  SPI_connect();
-  ret = SPI_execute(query.data, true, 1);
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 1);
 
-  if (ret == SPI_OK_SELECT && SPI_processed > 0) {
-    HeapTuple tuple = SPI_tuptable->vals[0];
-    TupleDesc tupdesc = SPI_tuptable->tupdesc;
-    bool isnull;
+    if (ret == SPI_OK_SELECT && SPI_processed > 0) {
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        bool isnull;
 
-    policy = palloc0(sizeof(OrochiTieringPolicy));
-    policy->policy_id =
-        DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
-    policy->table_oid =
-        DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 2, &isnull));
+        policy = palloc0(sizeof(OrochiTieringPolicy));
+        policy->policy_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+        policy->table_oid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 2, &isnull));
 
-    int64 hot_secs = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 3, &isnull));
-    int64 warm_secs = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 4, &isnull));
-    int64 cold_secs = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 5, &isnull));
+        int64 hot_secs = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 3, &isnull));
+        int64 warm_secs = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 4, &isnull));
+        int64 cold_secs = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 5, &isnull));
 
-    policy->hot_to_warm = palloc0(sizeof(Interval));
-    policy->hot_to_warm->time = hot_secs * USECS_PER_SEC;
-    policy->warm_to_cold = palloc0(sizeof(Interval));
-    policy->warm_to_cold->time = warm_secs * USECS_PER_SEC;
-    policy->cold_to_frozen = palloc0(sizeof(Interval));
-    policy->cold_to_frozen->time = cold_secs * USECS_PER_SEC;
+        policy->hot_to_warm = palloc0(sizeof(Interval));
+        policy->hot_to_warm->time = hot_secs * USECS_PER_SEC;
+        policy->warm_to_cold = palloc0(sizeof(Interval));
+        policy->warm_to_cold->time = warm_secs * USECS_PER_SEC;
+        policy->cold_to_frozen = palloc0(sizeof(Interval));
+        policy->cold_to_frozen->time = cold_secs * USECS_PER_SEC;
 
-    policy->compress_on_tier =
-        DatumGetBool(SPI_getbinval(tuple, tupdesc, 6, &isnull));
-    policy->enabled = DatumGetBool(SPI_getbinval(tuple, tupdesc, 7, &isnull));
-  }
-
-  SPI_finish();
-  pfree(query.data);
-  return policy;
-}
-
-List *orochi_catalog_get_active_tiering_policies(void) {
-  List *policies = NIL;
-  int ret;
-
-  SPI_connect();
-  ret = SPI_execute("SELECT policy_id, table_oid, "
-                    "EXTRACT(EPOCH FROM hot_to_warm)::bigint, "
-                    "EXTRACT(EPOCH FROM warm_to_cold)::bigint, "
-                    "EXTRACT(EPOCH FROM cold_to_frozen)::bigint, "
-                    "compress_on_tier, enabled "
-                    "FROM orochi.orochi_tiering_policies "
-                    "WHERE enabled = true",
-                    true, 0);
-
-  if (ret == SPI_OK_SELECT && SPI_processed > 0) {
-    TupleDesc tupdesc = SPI_tuptable->tupdesc;
-    for (uint64 i = 0; i < SPI_processed; i++) {
-      HeapTuple tuple = SPI_tuptable->vals[i];
-      bool isnull;
-      OrochiTieringPolicy *policy = palloc0(sizeof(OrochiTieringPolicy));
-
-      policy->policy_id =
-          DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
-      policy->table_oid =
-          DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 2, &isnull));
-      /* Convert seconds back to Interval (simplified - just store seconds) */
-      int64 hot_secs = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 3, &isnull));
-      int64 warm_secs =
-          DatumGetInt64(SPI_getbinval(tuple, tupdesc, 4, &isnull));
-      int64 cold_secs =
-          DatumGetInt64(SPI_getbinval(tuple, tupdesc, 5, &isnull));
-
-      policy->hot_to_warm = palloc0(sizeof(Interval));
-      policy->hot_to_warm->time = hot_secs * USECS_PER_SEC;
-      policy->warm_to_cold = palloc0(sizeof(Interval));
-      policy->warm_to_cold->time = warm_secs * USECS_PER_SEC;
-      policy->cold_to_frozen = palloc0(sizeof(Interval));
-      policy->cold_to_frozen->time = cold_secs * USECS_PER_SEC;
-
-      policy->compress_on_tier =
-          DatumGetBool(SPI_getbinval(tuple, tupdesc, 6, &isnull));
-      policy->enabled = DatumGetBool(SPI_getbinval(tuple, tupdesc, 7, &isnull));
-
-      policies = lappend(policies, policy);
+        policy->compress_on_tier = DatumGetBool(SPI_getbinval(tuple, tupdesc, 6, &isnull));
+        policy->enabled = DatumGetBool(SPI_getbinval(tuple, tupdesc, 7, &isnull));
     }
-  }
 
-  SPI_finish();
-  return policies;
+    SPI_finish();
+    pfree(query.data);
+    return policy;
 }
 
-void orochi_catalog_execute(const char *sql_query) {
-  SPI_connect();
-  SPI_execute(sql_query, false, 0);
-  SPI_finish();
+List *orochi_catalog_get_active_tiering_policies(void)
+{
+    List *policies = NIL;
+    int ret;
+
+    SPI_connect();
+    ret = SPI_execute("SELECT policy_id, table_oid, "
+                      "EXTRACT(EPOCH FROM hot_to_warm)::bigint, "
+                      "EXTRACT(EPOCH FROM warm_to_cold)::bigint, "
+                      "EXTRACT(EPOCH FROM cold_to_frozen)::bigint, "
+                      "compress_on_tier, enabled "
+                      "FROM orochi.orochi_tiering_policies "
+                      "WHERE enabled = true",
+                      true, 0);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0) {
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        for (uint64 i = 0; i < SPI_processed; i++) {
+            HeapTuple tuple = SPI_tuptable->vals[i];
+            bool isnull;
+            OrochiTieringPolicy *policy = palloc0(sizeof(OrochiTieringPolicy));
+
+            policy->policy_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+            policy->table_oid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 2, &isnull));
+            /* Convert seconds back to Interval (simplified - just store seconds) */
+            int64 hot_secs = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 3, &isnull));
+            int64 warm_secs = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 4, &isnull));
+            int64 cold_secs = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 5, &isnull));
+
+            policy->hot_to_warm = palloc0(sizeof(Interval));
+            policy->hot_to_warm->time = hot_secs * USECS_PER_SEC;
+            policy->warm_to_cold = palloc0(sizeof(Interval));
+            policy->warm_to_cold->time = warm_secs * USECS_PER_SEC;
+            policy->cold_to_frozen = palloc0(sizeof(Interval));
+            policy->cold_to_frozen->time = cold_secs * USECS_PER_SEC;
+
+            policy->compress_on_tier = DatumGetBool(SPI_getbinval(tuple, tupdesc, 6, &isnull));
+            policy->enabled = DatumGetBool(SPI_getbinval(tuple, tupdesc, 7, &isnull));
+
+            policies = lappend(policies, policy);
+        }
+    }
+
+    SPI_finish();
+    return policies;
 }
 
-void orochi_catalog_begin_transaction(void) {
-  /* Transaction management is handled by PostgreSQL */
+void orochi_catalog_execute(const char *sql_query)
+{
+    SPI_connect();
+    SPI_execute(sql_query, false, 0);
+    SPI_finish();
 }
 
-void orochi_catalog_commit_transaction(void) {
-  /* Transaction management is handled by PostgreSQL */
+void orochi_catalog_begin_transaction(void)
+{
+    /* Transaction management is handled by PostgreSQL */
 }
 
-void orochi_catalog_rollback_transaction(void) {
-  /* Transaction management is handled by PostgreSQL */
+void orochi_catalog_commit_transaction(void)
+{
+    /* Transaction management is handled by PostgreSQL */
 }
 
-OrochiChunkInfo *orochi_catalog_get_chunk(int64 chunk_id) {
-  StringInfoData query;
-  OrochiChunkInfo *info = NULL;
-  int ret;
+void orochi_catalog_rollback_transaction(void)
+{
+    /* Transaction management is handled by PostgreSQL */
+}
 
-  initStringInfo(&query);
-  appendStringInfo(
-      &query,
-      "SELECT chunk_id, hypertable_oid, dimension_id, range_start, range_end, "
-      "row_count, size_bytes, is_compressed, storage_tier, tablespace_name "
-      "FROM orochi.orochi_chunks WHERE chunk_id = %ld",
-      chunk_id);
+OrochiChunkInfo *orochi_catalog_get_chunk(int64 chunk_id)
+{
+    StringInfoData query;
+    OrochiChunkInfo *info = NULL;
+    int ret;
 
-  SPI_connect();
-  ret = SPI_execute(query.data, true, 1);
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "SELECT chunk_id, hypertable_oid, dimension_id, range_start, range_end, "
+                     "row_count, size_bytes, is_compressed, storage_tier, tablespace_name "
+                     "FROM orochi.orochi_chunks WHERE chunk_id = %ld",
+                     chunk_id);
 
-  if (ret == SPI_OK_SELECT && SPI_processed > 0) {
-    HeapTuple tuple = SPI_tuptable->vals[0];
-    TupleDesc tupdesc = SPI_tuptable->tupdesc;
-    bool isnull;
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 1);
 
-    info = (OrochiChunkInfo *)palloc0(sizeof(OrochiChunkInfo));
+    if (ret == SPI_OK_SELECT && SPI_processed > 0) {
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        bool isnull;
 
-    info->chunk_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
-    info->hypertable_oid =
-        DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 2, &isnull));
-    info->dimension_id =
-        DatumGetInt32(SPI_getbinval(tuple, tupdesc, 3, &isnull));
-    info->range_start =
-        DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 4, &isnull));
-    info->range_end =
-        DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 5, &isnull));
-    info->row_count = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 6, &isnull));
-    info->size_bytes = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 7, &isnull));
-    info->is_compressed =
-        DatumGetBool(SPI_getbinval(tuple, tupdesc, 8, &isnull));
-    info->storage_tier =
-        DatumGetInt32(SPI_getbinval(tuple, tupdesc, 9, &isnull));
-    info->tablespace = SPI_getvalue(tuple, tupdesc, 10);
-  }
+        info = (OrochiChunkInfo *)palloc0(sizeof(OrochiChunkInfo));
 
-  SPI_finish();
-  pfree(query.data);
+        info->chunk_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+        info->hypertable_oid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 2, &isnull));
+        info->dimension_id = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 3, &isnull));
+        info->range_start = DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 4, &isnull));
+        info->range_end = DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 5, &isnull));
+        info->row_count = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 6, &isnull));
+        info->size_bytes = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 7, &isnull));
+        info->is_compressed = DatumGetBool(SPI_getbinval(tuple, tupdesc, 8, &isnull));
+        info->storage_tier = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 9, &isnull));
+        info->tablespace = SPI_getvalue(tuple, tupdesc, 10);
+    }
 
-  return info;
+    SPI_finish();
+    pfree(query.data);
+
+    return info;
 }
 
 /*
@@ -1854,58 +1773,58 @@ OrochiChunkInfo *orochi_catalog_get_chunk(int64 chunk_id) {
  * Returns the compressed data buffer and sets size.
  * Caller is responsible for freeing the returned buffer.
  */
-char *orochi_catalog_read_chunk_data(int64 stripe_id, int32 chunk_group_index,
-                                     int16 column_index, int64 *data_size) {
-  StringInfoData query;
-  char *result = NULL;
-  int ret;
+char *orochi_catalog_read_chunk_data(int64 stripe_id, int32 chunk_group_index, int16 column_index,
+                                     int64 *data_size)
+{
+    StringInfoData query;
+    char *result = NULL;
+    int ret;
 
-  if (data_size)
-    *data_size = 0;
+    if (data_size)
+        *data_size = 0;
 
-  initStringInfo(&query);
-  appendStringInfo(
-      &query,
-      "SELECT chunk_data, compressed_size "
-      "FROM orochi.orochi_column_chunks "
-      "WHERE stripe_id = %ld AND chunk_group_index = %d AND column_index = %d",
-      stripe_id, chunk_group_index, column_index);
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "SELECT chunk_data, compressed_size "
+                     "FROM orochi.orochi_column_chunks "
+                     "WHERE stripe_id = %ld AND chunk_group_index = %d AND column_index = %d",
+                     stripe_id, chunk_group_index, column_index);
 
-  SPI_connect();
-  ret = SPI_execute(query.data, true, 1);
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 1);
 
-  if (ret == SPI_OK_SELECT && SPI_processed > 0) {
-    HeapTuple tuple = SPI_tuptable->vals[0];
-    TupleDesc tupdesc = SPI_tuptable->tupdesc;
-    bool isnull;
-    Datum chunk_data_datum;
-    int64 compressed_size;
+    if (ret == SPI_OK_SELECT && SPI_processed > 0) {
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        bool isnull;
+        Datum chunk_data_datum;
+        int64 compressed_size;
 
-    chunk_data_datum = SPI_getbinval(tuple, tupdesc, 1, &isnull);
+        chunk_data_datum = SPI_getbinval(tuple, tupdesc, 1, &isnull);
 
-    if (!isnull) {
-      bytea *chunk_bytea = DatumGetByteaP(chunk_data_datum);
-      int32 bytea_len = VARSIZE_ANY_EXHDR(chunk_bytea);
-      char *bytea_data = VARDATA_ANY(chunk_bytea);
+        if (!isnull) {
+            bytea *chunk_bytea = DatumGetByteaP(chunk_data_datum);
+            int32 bytea_len = VARSIZE_ANY_EXHDR(chunk_bytea);
+            char *bytea_data = VARDATA_ANY(chunk_bytea);
 
-      /* Allocate result buffer and copy data */
-      result = (char *)palloc(bytea_len);
-      memcpy(result, bytea_data, bytea_len);
+            /* Allocate result buffer and copy data */
+            result = (char *)palloc(bytea_len);
+            memcpy(result, bytea_data, bytea_len);
 
-      if (data_size)
-        *data_size = bytea_len;
+            if (data_size)
+                *data_size = bytea_len;
+        }
+
+        /* Also get compressed_size from column 2 as fallback */
+        compressed_size = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 2, &isnull));
+        if (data_size && *data_size == 0)
+            *data_size = compressed_size;
     }
 
-    /* Also get compressed_size from column 2 as fallback */
-    compressed_size = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 2, &isnull));
-    if (data_size && *data_size == 0)
-      *data_size = compressed_size;
-  }
+    SPI_finish();
+    pfree(query.data);
 
-  SPI_finish();
-  pfree(query.data);
-
-  return result;
+    return result;
 }
 
 /*
@@ -1913,69 +1832,67 @@ char *orochi_catalog_read_chunk_data(int64 stripe_id, int32 chunk_group_index,
  *
  * Create a column chunk entry with the actual compressed data.
  */
-void orochi_catalog_create_column_chunk_with_data(
-    int64 stripe_id, int32 chunk_group_index, int16 column_index,
-    OrochiColumnChunk *chunk, const char *data, int64 data_size) {
-  StringInfoData query;
-  int ret;
-  char *hex_data = NULL;
+void orochi_catalog_create_column_chunk_with_data(int64 stripe_id, int32 chunk_group_index,
+                                                  int16 column_index, OrochiColumnChunk *chunk,
+                                                  const char *data, int64 data_size)
+{
+    StringInfoData query;
+    int ret;
+    char *hex_data = NULL;
 
-  if (chunk == NULL)
-    return;
+    if (chunk == NULL)
+        return;
 
-  ensure_catalog_initialized();
+    ensure_catalog_initialized();
 
-  /* Convert binary data to hex string for SQL insertion */
-  if (data != NULL && data_size > 0) {
-    int64 i;
-    hex_data = palloc(data_size * 2 + 1);
-    for (i = 0; i < data_size; i++) {
-      sprintf(hex_data + (i * 2), "%02x", (unsigned char)data[i]);
+    /* Convert binary data to hex string for SQL insertion */
+    if (data != NULL && data_size > 0) {
+        int64 i;
+        hex_data = palloc(data_size * 2 + 1);
+        for (i = 0; i < data_size; i++) {
+            sprintf(hex_data + (i * 2), "%02x", (unsigned char)data[i]);
+        }
+        hex_data[data_size * 2] = '\0';
     }
-    hex_data[data_size * 2] = '\0';
-  }
 
-  initStringInfo(&query);
-  appendStringInfo(
-      &query,
-      "INSERT INTO orochi.orochi_column_chunks "
-      "(stripe_id, chunk_group_index, column_index, column_type, "
-      "value_count, null_count, has_nulls, compressed_size, decompressed_size, "
-      "compression, chunk_data) "
-      "VALUES (%ld, %d, %d, %u, %ld, %ld, %s, %ld, %ld, %d, ",
-      stripe_id, chunk_group_index, column_index,
-      (unsigned int)INT8OID, /* Will be updated with proper type */
-      chunk->value_count, chunk->null_count,
-      chunk->has_nulls ? "TRUE" : "FALSE", chunk->compressed_size,
-      chunk->decompressed_size, (int)chunk->compression);
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "INSERT INTO orochi.orochi_column_chunks "
+                     "(stripe_id, chunk_group_index, column_index, column_type, "
+                     "value_count, null_count, has_nulls, compressed_size, decompressed_size, "
+                     "compression, chunk_data) "
+                     "VALUES (%ld, %d, %d, %u, %ld, %ld, %s, %ld, %ld, %d, ",
+                     stripe_id, chunk_group_index, column_index,
+                     (unsigned int)INT8OID, /* Will be updated with proper type */
+                     chunk->value_count, chunk->null_count, chunk->has_nulls ? "TRUE" : "FALSE",
+                     chunk->compressed_size, chunk->decompressed_size, (int)chunk->compression);
 
-  /* Add chunk data as bytea */
-  if (hex_data != NULL) {
-    appendStringInfo(&query, "E'\\\\x%s'", hex_data);
-    pfree(hex_data);
-  } else {
-    appendStringInfo(&query, "NULL");
-  }
+    /* Add chunk data as bytea */
+    if (hex_data != NULL) {
+        appendStringInfo(&query, "E'\\\\x%s'", hex_data);
+        pfree(hex_data);
+    } else {
+        appendStringInfo(&query, "NULL");
+    }
 
-  appendStringInfo(&query, ") ON CONFLICT (stripe_id, chunk_group_index, "
-                           "column_index) DO UPDATE SET "
-                           "value_count = EXCLUDED.value_count, "
-                           "null_count = EXCLUDED.null_count, "
-                           "has_nulls = EXCLUDED.has_nulls, "
-                           "compressed_size = EXCLUDED.compressed_size, "
-                           "decompressed_size = EXCLUDED.decompressed_size, "
-                           "compression = EXCLUDED.compression, "
-                           "chunk_data = EXCLUDED.chunk_data");
+    appendStringInfo(&query, ") ON CONFLICT (stripe_id, chunk_group_index, "
+                             "column_index) DO UPDATE SET "
+                             "value_count = EXCLUDED.value_count, "
+                             "null_count = EXCLUDED.null_count, "
+                             "has_nulls = EXCLUDED.has_nulls, "
+                             "compressed_size = EXCLUDED.compressed_size, "
+                             "decompressed_size = EXCLUDED.decompressed_size, "
+                             "compression = EXCLUDED.compression, "
+                             "chunk_data = EXCLUDED.chunk_data");
 
-  SPI_connect();
-  ret = SPI_execute(query.data, false, 0);
-  if (ret != SPI_OK_INSERT && ret != SPI_OK_UPDATE) {
-    ereport(WARNING,
-            (errcode(ERRCODE_INTERNAL_ERROR),
-             errmsg("failed to create column chunk with data: %d", ret)));
-  }
-  SPI_finish();
-  pfree(query.data);
+    SPI_connect();
+    ret = SPI_execute(query.data, false, 0);
+    if (ret != SPI_OK_INSERT && ret != SPI_OK_UPDATE) {
+        ereport(WARNING, (errcode(ERRCODE_INTERNAL_ERROR),
+                          errmsg("failed to create column chunk with data: %d", ret)));
+    }
+    SPI_finish();
+    pfree(query.data);
 }
 
 /*
@@ -1983,274 +1900,259 @@ void orochi_catalog_create_column_chunk_with_data(
  *
  * Get all stripes for a table.
  */
-List *orochi_catalog_get_table_stripes(Oid table_oid) {
-  StringInfoData query;
-  List *stripes = NIL;
-  int ret;
-  uint64 i;
+List *orochi_catalog_get_table_stripes(Oid table_oid)
+{
+    StringInfoData query;
+    List *stripes = NIL;
+    int ret;
+    uint64 i;
 
-  initStringInfo(&query);
-  appendStringInfo(
-      &query,
-      "SELECT stripe_id, table_oid, first_row, row_count, column_count, "
-      "data_size, metadata_size, compression, is_flushed "
-      "FROM orochi.orochi_stripes WHERE table_oid = %u ORDER BY first_row",
-      table_oid);
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "SELECT stripe_id, table_oid, first_row, row_count, column_count, "
+                     "data_size, metadata_size, compression, is_flushed "
+                     "FROM orochi.orochi_stripes WHERE table_oid = %u ORDER BY first_row",
+                     table_oid);
 
-  SPI_connect();
-  ret = SPI_execute(query.data, true, 0);
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 0);
 
-  if (ret == SPI_OK_SELECT) {
-    for (i = 0; i < SPI_processed; i++) {
-      HeapTuple tuple = SPI_tuptable->vals[i];
-      TupleDesc tupdesc = SPI_tuptable->tupdesc;
-      bool isnull;
-      ColumnarStripe *stripe;
+    if (ret == SPI_OK_SELECT) {
+        for (i = 0; i < SPI_processed; i++) {
+            HeapTuple tuple = SPI_tuptable->vals[i];
+            TupleDesc tupdesc = SPI_tuptable->tupdesc;
+            bool isnull;
+            ColumnarStripe *stripe;
 
-      stripe = (ColumnarStripe *)palloc0(sizeof(ColumnarStripe));
+            stripe = (ColumnarStripe *)palloc0(sizeof(ColumnarStripe));
 
-      stripe->stripe_id =
-          DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
-      /* table_oid at col 2 - not needed */
-      stripe->first_row_number =
-          DatumGetInt64(SPI_getbinval(tuple, tupdesc, 3, &isnull));
-      stripe->row_count =
-          DatumGetInt64(SPI_getbinval(tuple, tupdesc, 4, &isnull));
-      stripe->column_count =
-          DatumGetInt32(SPI_getbinval(tuple, tupdesc, 5, &isnull));
-      stripe->data_size =
-          DatumGetInt64(SPI_getbinval(tuple, tupdesc, 6, &isnull));
-      stripe->metadata_size =
-          DatumGetInt64(SPI_getbinval(tuple, tupdesc, 7, &isnull));
-      /* compression at col 8 - not in ColumnarStripe */
-      stripe->is_flushed =
-          DatumGetBool(SPI_getbinval(tuple, tupdesc, 9, &isnull));
+            stripe->stripe_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+            /* table_oid at col 2 - not needed */
+            stripe->first_row_number = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 3, &isnull));
+            stripe->row_count = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 4, &isnull));
+            stripe->column_count = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 5, &isnull));
+            stripe->data_size = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 6, &isnull));
+            stripe->metadata_size = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 7, &isnull));
+            /* compression at col 8 - not in ColumnarStripe */
+            stripe->is_flushed = DatumGetBool(SPI_getbinval(tuple, tupdesc, 9, &isnull));
 
-      /* Calculate chunk_group_count based on row_count and default chunk group
-       * size */
-      stripe->chunk_group_count = (int32)((stripe->row_count + 9999) / 10000);
-      if (stripe->chunk_group_count < 1)
-        stripe->chunk_group_count = 1;
+            /* Calculate chunk_group_count based on row_count and default chunk group
+             * size */
+            stripe->chunk_group_count = (int32)((stripe->row_count + 9999) / 10000);
+            if (stripe->chunk_group_count < 1)
+                stripe->chunk_group_count = 1;
 
-      stripes = lappend(stripes, stripe);
+            stripes = lappend(stripes, stripe);
+        }
     }
-  }
 
-  SPI_finish();
-  pfree(query.data);
+    SPI_finish();
+    pfree(query.data);
 
-  return stripes;
+    return stripes;
 }
 
 /* ============================================================
  * Missing catalog function implementations (stubs/minimal)
  * ============================================================ */
 
-OrochiTableInfo *orochi_catalog_get_table_by_name(const char *schema,
-                                                  const char *table) {
-  StringInfoData query;
-  OrochiTableInfo *info = NULL;
-  int ret;
+OrochiTableInfo *orochi_catalog_get_table_by_name(const char *schema, const char *table)
+{
+    StringInfoData query;
+    OrochiTableInfo *info = NULL;
+    int ret;
 
-  initStringInfo(&query);
-  appendStringInfo(&query,
-                   "SELECT table_oid FROM orochi.orochi_tables t "
-                   "JOIN pg_class c ON t.table_oid = c.oid "
-                   "JOIN pg_namespace n ON c.relnamespace = n.oid "
-                   "WHERE n.nspname = '%s' AND c.relname = '%s'",
-                   schema, table);
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "SELECT table_oid FROM orochi.orochi_tables t "
+                     "JOIN pg_class c ON t.table_oid = c.oid "
+                     "JOIN pg_namespace n ON c.relnamespace = n.oid "
+                     "WHERE n.nspname = '%s' AND c.relname = '%s'",
+                     schema, table);
 
-  SPI_connect();
-  ret = SPI_execute(query.data, true, 1);
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 1);
 
-  if (ret == SPI_OK_SELECT && SPI_processed > 0) {
-    HeapTuple tuple = SPI_tuptable->vals[0];
-    TupleDesc tupdesc = SPI_tuptable->tupdesc;
-    bool isnull;
-    Oid table_oid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+    if (ret == SPI_OK_SELECT && SPI_processed > 0) {
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        bool isnull;
+        Oid table_oid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+        SPI_finish();
+        pfree(query.data);
+        return orochi_catalog_get_table(table_oid);
+    }
+
     SPI_finish();
     pfree(query.data);
-    return orochi_catalog_get_table(table_oid);
-  }
-
-  SPI_finish();
-  pfree(query.data);
-  return info;
+    return info;
 }
 
-List *orochi_catalog_list_tables(void) {
-  List *tables = NIL;
-  int ret;
+List *orochi_catalog_list_tables(void)
+{
+    List *tables = NIL;
+    int ret;
 
-  SPI_connect();
-  ret = SPI_execute("SELECT table_oid FROM orochi.orochi_tables", true, 0);
+    SPI_connect();
+    ret = SPI_execute("SELECT table_oid FROM orochi.orochi_tables", true, 0);
 
-  if (ret == SPI_OK_SELECT && SPI_processed > 0) {
-    TupleDesc tupdesc = SPI_tuptable->tupdesc;
-    for (uint64 i = 0; i < SPI_processed; i++) {
-      HeapTuple tuple = SPI_tuptable->vals[i];
-      bool isnull;
-      Oid table_oid =
-          DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 1, &isnull));
-      OrochiTableInfo *info = orochi_catalog_get_table(table_oid);
-      if (info)
-        tables = lappend(tables, info);
+    if (ret == SPI_OK_SELECT && SPI_processed > 0) {
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        for (uint64 i = 0; i < SPI_processed; i++) {
+            HeapTuple tuple = SPI_tuptable->vals[i];
+            bool isnull;
+            Oid table_oid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+            OrochiTableInfo *info = orochi_catalog_get_table(table_oid);
+            if (info)
+                tables = lappend(tables, info);
+        }
     }
-  }
 
-  SPI_finish();
-  return tables;
+    SPI_finish();
+    return tables;
 }
 
-List *orochi_catalog_get_hypertable_chunks(Oid hypertable_oid) {
-  /* Reuse the existing get_chunks_in_range with full time range */
-  return orochi_catalog_get_chunks_in_range(hypertable_oid, DT_NOBEGIN,
-                                            DT_NOEND);
+List *orochi_catalog_get_hypertable_chunks(Oid hypertable_oid)
+{
+    /* Reuse the existing get_chunks_in_range with full time range */
+    return orochi_catalog_get_chunks_in_range(hypertable_oid, DT_NOBEGIN, DT_NOEND);
 }
 
-List *orochi_catalog_get_nodes_by_role(OrochiNodeRole role) {
-  List *nodes = NIL;
-  StringInfoData query;
-  int ret;
+List *orochi_catalog_get_nodes_by_role(OrochiNodeRole role)
+{
+    List *nodes = NIL;
+    StringInfoData query;
+    int ret;
 
-  initStringInfo(&query);
-  appendStringInfo(&query,
-                   "SELECT node_id FROM orochi.orochi_nodes WHERE role = %d "
-                   "AND is_active = true",
-                   (int)role);
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "SELECT node_id FROM orochi.orochi_nodes WHERE role = %d "
+                     "AND is_active = true",
+                     (int)role);
 
-  SPI_connect();
-  ret = SPI_execute(query.data, true, 0);
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 0);
 
-  if (ret == SPI_OK_SELECT && SPI_processed > 0) {
-    TupleDesc tupdesc = SPI_tuptable->tupdesc;
-    for (uint64 i = 0; i < SPI_processed; i++) {
-      HeapTuple tuple = SPI_tuptable->vals[i];
-      bool isnull;
-      int32 node_id = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 1, &isnull));
-      OrochiNodeInfo *info = orochi_catalog_get_node(node_id);
-      if (info)
-        nodes = lappend(nodes, info);
+    if (ret == SPI_OK_SELECT && SPI_processed > 0) {
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        for (uint64 i = 0; i < SPI_processed; i++) {
+            HeapTuple tuple = SPI_tuptable->vals[i];
+            bool isnull;
+            int32 node_id = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+            OrochiNodeInfo *info = orochi_catalog_get_node(node_id);
+            if (info)
+                nodes = lappend(nodes, info);
+        }
     }
-  }
 
-  SPI_finish();
-  pfree(query.data);
-  return nodes;
+    SPI_finish();
+    pfree(query.data);
+    return nodes;
 }
 
-OrochiStripeInfo *orochi_catalog_get_stripe(int64 stripe_id) {
-  StringInfoData query;
-  OrochiStripeInfo *info = NULL;
-  int ret;
+OrochiStripeInfo *orochi_catalog_get_stripe(int64 stripe_id)
+{
+    StringInfoData query;
+    OrochiStripeInfo *info = NULL;
+    int ret;
 
-  initStringInfo(&query);
-  appendStringInfo(
-      &query,
-      "SELECT stripe_id, table_oid, first_row_number, row_count, column_count, "
-      "data_size, metadata_size, compression, is_flushed "
-      "FROM orochi.orochi_stripes WHERE stripe_id = %ld",
-      stripe_id);
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "SELECT stripe_id, table_oid, first_row_number, row_count, column_count, "
+                     "data_size, metadata_size, compression, is_flushed "
+                     "FROM orochi.orochi_stripes WHERE stripe_id = %ld",
+                     stripe_id);
 
-  SPI_connect();
-  ret = SPI_execute(query.data, true, 1);
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 1);
 
-  if (ret == SPI_OK_SELECT && SPI_processed > 0) {
-    HeapTuple tuple = SPI_tuptable->vals[0];
-    TupleDesc tupdesc = SPI_tuptable->tupdesc;
-    bool isnull;
+    if (ret == SPI_OK_SELECT && SPI_processed > 0) {
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        bool isnull;
 
-    info = palloc0(sizeof(OrochiStripeInfo));
-    info->stripe_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
-    info->table_oid =
-        DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 2, &isnull));
-    info->first_row = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 3, &isnull));
-    info->row_count = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 4, &isnull));
-    info->column_count =
-        DatumGetInt32(SPI_getbinval(tuple, tupdesc, 5, &isnull));
-    info->data_size = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 6, &isnull));
-    info->metadata_size =
-        DatumGetInt64(SPI_getbinval(tuple, tupdesc, 7, &isnull));
-    info->compression =
-        DatumGetInt32(SPI_getbinval(tuple, tupdesc, 8, &isnull));
-    info->is_flushed = DatumGetBool(SPI_getbinval(tuple, tupdesc, 9, &isnull));
-  }
-
-  SPI_finish();
-  pfree(query.data);
-  return info;
-}
-
-OrochiVectorIndex *orochi_catalog_get_vector_index(Oid index_oid) {
-  StringInfoData query;
-  OrochiVectorIndex *info = NULL;
-  int ret;
-
-  initStringInfo(&query);
-  appendStringInfo(
-      &query,
-      "SELECT index_oid, table_oid, vector_column, dimensions, lists, probes, "
-      "distance_type, index_type "
-      "FROM orochi.orochi_vector_indexes WHERE index_oid = %u",
-      index_oid);
-
-  SPI_connect();
-  ret = SPI_execute(query.data, true, 1);
-
-  if (ret == SPI_OK_SELECT && SPI_processed > 0) {
-    HeapTuple tuple = SPI_tuptable->vals[0];
-    TupleDesc tupdesc = SPI_tuptable->tupdesc;
-    bool isnull;
-
-    info = palloc0(sizeof(OrochiVectorIndex));
-    info->index_oid =
-        DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 1, &isnull));
-    info->table_oid =
-        DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 2, &isnull));
-    info->vector_column =
-        DatumGetInt16(SPI_getbinval(tuple, tupdesc, 3, &isnull));
-    info->dimensions = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 4, &isnull));
-    info->lists = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 5, &isnull));
-    info->probes = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 6, &isnull));
-    info->distance_type =
-        pstrdup(TextDatumGetCString(SPI_getbinval(tuple, tupdesc, 7, &isnull)));
-    info->index_type =
-        pstrdup(TextDatumGetCString(SPI_getbinval(tuple, tupdesc, 8, &isnull)));
-  }
-
-  SPI_finish();
-  pfree(query.data);
-  return info;
-}
-
-List *orochi_catalog_get_table_vector_indexes(Oid table_oid) {
-  List *indexes = NIL;
-  StringInfoData query;
-  int ret;
-
-  initStringInfo(&query);
-  appendStringInfo(
-      &query,
-      "SELECT index_oid FROM orochi.orochi_vector_indexes WHERE table_oid = %u",
-      table_oid);
-
-  SPI_connect();
-  ret = SPI_execute(query.data, true, 0);
-
-  if (ret == SPI_OK_SELECT && SPI_processed > 0) {
-    TupleDesc tupdesc = SPI_tuptable->tupdesc;
-    for (uint64 i = 0; i < SPI_processed; i++) {
-      HeapTuple tuple = SPI_tuptable->vals[i];
-      bool isnull;
-      Oid index_oid =
-          DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 1, &isnull));
-      OrochiVectorIndex *info = orochi_catalog_get_vector_index(index_oid);
-      if (info)
-        indexes = lappend(indexes, info);
+        info = palloc0(sizeof(OrochiStripeInfo));
+        info->stripe_id = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+        info->table_oid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 2, &isnull));
+        info->first_row = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 3, &isnull));
+        info->row_count = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 4, &isnull));
+        info->column_count = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 5, &isnull));
+        info->data_size = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 6, &isnull));
+        info->metadata_size = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 7, &isnull));
+        info->compression = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 8, &isnull));
+        info->is_flushed = DatumGetBool(SPI_getbinval(tuple, tupdesc, 9, &isnull));
     }
-  }
 
-  SPI_finish();
-  pfree(query.data);
-  return indexes;
+    SPI_finish();
+    pfree(query.data);
+    return info;
+}
+
+OrochiVectorIndex *orochi_catalog_get_vector_index(Oid index_oid)
+{
+    StringInfoData query;
+    OrochiVectorIndex *info = NULL;
+    int ret;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "SELECT index_oid, table_oid, vector_column, dimensions, lists, probes, "
+                     "distance_type, index_type "
+                     "FROM orochi.orochi_vector_indexes WHERE index_oid = %u",
+                     index_oid);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 1);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0) {
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        bool isnull;
+
+        info = palloc0(sizeof(OrochiVectorIndex));
+        info->index_oid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+        info->table_oid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 2, &isnull));
+        info->vector_column = DatumGetInt16(SPI_getbinval(tuple, tupdesc, 3, &isnull));
+        info->dimensions = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 4, &isnull));
+        info->lists = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 5, &isnull));
+        info->probes = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 6, &isnull));
+        info->distance_type =
+            pstrdup(TextDatumGetCString(SPI_getbinval(tuple, tupdesc, 7, &isnull)));
+        info->index_type = pstrdup(TextDatumGetCString(SPI_getbinval(tuple, tupdesc, 8, &isnull)));
+    }
+
+    SPI_finish();
+    pfree(query.data);
+    return info;
+}
+
+List *orochi_catalog_get_table_vector_indexes(Oid table_oid)
+{
+    List *indexes = NIL;
+    StringInfoData query;
+    int ret;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "SELECT index_oid FROM orochi.orochi_vector_indexes WHERE table_oid = %u",
+                     table_oid);
+
+    SPI_connect();
+    ret = SPI_execute(query.data, true, 0);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0) {
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        for (uint64 i = 0; i < SPI_processed; i++) {
+            HeapTuple tuple = SPI_tuptable->vals[i];
+            bool isnull;
+            Oid index_oid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 1, &isnull));
+            OrochiVectorIndex *info = orochi_catalog_get_vector_index(index_oid);
+            if (info)
+                indexes = lappend(indexes, info);
+        }
+    }
+
+    SPI_finish();
+    pfree(query.data);
+    return indexes;
 }

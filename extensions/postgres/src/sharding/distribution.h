@@ -23,7 +23,7 @@
  * Hash Distribution Constants
  * ============================================================ */
 
-#define OROCHI_HASH_SEED 0x9747b28c
+#define OROCHI_HASH_SEED    0x9747b28c
 #define OROCHI_HASH_MODULUS INT32_MAX
 
 /* ============================================================
@@ -31,10 +31,10 @@
  * ============================================================ */
 
 typedef struct OrochiColocationGroup {
-  int32 group_id;               /* Unique group identifier */
-  int32 shard_count;            /* Number of shards */
-  OrochiShardStrategy strategy; /* Distribution strategy */
-  char *distribution_type;      /* Column type name */
+    int32 group_id;               /* Unique group identifier */
+    int32 shard_count;            /* Number of shards */
+    OrochiShardStrategy strategy; /* Distribution strategy */
+    char *distribution_type;      /* Column type name */
 } OrochiColocationGroup;
 
 /* ============================================================
@@ -64,8 +64,7 @@ extern int32 orochi_get_colocation_group(Oid table_oid);
 /*
  * Create a new co-location group
  */
-extern int32 orochi_create_colocation_group(int32 shard_count,
-                                            OrochiShardStrategy strategy,
+extern int32 orochi_create_colocation_group(int32 shard_count, OrochiShardStrategy strategy,
                                             const char *dist_type);
 
 /* ============================================================
@@ -94,8 +93,7 @@ extern int32 orochi_get_shard_index(int32 hash_value, int32 shard_count);
 /*
  * Get the shard for a given value
  */
-extern OrochiShardInfo *orochi_route_to_shard(Oid table_oid, Datum value,
-                                              Oid type_oid);
+extern OrochiShardInfo *orochi_route_to_shard(Oid table_oid, Datum value, Oid type_oid);
 
 /*
  * Get all shards for a table
@@ -105,8 +103,7 @@ extern List *orochi_get_all_shards(Oid table_oid);
 /*
  * Get shards that match a hash range
  */
-extern List *orochi_get_shards_in_range(Oid table_oid, int32 min_hash,
-                                        int32 max_hash);
+extern List *orochi_get_shards_in_range(Oid table_oid, int32 min_hash, int32 max_hash);
 
 /* ============================================================
  * Distribution Column Functions
@@ -167,8 +164,7 @@ extern int32 orochi_select_node_for_shard(void);
 /*
  * Validate distribution column exists and is hashable
  */
-extern bool orochi_validate_distribution_column(Oid table_oid,
-                                                const char *column_name);
+extern bool orochi_validate_distribution_column(Oid table_oid, const char *column_name);
 
 /*
  * Get the number of shards for a table
@@ -183,37 +179,37 @@ extern int32 orochi_get_shard_count(Oid table_oid);
  * Statistics about shard distribution across nodes
  */
 typedef struct ShardBalanceStats {
-  int total_nodes;            /* Number of active nodes */
-  int64 total_shards;         /* Total shards across all nodes */
-  int64 min_shards;           /* Minimum shards on any node */
-  int64 max_shards;           /* Maximum shards on any node */
-  double avg_shards_per_node; /* Average shards per node */
-  double std_deviation;       /* Standard deviation */
-  double imbalance_ratio;     /* max/min ratio */
-  bool needs_rebalancing;     /* True if imbalance > 20% */
+    int total_nodes;            /* Number of active nodes */
+    int64 total_shards;         /* Total shards across all nodes */
+    int64 min_shards;           /* Minimum shards on any node */
+    int64 max_shards;           /* Maximum shards on any node */
+    double avg_shards_per_node; /* Average shards per node */
+    double std_deviation;       /* Standard deviation */
+    double imbalance_ratio;     /* max/min ratio */
+    bool needs_rebalancing;     /* True if imbalance > 20% */
 } ShardBalanceStats;
 
 /*
  * Shard move operation
  */
 typedef struct ShardMove {
-  int64 shard_id;    /* Shard to move */
-  int32 source_node; /* Source node ID */
-  int32 target_node; /* Target node ID */
+    int64 shard_id;    /* Shard to move */
+    int32 source_node; /* Source node ID */
+    int32 target_node; /* Target node ID */
 } ShardMove;
 
 /*
  * Detailed shard placement info
  */
 typedef struct ShardPlacementInfo {
-  int64 shard_id;
-  Oid table_oid;
-  int32 node_id;
-  int32 shard_index;
-  int32 hash_min;
-  int32 hash_max;
-  int64 row_count;
-  int64 size_bytes;
+    int64 shard_id;
+    Oid table_oid;
+    int32 node_id;
+    int32 shard_index;
+    int32 hash_min;
+    int32 hash_max;
+    int64 row_count;
+    int64 size_bytes;
 } ShardPlacementInfo;
 
 /* ============================================================

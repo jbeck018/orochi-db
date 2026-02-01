@@ -29,65 +29,65 @@
  * Authentication Constants
  * ============================================================ */
 
-#define OROCHI_AUTH_MAX_CACHED_TOKENS 10000
-#define OROCHI_AUTH_MAX_CACHED_SESSIONS 5000
-#define OROCHI_AUTH_MAX_SIGNING_KEYS 16
+#define OROCHI_AUTH_MAX_CACHED_TOKENS     10000
+#define OROCHI_AUTH_MAX_CACHED_SESSIONS   5000
+#define OROCHI_AUTH_MAX_SIGNING_KEYS      16
 #define OROCHI_AUTH_MAX_API_KEYS_PER_USER 100
-#define OROCHI_AUTH_TOKEN_HASH_SIZE 64
-#define OROCHI_AUTH_SESSION_ID_SIZE 32
-#define OROCHI_AUTH_API_KEY_PREFIX_SIZE 8
-#define OROCHI_AUTH_USER_ID_SIZE 36 /* UUID string */
-#define OROCHI_AUTH_TENANT_ID_SIZE 36
-#define OROCHI_AUTH_PROVIDER_NAME_SIZE 64
-#define OROCHI_AUTH_ROLE_NAME_SIZE 64
-#define OROCHI_AUTH_MAX_ROLES 32
-#define OROCHI_AUTH_JWT_MAX_SIZE 8192
-#define OROCHI_AUTH_PASSWORD_HASH_SIZE 97 /* Argon2id */
-#define OROCHI_AUTH_HMAC_KEY_SIZE 64
-#define OROCHI_AUTH_AES_KEY_SIZE 32
-#define OROCHI_AUTH_ERROR_CODE_SIZE 32
-#define OROCHI_AUTH_ERROR_MSG_SIZE 256
-#define OROCHI_AUTH_JTI_SIZE 64
-#define OROCHI_AUTH_AAL_SIZE 16
-#define OROCHI_AUTH_IP_SIZE 64
-#define OROCHI_AUTH_USER_AGENT_SIZE 512
-#define OROCHI_AUTH_DEVICE_ID_SIZE 64
-#define OROCHI_AUTH_GEO_COUNTRY_SIZE 4
-#define OROCHI_AUTH_GEO_CITY_SIZE 128
-#define OROCHI_AUTH_RATE_LIMIT_KEY_SIZE 256
-#define OROCHI_AUTH_MAX_RATE_LIMITS 1024
-#define OROCHI_AUTH_KEY_ID_SIZE 64
-#define OROCHI_AUTH_PUBLIC_KEY_SIZE 4096
-#define OROCHI_AUTH_PRIVATE_KEY_SIZE 8192
+#define OROCHI_AUTH_TOKEN_HASH_SIZE       64
+#define OROCHI_AUTH_SESSION_ID_SIZE       32
+#define OROCHI_AUTH_API_KEY_PREFIX_SIZE   8
+#define OROCHI_AUTH_USER_ID_SIZE          36 /* UUID string */
+#define OROCHI_AUTH_TENANT_ID_SIZE        36
+#define OROCHI_AUTH_PROVIDER_NAME_SIZE    64
+#define OROCHI_AUTH_ROLE_NAME_SIZE        64
+#define OROCHI_AUTH_MAX_ROLES             32
+#define OROCHI_AUTH_JWT_MAX_SIZE          8192
+#define OROCHI_AUTH_PASSWORD_HASH_SIZE    97 /* Argon2id */
+#define OROCHI_AUTH_HMAC_KEY_SIZE         64
+#define OROCHI_AUTH_AES_KEY_SIZE          32
+#define OROCHI_AUTH_ERROR_CODE_SIZE       32
+#define OROCHI_AUTH_ERROR_MSG_SIZE        256
+#define OROCHI_AUTH_JTI_SIZE              64
+#define OROCHI_AUTH_AAL_SIZE              16
+#define OROCHI_AUTH_IP_SIZE               64
+#define OROCHI_AUTH_USER_AGENT_SIZE       512
+#define OROCHI_AUTH_DEVICE_ID_SIZE        64
+#define OROCHI_AUTH_GEO_COUNTRY_SIZE      4
+#define OROCHI_AUTH_GEO_CITY_SIZE         128
+#define OROCHI_AUTH_RATE_LIMIT_KEY_SIZE   256
+#define OROCHI_AUTH_MAX_RATE_LIMITS       1024
+#define OROCHI_AUTH_KEY_ID_SIZE           64
+#define OROCHI_AUTH_PUBLIC_KEY_SIZE       4096
+#define OROCHI_AUTH_PRIVATE_KEY_SIZE      8192
 
 /* Default timeouts and intervals */
-#define OROCHI_AUTH_ACCESS_TOKEN_TTL_SEC 900     /* 15 minutes */
+#define OROCHI_AUTH_ACCESS_TOKEN_TTL_SEC  900    /* 15 minutes */
 #define OROCHI_AUTH_REFRESH_TOKEN_TTL_SEC 604800 /* 7 days */
-#define OROCHI_AUTH_SESSION_TTL_SEC 86400        /* 24 hours */
-#define OROCHI_AUTH_API_KEY_CLEANUP_SEC 3600     /* 1 hour */
-#define OROCHI_AUTH_TOKEN_CLEANUP_SEC 300        /* 5 minutes */
-#define OROCHI_AUTH_KEY_ROTATION_DAYS 90
-#define OROCHI_AUTH_KEY_OVERLAP_DAYS 30
+#define OROCHI_AUTH_SESSION_TTL_SEC       86400  /* 24 hours */
+#define OROCHI_AUTH_API_KEY_CLEANUP_SEC   3600   /* 1 hour */
+#define OROCHI_AUTH_TOKEN_CLEANUP_SEC     300    /* 5 minutes */
+#define OROCHI_AUTH_KEY_ROTATION_DAYS     90
+#define OROCHI_AUTH_KEY_OVERLAP_DAYS      30
 
 /* LWLock tranche names */
 #define OROCHI_AUTH_LWLOCK_TRANCHE_NAME "orochi_auth"
-#define OROCHI_AUTH_LWLOCK_COUNT 5
+#define OROCHI_AUTH_LWLOCK_COUNT        5
 
 /* ============================================================
  * Authentication Method Types
  * ============================================================ */
 
 typedef enum OrochiAuthMethod {
-  OROCHI_AUTH_NONE = 0,
-  OROCHI_AUTH_PASSWORD,         /* Email/password */
-  OROCHI_AUTH_API_KEY,          /* Service API key */
-  OROCHI_AUTH_JWT,              /* JWT bearer token */
-  OROCHI_AUTH_OAUTH,            /* OAuth 2.0 provider */
-  OROCHI_AUTH_MAGIC_LINK,       /* Passwordless email */
-  OROCHI_AUTH_PHONE_OTP,        /* SMS OTP */
-  OROCHI_AUTH_SAML,             /* Enterprise SAML */
-  OROCHI_AUTH_CERTIFICATE,      /* Client certificate */
-  OROCHI_AUTH_CONNECTION_STRING /* Pooler connection string */
+    OROCHI_AUTH_NONE = 0,
+    OROCHI_AUTH_PASSWORD,         /* Email/password */
+    OROCHI_AUTH_API_KEY,          /* Service API key */
+    OROCHI_AUTH_JWT,              /* JWT bearer token */
+    OROCHI_AUTH_OAUTH,            /* OAuth 2.0 provider */
+    OROCHI_AUTH_MAGIC_LINK,       /* Passwordless email */
+    OROCHI_AUTH_PHONE_OTP,        /* SMS OTP */
+    OROCHI_AUTH_SAML,             /* Enterprise SAML */
+    OROCHI_AUTH_CERTIFICATE,      /* Client certificate */
+    OROCHI_AUTH_CONNECTION_STRING /* Pooler connection string */
 } OrochiAuthMethod;
 
 /* ============================================================
@@ -95,13 +95,13 @@ typedef enum OrochiAuthMethod {
  * ============================================================ */
 
 typedef enum OrochiTokenType {
-  OROCHI_TOKEN_ACCESS = 0,     /* Short-lived access token */
-  OROCHI_TOKEN_REFRESH,        /* Long-lived refresh token */
-  OROCHI_TOKEN_API_KEY,        /* API key (no expiry) */
-  OROCHI_TOKEN_CONNECTION,     /* Connection pooler token */
-  OROCHI_TOKEN_INVITATION,     /* User invitation token */
-  OROCHI_TOKEN_PASSWORD_RESET, /* Password reset token */
-  OROCHI_TOKEN_EMAIL_VERIFY    /* Email verification token */
+    OROCHI_TOKEN_ACCESS = 0,     /* Short-lived access token */
+    OROCHI_TOKEN_REFRESH,        /* Long-lived refresh token */
+    OROCHI_TOKEN_API_KEY,        /* API key (no expiry) */
+    OROCHI_TOKEN_CONNECTION,     /* Connection pooler token */
+    OROCHI_TOKEN_INVITATION,     /* User invitation token */
+    OROCHI_TOKEN_PASSWORD_RESET, /* Password reset token */
+    OROCHI_TOKEN_EMAIL_VERIFY    /* Email verification token */
 } OrochiTokenType;
 
 /* ============================================================
@@ -109,16 +109,16 @@ typedef enum OrochiTokenType {
  * ============================================================ */
 
 typedef enum OrochiProviderType {
-  OROCHI_PROVIDER_EMAIL = 0, /* Email/password */
-  OROCHI_PROVIDER_PHONE,     /* Phone/SMS */
-  OROCHI_PROVIDER_GOOGLE,    /* Google OAuth */
-  OROCHI_PROVIDER_GITHUB,    /* GitHub OAuth */
-  OROCHI_PROVIDER_GITLAB,    /* GitLab OAuth */
-  OROCHI_PROVIDER_AZURE,     /* Azure AD */
-  OROCHI_PROVIDER_OKTA,      /* Okta */
-  OROCHI_PROVIDER_SAML,      /* Generic SAML */
-  OROCHI_PROVIDER_OIDC,      /* Generic OIDC */
-  OROCHI_PROVIDER_CUSTOM     /* Custom provider */
+    OROCHI_PROVIDER_EMAIL = 0, /* Email/password */
+    OROCHI_PROVIDER_PHONE,     /* Phone/SMS */
+    OROCHI_PROVIDER_GOOGLE,    /* Google OAuth */
+    OROCHI_PROVIDER_GITHUB,    /* GitHub OAuth */
+    OROCHI_PROVIDER_GITLAB,    /* GitLab OAuth */
+    OROCHI_PROVIDER_AZURE,     /* Azure AD */
+    OROCHI_PROVIDER_OKTA,      /* Okta */
+    OROCHI_PROVIDER_SAML,      /* Generic SAML */
+    OROCHI_PROVIDER_OIDC,      /* Generic OIDC */
+    OROCHI_PROVIDER_CUSTOM     /* Custom provider */
 } OrochiProviderType;
 
 /* ============================================================
@@ -126,11 +126,11 @@ typedef enum OrochiProviderType {
  * ============================================================ */
 
 typedef enum OrochiSessionState {
-  OROCHI_SESSION_ACTIVE = 0,
-  OROCHI_SESSION_IDLE,
-  OROCHI_SESSION_EXPIRED,
-  OROCHI_SESSION_REVOKED,
-  OROCHI_SESSION_MFA_REQUIRED
+    OROCHI_SESSION_ACTIVE = 0,
+    OROCHI_SESSION_IDLE,
+    OROCHI_SESSION_EXPIRED,
+    OROCHI_SESSION_REVOKED,
+    OROCHI_SESSION_MFA_REQUIRED
 } OrochiSessionState;
 
 /* ============================================================
@@ -138,12 +138,12 @@ typedef enum OrochiSessionState {
  * ============================================================ */
 
 typedef enum OrochiMfaType {
-  OROCHI_MFA_NONE = 0,
-  OROCHI_MFA_TOTP,         /* Time-based OTP (Authenticator apps) */
-  OROCHI_MFA_SMS,          /* SMS OTP */
-  OROCHI_MFA_EMAIL,        /* Email OTP */
-  OROCHI_MFA_WEBAUTHN,     /* WebAuthn/FIDO2 */
-  OROCHI_MFA_RECOVERY_CODE /* Recovery codes */
+    OROCHI_MFA_NONE = 0,
+    OROCHI_MFA_TOTP,         /* Time-based OTP (Authenticator apps) */
+    OROCHI_MFA_SMS,          /* SMS OTP */
+    OROCHI_MFA_EMAIL,        /* Email OTP */
+    OROCHI_MFA_WEBAUTHN,     /* WebAuthn/FIDO2 */
+    OROCHI_MFA_RECOVERY_CODE /* Recovery codes */
 } OrochiMfaType;
 
 /* ============================================================
@@ -151,30 +151,30 @@ typedef enum OrochiMfaType {
  * ============================================================ */
 
 typedef enum OrochiAuditEvent {
-  OROCHI_AUDIT_LOGIN_SUCCESS = 0,
-  OROCHI_AUDIT_LOGIN_FAILED,
-  OROCHI_AUDIT_LOGOUT,
-  OROCHI_AUDIT_TOKEN_ISSUED,
-  OROCHI_AUDIT_TOKEN_REVOKED,
-  OROCHI_AUDIT_TOKEN_REFRESHED,
-  OROCHI_AUDIT_PASSWORD_CHANGED,
-  OROCHI_AUDIT_PASSWORD_RESET,
-  OROCHI_AUDIT_MFA_ENROLLED,
-  OROCHI_AUDIT_MFA_VERIFIED,
-  OROCHI_AUDIT_MFA_FAILED,
-  OROCHI_AUDIT_API_KEY_CREATED,
-  OROCHI_AUDIT_API_KEY_REVOKED,
-  OROCHI_AUDIT_USER_CREATED,
-  OROCHI_AUDIT_USER_UPDATED,
-  OROCHI_AUDIT_USER_DELETED,
-  OROCHI_AUDIT_ROLE_ASSIGNED,
-  OROCHI_AUDIT_ROLE_REVOKED,
-  OROCHI_AUDIT_PERMISSION_DENIED,
-  OROCHI_AUDIT_RATE_LIMITED,
-  OROCHI_AUDIT_SUSPICIOUS_ACTIVITY,
-  OROCHI_AUDIT_KEY_ROTATED,
-  OROCHI_AUDIT_SESSION_CREATED,
-  OROCHI_AUDIT_SESSION_EXPIRED
+    OROCHI_AUDIT_LOGIN_SUCCESS = 0,
+    OROCHI_AUDIT_LOGIN_FAILED,
+    OROCHI_AUDIT_LOGOUT,
+    OROCHI_AUDIT_TOKEN_ISSUED,
+    OROCHI_AUDIT_TOKEN_REVOKED,
+    OROCHI_AUDIT_TOKEN_REFRESHED,
+    OROCHI_AUDIT_PASSWORD_CHANGED,
+    OROCHI_AUDIT_PASSWORD_RESET,
+    OROCHI_AUDIT_MFA_ENROLLED,
+    OROCHI_AUDIT_MFA_VERIFIED,
+    OROCHI_AUDIT_MFA_FAILED,
+    OROCHI_AUDIT_API_KEY_CREATED,
+    OROCHI_AUDIT_API_KEY_REVOKED,
+    OROCHI_AUDIT_USER_CREATED,
+    OROCHI_AUDIT_USER_UPDATED,
+    OROCHI_AUDIT_USER_DELETED,
+    OROCHI_AUDIT_ROLE_ASSIGNED,
+    OROCHI_AUDIT_ROLE_REVOKED,
+    OROCHI_AUDIT_PERMISSION_DENIED,
+    OROCHI_AUDIT_RATE_LIMITED,
+    OROCHI_AUDIT_SUSPICIOUS_ACTIVITY,
+    OROCHI_AUDIT_KEY_ROTATED,
+    OROCHI_AUDIT_SESSION_CREATED,
+    OROCHI_AUDIT_SESSION_EXPIRED
 } OrochiAuditEvent;
 
 /* ============================================================
@@ -182,15 +182,15 @@ typedef enum OrochiAuditEvent {
  * ============================================================ */
 
 typedef enum OrochiJwtAlgorithm {
-  OROCHI_JWT_ALG_HS256 = 0, /* HMAC SHA-256 */
-  OROCHI_JWT_ALG_HS384,     /* HMAC SHA-384 */
-  OROCHI_JWT_ALG_HS512,     /* HMAC SHA-512 */
-  OROCHI_JWT_ALG_RS256,     /* RSA SHA-256 */
-  OROCHI_JWT_ALG_RS384,     /* RSA SHA-384 */
-  OROCHI_JWT_ALG_RS512,     /* RSA SHA-512 */
-  OROCHI_JWT_ALG_ES256,     /* ECDSA P-256 SHA-256 */
-  OROCHI_JWT_ALG_ES384,     /* ECDSA P-384 SHA-384 */
-  OROCHI_JWT_ALG_ES512      /* ECDSA P-521 SHA-512 */
+    OROCHI_JWT_ALG_HS256 = 0, /* HMAC SHA-256 */
+    OROCHI_JWT_ALG_HS384,     /* HMAC SHA-384 */
+    OROCHI_JWT_ALG_HS512,     /* HMAC SHA-512 */
+    OROCHI_JWT_ALG_RS256,     /* RSA SHA-256 */
+    OROCHI_JWT_ALG_RS384,     /* RSA SHA-384 */
+    OROCHI_JWT_ALG_RS512,     /* RSA SHA-512 */
+    OROCHI_JWT_ALG_ES256,     /* ECDSA P-256 SHA-256 */
+    OROCHI_JWT_ALG_ES384,     /* ECDSA P-384 SHA-384 */
+    OROCHI_JWT_ALG_ES512      /* ECDSA P-521 SHA-512 */
 } OrochiJwtAlgorithm;
 
 /* ============================================================
@@ -198,17 +198,17 @@ typedef enum OrochiJwtAlgorithm {
  * ============================================================ */
 
 typedef struct OrochiAuthContext {
-  char user_id[OROCHI_AUTH_USER_ID_SIZE + 1];
-  char tenant_id[OROCHI_AUTH_TENANT_ID_SIZE + 1];
-  char session_id[OROCHI_AUTH_SESSION_ID_SIZE + 1];
-  char role[OROCHI_AUTH_ROLE_NAME_SIZE + 1];
-  char session_token[OROCHI_AUTH_JWT_MAX_SIZE];
-  TimestampTz expires_at;
-  int64 permissions; /* Bitmask of permissions */
-  OrochiAuthMethod auth_method;
-  bool is_authenticated;
-  bool mfa_verified;
-  char aal[OROCHI_AUTH_AAL_SIZE + 1]; /* Authenticator Assurance Level */
+    char user_id[OROCHI_AUTH_USER_ID_SIZE + 1];
+    char tenant_id[OROCHI_AUTH_TENANT_ID_SIZE + 1];
+    char session_id[OROCHI_AUTH_SESSION_ID_SIZE + 1];
+    char role[OROCHI_AUTH_ROLE_NAME_SIZE + 1];
+    char session_token[OROCHI_AUTH_JWT_MAX_SIZE];
+    TimestampTz expires_at;
+    int64 permissions; /* Bitmask of permissions */
+    OrochiAuthMethod auth_method;
+    bool is_authenticated;
+    bool mfa_verified;
+    char aal[OROCHI_AUTH_AAL_SIZE + 1]; /* Authenticator Assurance Level */
 } OrochiAuthContext;
 
 /* ============================================================
@@ -216,23 +216,23 @@ typedef struct OrochiAuthContext {
  * ============================================================ */
 
 typedef struct OrochiSession {
-  char session_id[OROCHI_AUTH_SESSION_ID_SIZE + 1];
-  char user_id[OROCHI_AUTH_USER_ID_SIZE + 1];
-  char tenant_id[OROCHI_AUTH_TENANT_ID_SIZE + 1];
-  OrochiSessionState state;
-  OrochiAuthMethod auth_method;
-  char ip_address[OROCHI_AUTH_IP_SIZE + 1];
-  char user_agent[OROCHI_AUTH_USER_AGENT_SIZE + 1];
-  char device_id[OROCHI_AUTH_DEVICE_ID_SIZE + 1];
-  char geo_country[OROCHI_AUTH_GEO_COUNTRY_SIZE + 1];
-  char geo_city[OROCHI_AUTH_GEO_CITY_SIZE + 1];
-  TimestampTz created_at;
-  TimestampTz last_activity;
-  TimestampTz expires_at;
-  int refresh_count;
-  bool mfa_verified;
-  char aal[OROCHI_AUTH_AAL_SIZE + 1];
-  uint32 hash_slot; /* Cache hash slot for quick lookup */
+    char session_id[OROCHI_AUTH_SESSION_ID_SIZE + 1];
+    char user_id[OROCHI_AUTH_USER_ID_SIZE + 1];
+    char tenant_id[OROCHI_AUTH_TENANT_ID_SIZE + 1];
+    OrochiSessionState state;
+    OrochiAuthMethod auth_method;
+    char ip_address[OROCHI_AUTH_IP_SIZE + 1];
+    char user_agent[OROCHI_AUTH_USER_AGENT_SIZE + 1];
+    char device_id[OROCHI_AUTH_DEVICE_ID_SIZE + 1];
+    char geo_country[OROCHI_AUTH_GEO_COUNTRY_SIZE + 1];
+    char geo_city[OROCHI_AUTH_GEO_CITY_SIZE + 1];
+    TimestampTz created_at;
+    TimestampTz last_activity;
+    TimestampTz expires_at;
+    int refresh_count;
+    bool mfa_verified;
+    char aal[OROCHI_AUTH_AAL_SIZE + 1];
+    uint32 hash_slot; /* Cache hash slot for quick lookup */
 } OrochiSession;
 
 /* ============================================================
@@ -240,19 +240,19 @@ typedef struct OrochiSession {
  * ============================================================ */
 
 typedef struct OrochiToken {
-  char token_hash[OROCHI_AUTH_TOKEN_HASH_SIZE + 1];
-  OrochiTokenType token_type;
-  char session_id[OROCHI_AUTH_SESSION_ID_SIZE + 1];
-  char user_id[OROCHI_AUTH_USER_ID_SIZE + 1];
-  char tenant_id[OROCHI_AUTH_TENANT_ID_SIZE + 1];
-  TimestampTz issued_at;
-  TimestampTz expires_at;
-  TimestampTz not_before;
-  int64 scopes; /* Bitmask */
-  bool is_revoked;
-  char jti[OROCHI_AUTH_JTI_SIZE + 1]; /* JWT ID for revocation */
-  uint32 hash_slot;                   /* Cache hash slot for quick lookup */
-  TimestampTz cached_at;              /* When added to cache */
+    char token_hash[OROCHI_AUTH_TOKEN_HASH_SIZE + 1];
+    OrochiTokenType token_type;
+    char session_id[OROCHI_AUTH_SESSION_ID_SIZE + 1];
+    char user_id[OROCHI_AUTH_USER_ID_SIZE + 1];
+    char tenant_id[OROCHI_AUTH_TENANT_ID_SIZE + 1];
+    TimestampTz issued_at;
+    TimestampTz expires_at;
+    TimestampTz not_before;
+    int64 scopes; /* Bitmask */
+    bool is_revoked;
+    char jti[OROCHI_AUTH_JTI_SIZE + 1]; /* JWT ID for revocation */
+    uint32 hash_slot;                   /* Cache hash slot for quick lookup */
+    TimestampTz cached_at;              /* When added to cache */
 } OrochiToken;
 
 /* ============================================================
@@ -260,17 +260,17 @@ typedef struct OrochiToken {
  * ============================================================ */
 
 typedef struct OrochiSigningKey {
-  char key_id[OROCHI_AUTH_KEY_ID_SIZE + 1];
-  char tenant_id[OROCHI_AUTH_TENANT_ID_SIZE + 1];
-  OrochiJwtAlgorithm algorithm;
-  char public_key[OROCHI_AUTH_PUBLIC_KEY_SIZE + 1];
-  char private_key_encrypted[OROCHI_AUTH_PRIVATE_KEY_SIZE + 1];
-  TimestampTz created_at;
-  TimestampTz expires_at;
-  TimestampTz rotated_at;
-  bool is_current;
-  bool is_active;
-  int version;
+    char key_id[OROCHI_AUTH_KEY_ID_SIZE + 1];
+    char tenant_id[OROCHI_AUTH_TENANT_ID_SIZE + 1];
+    OrochiJwtAlgorithm algorithm;
+    char public_key[OROCHI_AUTH_PUBLIC_KEY_SIZE + 1];
+    char private_key_encrypted[OROCHI_AUTH_PRIVATE_KEY_SIZE + 1];
+    TimestampTz created_at;
+    TimestampTz expires_at;
+    TimestampTz rotated_at;
+    bool is_current;
+    bool is_active;
+    int version;
 } OrochiSigningKey;
 
 /* ============================================================
@@ -278,14 +278,13 @@ typedef struct OrochiSigningKey {
  * ============================================================ */
 
 typedef struct OrochiRateLimit {
-  char key[OROCHI_AUTH_RATE_LIMIT_KEY_SIZE +
-           1]; /* user_id:action or ip:action */
-  int count;
-  int limit;
-  TimestampTz window_start;
-  int window_seconds;
-  bool is_blocked;
-  TimestampTz blocked_until;
+    char key[OROCHI_AUTH_RATE_LIMIT_KEY_SIZE + 1]; /* user_id:action or ip:action */
+    int count;
+    int limit;
+    TimestampTz window_start;
+    int window_seconds;
+    bool is_blocked;
+    TimestampTz blocked_until;
 } OrochiRateLimit;
 
 /* ============================================================
@@ -293,17 +292,17 @@ typedef struct OrochiRateLimit {
  * ============================================================ */
 
 typedef struct OrochiAuditEntry {
-  int64 audit_id;
-  char tenant_id[OROCHI_AUTH_TENANT_ID_SIZE + 1];
-  char user_id[OROCHI_AUTH_USER_ID_SIZE + 1];
-  char session_id[OROCHI_AUTH_SESSION_ID_SIZE + 1];
-  OrochiAuditEvent event_type;
-  char ip_address[OROCHI_AUTH_IP_SIZE + 1];
-  char user_agent[OROCHI_AUTH_USER_AGENT_SIZE + 1];
-  char resource_type[64];
-  char resource_id[256];
-  TimestampTz created_at;
-  bool is_sensitive; /* Mask in logs */
+    int64 audit_id;
+    char tenant_id[OROCHI_AUTH_TENANT_ID_SIZE + 1];
+    char user_id[OROCHI_AUTH_USER_ID_SIZE + 1];
+    char session_id[OROCHI_AUTH_SESSION_ID_SIZE + 1];
+    OrochiAuditEvent event_type;
+    char ip_address[OROCHI_AUTH_IP_SIZE + 1];
+    char user_agent[OROCHI_AUTH_USER_AGENT_SIZE + 1];
+    char resource_type[64];
+    char resource_id[256];
+    TimestampTz created_at;
+    bool is_sensitive; /* Mask in logs */
 } OrochiAuditEntry;
 
 /* ============================================================
@@ -311,18 +310,18 @@ typedef struct OrochiAuditEntry {
  * ============================================================ */
 
 typedef struct OrochiTokenValidation {
-  bool is_valid;
-  char error_code[OROCHI_AUTH_ERROR_CODE_SIZE + 1];
-  char error_message[OROCHI_AUTH_ERROR_MSG_SIZE + 1];
-  char user_id[OROCHI_AUTH_USER_ID_SIZE + 1];
-  char tenant_id[OROCHI_AUTH_TENANT_ID_SIZE + 1];
-  char session_id[OROCHI_AUTH_SESSION_ID_SIZE + 1];
-  int64 scopes;
-  TimestampTz expires_at;
-  bool is_expired;
-  bool is_revoked;
-  char roles[OROCHI_AUTH_MAX_ROLES][OROCHI_AUTH_ROLE_NAME_SIZE + 1];
-  int role_count;
+    bool is_valid;
+    char error_code[OROCHI_AUTH_ERROR_CODE_SIZE + 1];
+    char error_message[OROCHI_AUTH_ERROR_MSG_SIZE + 1];
+    char user_id[OROCHI_AUTH_USER_ID_SIZE + 1];
+    char tenant_id[OROCHI_AUTH_TENANT_ID_SIZE + 1];
+    char session_id[OROCHI_AUTH_SESSION_ID_SIZE + 1];
+    int64 scopes;
+    TimestampTz expires_at;
+    bool is_expired;
+    bool is_revoked;
+    char roles[OROCHI_AUTH_MAX_ROLES][OROCHI_AUTH_ROLE_NAME_SIZE + 1];
+    int role_count;
 } OrochiTokenValidation;
 
 /* ============================================================
@@ -330,17 +329,17 @@ typedef struct OrochiTokenValidation {
  * ============================================================ */
 
 typedef struct OrochiAuthResult {
-  bool success;
-  char error_code[OROCHI_AUTH_ERROR_CODE_SIZE + 1];
-  char error_message[OROCHI_AUTH_ERROR_MSG_SIZE + 1];
-  char user_id[OROCHI_AUTH_USER_ID_SIZE + 1];
-  OrochiSession *session;
-  char access_token[OROCHI_AUTH_JWT_MAX_SIZE];
-  char refresh_token[256];
-  int access_token_expires_in;
-  int refresh_token_expires_in;
-  bool mfa_required;
-  OrochiMfaType mfa_type;
+    bool success;
+    char error_code[OROCHI_AUTH_ERROR_CODE_SIZE + 1];
+    char error_message[OROCHI_AUTH_ERROR_MSG_SIZE + 1];
+    char user_id[OROCHI_AUTH_USER_ID_SIZE + 1];
+    OrochiSession *session;
+    char access_token[OROCHI_AUTH_JWT_MAX_SIZE];
+    char refresh_token[256];
+    int access_token_expires_in;
+    int refresh_token_expires_in;
+    bool mfa_required;
+    OrochiMfaType mfa_type;
 } OrochiAuthResult;
 
 /* ============================================================
@@ -348,49 +347,49 @@ typedef struct OrochiAuthResult {
  * ============================================================ */
 
 typedef struct OrochiAuthCache {
-  /* Lock tranches */
-  LWLock *main_lock;
-  LWLock *token_cache_lock;
-  LWLock *session_cache_lock;
-  LWLock *rate_limit_lock;
-  LWLock *signing_key_lock;
+    /* Lock tranches */
+    LWLock *main_lock;
+    LWLock *token_cache_lock;
+    LWLock *session_cache_lock;
+    LWLock *rate_limit_lock;
+    LWLock *signing_key_lock;
 
-  /* Token cache (FIFO eviction) */
-  int token_cache_count;
-  int token_cache_head; /* Oldest entry index */
-  int token_cache_tail; /* Newest entry index */
-  OrochiToken token_cache[OROCHI_AUTH_MAX_CACHED_TOKENS];
+    /* Token cache (FIFO eviction) */
+    int token_cache_count;
+    int token_cache_head; /* Oldest entry index */
+    int token_cache_tail; /* Newest entry index */
+    OrochiToken token_cache[OROCHI_AUTH_MAX_CACHED_TOKENS];
 
-  /* Session cache */
-  int session_cache_count;
-  int session_cache_head;
-  int session_cache_tail;
-  OrochiSession session_cache[OROCHI_AUTH_MAX_CACHED_SESSIONS];
+    /* Session cache */
+    int session_cache_count;
+    int session_cache_head;
+    int session_cache_tail;
+    OrochiSession session_cache[OROCHI_AUTH_MAX_CACHED_SESSIONS];
 
-  /* Signing keys (rotated periodically) */
-  int signing_key_count;
-  OrochiSigningKey signing_keys[OROCHI_AUTH_MAX_SIGNING_KEYS];
+    /* Signing keys (rotated periodically) */
+    int signing_key_count;
+    OrochiSigningKey signing_keys[OROCHI_AUTH_MAX_SIGNING_KEYS];
 
-  /* Rate limiting state */
-  int rate_limit_count;
-  OrochiRateLimit rate_limits[OROCHI_AUTH_MAX_RATE_LIMITS];
+    /* Rate limiting state */
+    int rate_limit_count;
+    OrochiRateLimit rate_limits[OROCHI_AUTH_MAX_RATE_LIMITS];
 
-  /* Statistics */
-  pg_atomic_uint64 total_auth_requests;
-  pg_atomic_uint64 cache_hits;
-  pg_atomic_uint64 cache_misses;
-  pg_atomic_uint64 failed_authentications;
-  pg_atomic_uint64 tokens_issued;
-  pg_atomic_uint64 tokens_revoked;
-  pg_atomic_uint64 sessions_created;
-  pg_atomic_uint64 sessions_expired;
+    /* Statistics */
+    pg_atomic_uint64 total_auth_requests;
+    pg_atomic_uint64 cache_hits;
+    pg_atomic_uint64 cache_misses;
+    pg_atomic_uint64 failed_authentications;
+    pg_atomic_uint64 tokens_issued;
+    pg_atomic_uint64 tokens_revoked;
+    pg_atomic_uint64 sessions_created;
+    pg_atomic_uint64 sessions_expired;
 
-  /* Timestamps */
-  TimestampTz last_key_rotation;
-  TimestampTz last_cleanup;
-  TimestampTz startup_time;
+    /* Timestamps */
+    TimestampTz last_key_rotation;
+    TimestampTz last_cleanup;
+    TimestampTz startup_time;
 
-  bool is_initialized;
+    bool is_initialized;
 } OrochiAuthCache;
 
 /* ============================================================
@@ -467,8 +466,7 @@ extern void orochi_auth_fini(void);
  * Validate a JWT token
  * Returns validation result with user context
  */
-extern OrochiTokenValidation orochi_auth_validate_token(const char *token,
-                                                        const char *tenant_id);
+extern OrochiTokenValidation orochi_auth_validate_token(const char *token, const char *tenant_id);
 
 /*
  * Fast path token validation (cache lookup only)
@@ -480,8 +478,8 @@ extern bool orochi_auth_validate_token_fast(const char *token, int token_len,
 /*
  * Full JWT validation with signature verification
  */
-extern OrochiTokenValidation
-orochi_auth_validate_jwt_full(const char *token, const char *tenant_id);
+extern OrochiTokenValidation orochi_auth_validate_jwt_full(const char *token,
+                                                           const char *tenant_id);
 
 /*
  * Validate an API key
@@ -492,17 +490,17 @@ extern OrochiTokenValidation orochi_auth_validate_api_key(const char *api_key);
  * API Key Info structure for database operations
  */
 typedef struct OrochiApiKeyInfo {
-  int64 key_id;
-  char prefix[OROCHI_AUTH_API_KEY_PREFIX_SIZE + 1];
-  char name[256];
-  char user_id[OROCHI_AUTH_USER_ID_SIZE + 1];
-  char tenant_id[OROCHI_AUTH_TENANT_ID_SIZE + 1];
-  TimestampTz created_at;
-  TimestampTz last_used_at;
-  TimestampTz expires_at;
-  bool is_revoked;
-  bool has_last_used;
-  bool has_expires;
+    int64 key_id;
+    char prefix[OROCHI_AUTH_API_KEY_PREFIX_SIZE + 1];
+    char name[256];
+    char user_id[OROCHI_AUTH_USER_ID_SIZE + 1];
+    char tenant_id[OROCHI_AUTH_TENANT_ID_SIZE + 1];
+    TimestampTz created_at;
+    TimestampTz last_used_at;
+    TimestampTz expires_at;
+    bool is_revoked;
+    bool has_last_used;
+    bool has_expires;
 } OrochiApiKeyInfo;
 
 /*
@@ -534,8 +532,7 @@ extern OrochiToken *orochi_auth_cache_lookup(const char *token_hash);
 /*
  * Add token to cache
  */
-extern void orochi_auth_cache_token(OrochiTokenValidation *validation,
-                                    const char *token_hash);
+extern void orochi_auth_cache_token(OrochiTokenValidation *validation, const char *token_hash);
 
 /*
  * Invalidate token in cache
@@ -579,11 +576,9 @@ extern void orochi_auth_cleanup_expired_sessions(void);
 /*
  * Create a new session
  */
-extern OrochiSession *orochi_auth_create_session(const char *user_id,
-                                                 const char *tenant_id,
+extern OrochiSession *orochi_auth_create_session(const char *user_id, const char *tenant_id,
                                                  OrochiAuthMethod auth_method,
-                                                 const char *ip_address,
-                                                 const char *user_agent);
+                                                 const char *ip_address, const char *user_agent);
 
 /*
  * Get session by ID
@@ -647,8 +642,7 @@ extern void orochi_auth_cache_signing_key(OrochiSigningKey *key);
  * Check rate limit for a key/action combination
  * Returns true if request is allowed
  */
-extern bool orochi_auth_check_rate_limit(const char *key, const char *action,
-                                         int limit);
+extern bool orochi_auth_check_rate_limit(const char *key, const char *action, int limit);
 
 /*
  * Record a rate limit hit
@@ -672,11 +666,10 @@ extern void orochi_auth_cleanup_rate_limits(void);
 /*
  * Log an authentication event
  */
-extern void
-orochi_auth_audit_log(const char *tenant_id, const char *user_id,
-                      const char *session_id, OrochiAuditEvent event_type,
-                      const char *ip_address, const char *user_agent,
-                      const char *resource_type, const char *resource_id);
+extern void orochi_auth_audit_log(const char *tenant_id, const char *user_id,
+                                  const char *session_id, OrochiAuditEvent event_type,
+                                  const char *ip_address, const char *user_agent,
+                                  const char *resource_type, const char *resource_id);
 
 /*
  * Ensure audit log partitions exist
@@ -777,14 +770,12 @@ extern void orochi_auth_generate_token(char *token_out, int length);
 /*
  * Verify JWT signature
  */
-extern bool orochi_auth_verify_jwt_signature(const char *token,
-                                             OrochiSigningKey *key);
+extern bool orochi_auth_verify_jwt_signature(const char *token, OrochiSigningKey *key);
 
 /*
  * Parse JWT claims
  */
-extern bool orochi_auth_parse_jwt_claims(const char *token,
-                                         OrochiTokenValidation *result);
+extern bool orochi_auth_parse_jwt_claims(const char *token, OrochiTokenValidation *result);
 
 /*
  * Get algorithm from string
@@ -814,15 +805,13 @@ extern const char *orochi_auth_audit_event_name(OrochiAuditEvent event);
 /*
  * Check GUC algorithm value
  */
-extern bool orochi_auth_check_algorithm(char **newval, void **extra,
-                                        GucSource source);
+extern bool orochi_auth_check_algorithm(char **newval, void **extra, GucSource source);
 
 /*
  * Get auth statistics
  */
-extern void orochi_auth_get_stats(uint64 *total_requests, uint64 *cache_hits,
-                                  uint64 *cache_misses, uint64 *failed_auths,
-                                  uint64 *tokens_issued,
+extern void orochi_auth_get_stats(uint64 *total_requests, uint64 *cache_hits, uint64 *cache_misses,
+                                  uint64 *failed_auths, uint64 *tokens_issued,
                                   uint64 *tokens_revoked);
 
 /* ============================================================
