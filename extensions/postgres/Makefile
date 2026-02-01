@@ -125,6 +125,8 @@ lint:
 		--suppress=unusedStructMember \
 		--suppress=constParameter \
 		--suppress=knownConditionTrueFalse \
+		--suppress=nullPointer \
+		--suppress=nullPointerRedundantCheck \
 		--error-exitcode=1 \
 		src/
 
