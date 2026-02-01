@@ -1291,8 +1291,8 @@ void orochi_explain_custom_scan(CustomScanState *node, List *ancestors, ExplainS
     if (dplan == NULL)
         return;
 
-    /* ExplainPropertyText/Integer were removed in PG18 - use appendStringInfo
-     * directly */
+        /* ExplainPropertyText/Integer were removed in PG18 - use appendStringInfo
+         * directly */
 #if PG_VERSION_NUM >= 180000
     if (es->format == EXPLAIN_FORMAT_TEXT) {
         appendStringInfoSpaces(es->str, es->indent * 2);

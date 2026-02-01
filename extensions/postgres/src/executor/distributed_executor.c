@@ -65,7 +65,7 @@ static void init_executor_locks(void)
     if (locks_initialized)
         return;
 
-    /* Initialize connection pool lock */
+        /* Initialize connection pool lock */
 #if PG_VERSION_NUM >= 180000
     LWLockRegisterTranche(LWTRANCHE_FIRST_USER_DEFINED, connection_pool_tranche_name);
 #else

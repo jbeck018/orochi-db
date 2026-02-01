@@ -113,7 +113,7 @@ typedef struct JsonQueryExpr {
     char *column_name;   /* Column name */
 
     /* For OPERATOR */
-    JsonQueryOperator operator;  /* Operator type */
+    JsonQueryOperator op;        /* Operator type */
     struct JsonQueryExpr *left;  /* Left operand */
     struct JsonQueryExpr *right; /* Right operand */
 

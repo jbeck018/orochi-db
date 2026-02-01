@@ -236,7 +236,7 @@ JsonQueryExpr *json_query_build_expr(Node *pg_expr, Oid table_oid, int16 column_
         char *op_name = get_opname(op->opno);
 
         result = create_expr_node(JSON_EXPR_OPERATOR);
-        result->operator = json_query_parse_operator(op_name);
+        result->op = json_query_parse_operator(op_name);
 
         if (list_length(op->args) >= 1) {
             result->left = json_query_build_expr(linitial(op->args), table_oid, column_attnum);
@@ -328,13 +328,13 @@ JsonQueryExpr *json_query_optimize(JsonQueryExpr *expr, Oid table_oid, int16 col
         if (expr->left != NULL && expr->left->type == JSON_EXPR_PATH) {
             stats = json_index_get_path_stats(table_oid, column_attnum, expr->left->path);
             if (stats != NULL) {
-                expr->selectivity = estimate_operator_selectivity(expr->operator, stats);
+                expr->selectivity = estimate_operator_selectivity(expr->op, stats);
                 pfree(stats);
             }
         }
 
         /* Check if operator can use index */
-        switch (expr->operator) {
+        switch (expr->op) {
         case JSON_OP_CONTAINS:
         case JSON_OP_EXISTS:
         case JSON_OP_EXISTS_ANY:
@@ -588,7 +588,7 @@ bool json_query_can_pushdown(JsonQueryExpr *expr)
     switch (expr->type) {
     case JSON_EXPR_OPERATOR:
         /* Most operators can be pushed down */
-        switch (expr->operator) {
+        switch (expr->op) {
         case JSON_OP_CONTAINS:
         case JSON_OP_EXISTS:
         case JSON_OP_EQ:
@@ -679,7 +679,7 @@ ScanKey json_query_to_scankey(JsonQueryExpr *expr, int *nkeys)
             RegProcedure proc = InvalidOid;
 
             /* Determine strategy based on operator */
-            switch (expr->operator) {
+            switch (expr->op) {
             case JSON_OP_EQ:
                 strategy = BTEqualStrategyNumber;
                 break;
@@ -767,7 +767,7 @@ bool json_query_index_compatible(JsonQueryExpr *expr, Oid index_oid)
     /* GIN indexes support containment and existence operators */
     if (index_rel->rd_rel->relam == GIN_AM_OID) {
         if (expr->type == JSON_EXPR_OPERATOR) {
-            switch (expr->operator) {
+            switch (expr->op) {
             case JSON_OP_CONTAINS:
             case JSON_OP_EXISTS:
             case JSON_OP_EXISTS_ANY:
@@ -782,7 +782,7 @@ bool json_query_index_compatible(JsonQueryExpr *expr, Oid index_oid)
     /* B-tree indexes support comparison operators */
     else if (index_rel->rd_rel->relam == BTREE_AM_OID) {
         if (expr->type == JSON_EXPR_OPERATOR) {
-            switch (expr->operator) {
+            switch (expr->op) {
             case JSON_OP_EQ:
             case JSON_OP_LT:
             case JSON_OP_LE:
@@ -797,7 +797,7 @@ bool json_query_index_compatible(JsonQueryExpr *expr, Oid index_oid)
     }
     /* Hash indexes support equality only */
     else if (index_rel->rd_rel->relam == HASH_AM_OID) {
-        compatible = (expr->type == JSON_EXPR_OPERATOR && expr->operator == JSON_OP_EQ);
+        compatible = (expr->type == JSON_EXPR_OPERATOR && expr->op == JSON_OP_EQ);
     }
 
     index_close(index_rel, AccessShareLock);
@@ -1161,7 +1161,7 @@ bool json_query_eval(JsonQueryExpr *expr, Jsonb *value, bool *is_null)
         bool right_null = true;
 
         /* Handle special operators first */
-        switch (expr->operator) {
+        switch (expr->op) {
         case JSON_OP_CONTAINS: {
             /* Check JSONB containment */
             if (expr->right == NULL || expr->right->type != JSON_EXPR_CONST)
@@ -1239,7 +1239,7 @@ bool json_query_eval(JsonQueryExpr *expr, Jsonb *value, bool *is_null)
             return false;
         }
 
-        return eval_operator(expr->operator, left_val, right_val, left_type, right_type);
+        return eval_operator(expr->op, left_val, right_val, left_type, right_type);
     }
 
     case JSON_EXPR_AND: {
@@ -1549,7 +1549,7 @@ char *json_query_expr_to_string(JsonQueryExpr *expr)
 
     case JSON_EXPR_OPERATOR:
         appendStringInfo(&buf, "(%s %s %s)", json_query_expr_to_string(expr->left),
-                         json_query_operator_name(expr->operator),
+                         json_query_operator_name(expr->op),
                          json_query_expr_to_string(expr->right));
         break;
 
