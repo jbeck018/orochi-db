@@ -116,7 +116,7 @@ jobs:
 
       - name: Build application
         if: steps.check.outputs.exists == 'true'
-        run: npm run build
+        run: npm run build:node
         env:
           # Build-time environment variables (use defaults for CI)
           VITE_API_URL: https://api.orochi.dev
