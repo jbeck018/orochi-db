@@ -12,6 +12,14 @@ import {
   Server,
   Layers,
   Network,
+  FileCode,
+  Settings,
+  Terminal,
+  CheckCircle,
+  Cpu,
+  HardDrive,
+  MemoryStick,
+  Info,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -198,6 +206,305 @@ function BenchmarksPage(): React.JSX.Element {
             </CardContent>
           </Card>
         </div>
+      </section>
+
+      {/* Methodology Section */}
+      <section className="container mx-auto px-4 pb-12">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <FileCode className="h-5 w-5" />
+              Benchmark Methodology
+            </CardTitle>
+            <CardDescription>
+              How we measure performance with industry-standard benchmarks
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Tabs defaultValue="overview">
+              <TabsList className="grid w-full grid-cols-4">
+                <TabsTrigger value="overview">Overview</TabsTrigger>
+                <TabsTrigger value="environment">Environment</TabsTrigger>
+                <TabsTrigger value="categories">Categories</TabsTrigger>
+                <TabsTrigger value="reproduce">Reproduce</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="overview" className="mt-6 space-y-6">
+                <div className="prose prose-sm max-w-none">
+                  <p className="text-muted-foreground">
+                    Our benchmarks follow strict transparency principles to ensure accurate,
+                    reproducible results. All tests use industry-standard workloads and tools.
+                  </p>
+                </div>
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div className="flex items-start gap-3 p-4 rounded-lg bg-muted/50">
+                    <CheckCircle className="h-5 w-5 text-green-500 mt-0.5" />
+                    <div>
+                      <div className="font-medium">Standardized Tests</div>
+                      <div className="text-sm text-muted-foreground">
+                        TPC-C, TPC-H, TSBS, and ClickBench workloads
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3 p-4 rounded-lg bg-muted/50">
+                    <CheckCircle className="h-5 w-5 text-green-500 mt-0.5" />
+                    <div>
+                      <div className="font-medium">Multiple Runs</div>
+                      <div className="text-sm text-muted-foreground">
+                        3+ iterations with warm cache to reduce variance
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3 p-4 rounded-lg bg-muted/50">
+                    <CheckCircle className="h-5 w-5 text-green-500 mt-0.5" />
+                    <div>
+                      <div className="font-medium">Open Source</div>
+                      <div className="text-sm text-muted-foreground">
+                        Full scripts available for independent verification
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="bg-muted/30 rounded-lg p-4 border">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Info className="h-4 w-4 text-primary" />
+                    <span className="font-medium text-sm">Transparency Principles</span>
+                  </div>
+                  <ul className="text-sm text-muted-foreground space-y-1">
+                    <li>• Hardware and software versions documented</li>
+                    <li>• PostgreSQL configuration settings disclosed</li>
+                    <li>• Raw data exported as JSON and CSV</li>
+                    <li>• Statistical methods described</li>
+                    <li>• Reproduction scripts provided</li>
+                  </ul>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="environment" className="mt-6 space-y-6">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Cpu className="h-4 w-4" />
+                        Compute
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Instance Type</span>
+                        <span className="font-mono">Standard (4 vCPU)</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Memory</span>
+                        <span className="font-mono">16 GB</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">CPU</span>
+                        <span className="font-mono">Intel Xeon / AMD EPYC</span>
+                      </div>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <HardDrive className="h-4 w-4" />
+                        Storage
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Type</span>
+                        <span className="font-mono">NVMe SSD</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">IOPS</span>
+                        <span className="font-mono">Up to 16,000</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Throughput</span>
+                        <span className="font-mono">250 MB/s</span>
+                      </div>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Database className="h-4 w-4" />
+                        PostgreSQL
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Version</span>
+                        <span className="font-mono">PostgreSQL 16+</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Extension</span>
+                        <span className="font-mono">Orochi 1.0</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Pooler</span>
+                        <span className="font-mono">PgDog</span>
+                      </div>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Settings className="h-4 w-4" />
+                        Configuration
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">shared_buffers</span>
+                        <span className="font-mono">4 GB</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">work_mem</span>
+                        <span className="font-mono">256 MB</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">effective_cache_size</span>
+                        <span className="font-mono">12 GB</span>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="categories" className="mt-6 space-y-6">
+                <div className="grid gap-4">
+                  <div className="border rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Clock className="h-5 w-5 text-green-500" />
+                      <h4 className="font-semibold">Time-Series Benchmarks</h4>
+                      <Badge variant="outline">9 tests</Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground mb-3">
+                      Tests based on TSBS (Time Series Benchmark Suite) patterns. Measures ingestion
+                      rate, range queries, aggregations, and real-time analytics on time-partitioned data.
+                    </p>
+                    <div className="text-xs text-muted-foreground">
+                      <strong>Metrics:</strong> Rows/second ingestion, query latency (P50, P95, P99), chunk pruning efficiency
+                    </div>
+                  </div>
+
+                  <div className="border rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Database className="h-5 w-5 text-blue-500" />
+                      <h4 className="font-semibold">TPC-H Benchmarks</h4>
+                      <Badge variant="outline">2 tests</Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground mb-3">
+                      Industry-standard decision support benchmark. Tests complex analytical queries
+                      with joins, aggregations, and sorting on a realistic business dataset.
+                    </p>
+                    <div className="text-xs text-muted-foreground">
+                      <strong>Metrics:</strong> Query execution time, geometric mean of all 22 queries, scalability factor
+                    </div>
+                  </div>
+
+                  <div className="border rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Layers className="h-5 w-5 text-purple-500" />
+                      <h4 className="font-semibold">Columnar Storage Benchmarks</h4>
+                      <Badge variant="outline">1 test</Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground mb-3">
+                      Tests columnar scan performance with ZSTD compression. Measures full table scans,
+                      column projection, and compression ratios for analytical workloads.
+                    </p>
+                    <div className="text-xs text-muted-foreground">
+                      <strong>Metrics:</strong> Scan throughput (GB/s), compression ratio, decompression speed
+                    </div>
+                  </div>
+
+                  <div className="border rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Network className="h-5 w-5 text-red-500" />
+                      <h4 className="font-semibold">Distributed Query Benchmarks</h4>
+                      <Badge variant="outline">1 test</Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground mb-3">
+                      Tests query performance across distributed shards. Measures cross-shard joins,
+                      data shuffling, and coordinator overhead in multi-node configurations.
+                    </p>
+                    <div className="text-xs text-muted-foreground">
+                      <strong>Metrics:</strong> Query latency, network transfer, parallelism efficiency
+                    </div>
+                  </div>
+
+                  <div className="border rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Zap className="h-5 w-5 text-cyan-500" />
+                      <h4 className="font-semibold">Connection Pooling Benchmarks</h4>
+                      <Badge variant="outline">2 tests</Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground mb-3">
+                      Tests PgDog connection pooler performance. Measures connection establishment,
+                      pool stress under concurrent load, and query routing latency.
+                    </p>
+                    <div className="text-xs text-muted-foreground">
+                      <strong>Metrics:</strong> Connections/second, pool exhaustion handling, routing overhead
+                    </div>
+                  </div>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="reproduce" className="mt-6 space-y-6">
+                <div className="prose prose-sm max-w-none">
+                  <p className="text-muted-foreground">
+                    All benchmark scripts are open source. Clone the repository and run benchmarks
+                    against your own OrochiDB cluster for independent verification.
+                  </p>
+                </div>
+                <div className="bg-zinc-950 rounded-lg p-4 font-mono text-sm">
+                  <div className="text-zinc-400 mb-2"># Clone the repository</div>
+                  <div className="text-green-400 mb-4">git clone https://github.com/jbeck018/orochi-db.git</div>
+
+                  <div className="text-zinc-400 mb-2"># Navigate to benchmark directory</div>
+                  <div className="text-green-400 mb-4">cd orochi-db/extensions/postgres/benchmark</div>
+
+                  <div className="text-zinc-400 mb-2"># Run all benchmarks</div>
+                  <div className="text-green-400 mb-4">./run_all.sh</div>
+
+                  <div className="text-zinc-400 mb-2"># Run specific benchmark suite</div>
+                  <div className="text-green-400 mb-4">./timeseries/run_timeseries.sh</div>
+
+                  <div className="text-zinc-400 mb-2"># Generate dashboard report</div>
+                  <div className="text-green-400">./dashboard/generate_report.sh</div>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm">Individual Test Suites</CardTitle>
+                    </CardHeader>
+                    <CardContent className="text-sm font-mono space-y-1">
+                      <div><span className="text-muted-foreground">Time-series:</span> ./timeseries/run_timeseries.sh</div>
+                      <div><span className="text-muted-foreground">TPC-H:</span> ./tpch/run_tpch.sh</div>
+                      <div><span className="text-muted-foreground">Columnar:</span> ./columnar/run_columnar.sh</div>
+                      <div><span className="text-muted-foreground">Sharding:</span> ./sharding/run_sharding.sh</div>
+                      <div><span className="text-muted-foreground">Connection:</span> ./connection/run_connection.sh</div>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm">Competitor Comparisons</CardTitle>
+                    </CardHeader>
+                    <CardContent className="text-sm font-mono space-y-1">
+                      <div><span className="text-muted-foreground">vs TimescaleDB:</span> --competitor=timescaledb</div>
+                      <div><span className="text-muted-foreground">vs Citus:</span> --competitor=citus</div>
+                      <div><span className="text-muted-foreground">vs QuestDB:</span> --competitor=questdb</div>
+                      <div><span className="text-muted-foreground">All targets:</span> --competitor=all</div>
+                    </CardContent>
+                  </Card>
+                </div>
+              </TabsContent>
+            </Tabs>
+          </CardContent>
+        </Card>
       </section>
 
       {/* Benchmark Results by Category */}
