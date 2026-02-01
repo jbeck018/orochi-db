@@ -1,0 +1,39 @@
+# golangci-lint configuration for Orochi DB (v2 format)
+# Balances code quality with practical development
+version: "2"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+linters:
+  default: none
+  enable:
+    - govet       # Standard go vet checks
+    - ineffassign # Detect ineffective assignments
+    - staticcheck # Static analysis
+  settings:
+    govet:
+      disable:
+        - shadow  # Shadow checking can be too strict
+    staticcheck:
+      checks:
+        - all
+        - -QF*    # Exclude quickfix suggestions
+        - -S1*    # Exclude simplify suggestions
+        - -ST*    # Exclude style suggestions
+        - -SA1019 # Allow deprecated API usage for now
+
+issues:
+  # Exclude some linters from running on tests
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - staticcheck
+  # Don't limit issues reported
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+run:
+  timeout: 5m
