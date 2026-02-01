@@ -110,7 +110,10 @@ jobs:
 
       - name: Install dependencies
         if: steps.check.outputs.exists == 'true'
-        run: npm install --legacy-peer-deps
+        run: |
+          npm install --legacy-peer-deps
+          # Explicitly install rollup linux binary (workaround for npm optional dep bug)
+          npm install @rollup/rollup-linux-x64-gnu --save-optional
         working-directory: ${{ github.workspace }}
 
       - name: Build application
