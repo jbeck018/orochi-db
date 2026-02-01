@@ -111,7 +111,10 @@ jobs:
 
       - name: Install dependencies
         if: steps.check.outputs.exists == 'true'
-        run: npm install --legacy-peer-deps
+        run: |
+          npm install --legacy-peer-deps
+          # Reinstall rollup to ensure platform-specific binaries are present
+          npm rebuild rollup
         working-directory: ${{ github.workspace }}
 
       - name: Build application
