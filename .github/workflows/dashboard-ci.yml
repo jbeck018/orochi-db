@@ -111,9 +111,9 @@ jobs:
       - name: Install dependencies
         if: steps.check.outputs.exists == 'true'
         run: |
+          # Clean install to fix npm optional dependency bugs
+          rm -rf node_modules package-lock.json
           npm install --legacy-peer-deps
-          # Explicitly install linux binaries (workaround for npm optional dep bug)
-          npm install @rollup/rollup-linux-x64-gnu lightningcss-linux-x64-gnu --save-optional
         working-directory: ${{ github.workspace }}
 
       - name: Build application
