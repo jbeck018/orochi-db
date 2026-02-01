@@ -106,8 +106,27 @@ check-format:
 	find src -name '*.c' -o -name '*.h' | xargs clang-format --dry-run --Werror
 
 # Run static analysis
+# Suppressing PostgreSQL-specific issues that cppcheck can't properly analyze:
+# - missingIncludeSystem: PostgreSQL headers are in non-standard locations
+# - preprocessorErrorDirective: Intentional #error for PG version checking
+# - noValidConfiguration: cppcheck can't parse PostgreSQL macros
+# - variableScope: Many variables need to be declared before PG_TRY blocks
+# - missingReturn: False positives due to PostgreSQL macro expansion
+# - unusedStructMember: PG structures have many unused members
+# - constParameter: PG APIs don't use const consistently
+# - knownConditionTrueFalse: False positives from PG macro expansion
 lint:
-	cppcheck --enable=all --suppress=missingIncludeSystem src/
+	cppcheck --enable=warning,performance,portability \
+		--suppress=missingIncludeSystem \
+		--suppress=preprocessorErrorDirective \
+		--suppress=noValidConfiguration \
+		--suppress=variableScope \
+		--suppress=missingReturn \
+		--suppress=unusedStructMember \
+		--suppress=constParameter \
+		--suppress=knownConditionTrueFalse \
+		--error-exitcode=1 \
+		src/
 
 # Run tests
 test: install
