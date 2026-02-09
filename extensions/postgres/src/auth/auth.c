@@ -38,6 +38,7 @@
 #include "utils/uuid.h"
 
 /* OpenSSL includes for cryptographic operations */
+#include <openssl/bn.h>
 #include <openssl/crypto.h>
 #include <openssl/ec.h>
 #include <openssl/ecdsa.h>
