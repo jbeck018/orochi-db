@@ -859,9 +859,9 @@ Datum orochi_auth_link_email_sql(PG_FUNCTION_ARGS)
     OrochiAuthResult *result = orochi_auth_link_email(*user_uuid, email, password);
 
     if (result->success)
-        PG_RETURN_JSONB_P(DirectFunctionCall1(
+        PG_RETURN_JSONB_P(DatumGetJsonbP(DirectFunctionCall1(
             jsonb_in, CStringGetDatum("{\"success\": true, \"message\": \"Email "
-                                      "linked successfully\"}")));
+                                      "linked successfully\"}"))));
     else {
         StringInfoData error_json;
         initStringInfo(&error_json);
@@ -870,7 +870,7 @@ Datum orochi_auth_link_email_sql(PG_FUNCTION_ARGS)
                          result->error_code ? result->error_code : "unknown",
                          result->error_message ? result->error_message : "Unknown error");
 
-        PG_RETURN_JSONB_P(DirectFunctionCall1(jsonb_in, CStringGetDatum(error_json.data)));
+        PG_RETURN_JSONB_P(DatumGetJsonbP(DirectFunctionCall1(jsonb_in, CStringGetDatum(error_json.data))));
     }
 }
 
@@ -884,9 +884,9 @@ Datum orochi_auth_link_phone_sql(PG_FUNCTION_ARGS)
     OrochiAuthResult *result = orochi_auth_link_phone(*user_uuid, phone);
 
     if (result->success)
-        PG_RETURN_JSONB_P(DirectFunctionCall1(
+        PG_RETURN_JSONB_P(DatumGetJsonbP(DirectFunctionCall1(
             jsonb_in, CStringGetDatum("{\"success\": true, \"message\": \"Phone "
-                                      "linked successfully\"}")));
+                                      "linked successfully\"}"))));
     else {
         StringInfoData error_json;
         initStringInfo(&error_json);
@@ -895,7 +895,7 @@ Datum orochi_auth_link_phone_sql(PG_FUNCTION_ARGS)
                          result->error_code ? result->error_code : "unknown",
                          result->error_message ? result->error_message : "Unknown error");
 
-        PG_RETURN_JSONB_P(DirectFunctionCall1(jsonb_in, CStringGetDatum(error_json.data)));
+        PG_RETURN_JSONB_P(DatumGetJsonbP(DirectFunctionCall1(jsonb_in, CStringGetDatum(error_json.data))));
     }
 }
 

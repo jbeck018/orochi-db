@@ -991,8 +991,8 @@ Datum orochi_auth_send_magic_link_sql(PG_FUNCTION_ARGS)
     if (result == NULL)
         PG_RETURN_NULL();
 
-    PG_RETURN_JSONB_P(
-        DirectFunctionCall1(jsonb_in, CStringGetDatum("{\"message\": \"Magic link sent\"}")));
+    PG_RETURN_JSONB_P(DatumGetJsonbP(
+        DirectFunctionCall1(jsonb_in, CStringGetDatum("{\"message\": \"Magic link sent\"}"))));
 }
 
 Datum orochi_auth_send_phone_otp_sql(PG_FUNCTION_ARGS)
@@ -1008,8 +1008,8 @@ Datum orochi_auth_send_phone_otp_sql(PG_FUNCTION_ARGS)
     if (result == NULL)
         PG_RETURN_NULL();
 
-    PG_RETURN_JSONB_P(
-        DirectFunctionCall1(jsonb_in, CStringGetDatum("{\"message\": \"OTP sent\"}")));
+    PG_RETURN_JSONB_P(DatumGetJsonbP(
+        DirectFunctionCall1(jsonb_in, CStringGetDatum("{\"message\": \"OTP sent\"}"))));
 }
 
 Datum orochi_auth_verify_otp_sql(PG_FUNCTION_ARGS)
@@ -1064,7 +1064,7 @@ Datum orochi_auth_send_recovery_sql(PG_FUNCTION_ARGS)
     OrochiMagicLink *result = orochi_auth_send_recovery(email);
 
     /* Always return success to prevent email enumeration */
-    PG_RETURN_JSONB_P(
+    PG_RETURN_JSONB_P(DatumGetJsonbP(
         DirectFunctionCall1(jsonb_in, CStringGetDatum("{\"message\": \"If the email exists, a "
-                                                      "recovery link has been sent\"}")));
+                                                      "recovery link has been sent\"}"))));
 }
