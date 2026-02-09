@@ -6,7 +6,7 @@
  * This module handles:
  *   - Parsing CREATE WORKFLOW statements
  *   - Storing workflow definitions in catalog
- *   - Workflow execution orchestration (stub)
+ *   - Workflow execution orchestration
  *
  * Copyright (c) 2024, Orochi DB Contributors
  *
@@ -26,6 +26,8 @@
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/timestamp.h"
+
+#include <inttypes.h>
 
 #include "../core/catalog.h"
 #include "ddl_workflow.h"
@@ -819,25 +821,343 @@ static Workflow *workflow_load_from_catalog(int64 workflow_id)
 }
 
 /*
- * Execute a single workflow step
+ * Execute a STAGE step: copy data from source into a staging temp table
  */
-static bool workflow_execute_step(Workflow *wf, WorkflowStep *step, char **error_msg)
+static bool
+workflow_execute_stage(WorkflowStep *step, char **error_msg)
 {
-    /* For now, just log the step execution */
-    elog(LOG, "executing workflow %s step %d (%s) type=%s", wf->workflow_name, step->step_id,
-         step->step_name ? step->step_name : "unnamed", workflow_step_type_name(step->step_type));
+    StageConfig *cfg = step->config.stage;
+    StringInfoData query;
+    int ret;
+
+    if (cfg == NULL)
+    {
+        *error_msg = pstrdup("stage step has no configuration");
+        return false;
+    }
+
+    initStringInfo(&query);
+
+    if (cfg->source_type == STAGE_SOURCE_TABLE)
+    {
+        /*
+         * Source is another table - use CREATE TEMP TABLE AS SELECT
+         */
+        if (cfg->source_url == NULL)
+        {
+            *error_msg = pstrdup("stage step: source_url (table name) is required");
+            pfree(query.data);
+            return false;
+        }
+
+        appendStringInfo(&query,
+                         "CREATE TEMP TABLE IF NOT EXISTS %s AS SELECT * FROM %s",
+                         cfg->stage_name ? quote_identifier(cfg->stage_name)
+                                         : quote_identifier("_orochi_stage"),
+                         quote_identifier(cfg->source_url));
+    }
+    else if (cfg->source_type == STAGE_SOURCE_LOCAL)
+    {
+        /*
+         * Local file source - use COPY FROM
+         */
+        if (cfg->source_url == NULL)
+        {
+            *error_msg = pstrdup("stage step: source_url (file path) is required");
+            pfree(query.data);
+            return false;
+        }
+
+        appendStringInfo(&query, "COPY %s FROM %s",
+                         cfg->stage_name ? quote_identifier(cfg->stage_name)
+                                         : quote_identifier("_orochi_stage"),
+                         quote_literal_cstr(cfg->source_url));
+
+        if (cfg->copy_options != NULL)
+            appendStringInfo(&query, " WITH (%s)", cfg->copy_options);
+    }
+    else
+    {
+        /*
+         * S3/GCS/Azure/HTTP sources would need external helper functions.
+         * For now, report a clear error rather than silently doing nothing.
+         */
+        *error_msg = psprintf("stage source type '%s' requires external helper "
+                              "(not yet implemented in-process)",
+                              cfg->source_url ? cfg->source_url : "unknown");
+        pfree(query.data);
+        return false;
+    }
+
+    ret = SPI_execute(query.data, false, 0);
+    pfree(query.data);
+
+    if (ret < 0)
+    {
+        *error_msg = psprintf("stage step failed with SPI error %d", ret);
+        return false;
+    }
+
+    elog(LOG, "stage step completed: %" PRId64 " rows",
+         (int64)SPI_processed);
+    return true;
+}
+
+/*
+ * Execute a TRANSFORM step: run a SQL transformation query
+ */
+static bool
+workflow_execute_transform(WorkflowStep *step, char **error_msg)
+{
+    TransformConfig *cfg = step->config.transform;
+    StringInfoData query;
+    int ret;
+
+    if (cfg == NULL || cfg->query_text == NULL)
+    {
+        *error_msg = pstrdup("transform step has no query_text");
+        return false;
+    }
+
+    if (cfg->materialize && cfg->target_stage != NULL)
+    {
+        /*
+         * Materialize: wrap query into CREATE TEMP TABLE
+         */
+        initStringInfo(&query);
+        appendStringInfo(&query,
+                         "CREATE TEMP TABLE IF NOT EXISTS %s AS %s",
+                         quote_identifier(cfg->target_stage),
+                         cfg->query_text);
+
+        ret = SPI_execute(query.data, false, 0);
+        pfree(query.data);
+    }
+    else
+    {
+        ret = SPI_execute(cfg->query_text, false, 0);
+    }
+
+    if (ret < 0)
+    {
+        *error_msg = psprintf("transform step failed with SPI error %d", ret);
+        return false;
+    }
+
+    elog(LOG, "transform step completed: %" PRId64 " rows",
+         (int64)SPI_processed);
+    return true;
+}
+
+/*
+ * Execute a LOAD step: insert from staging into target table
+ */
+static bool
+workflow_execute_load(WorkflowStep *step, char **error_msg)
+{
+    LoadConfig *cfg = step->config.load;
+    StringInfoData query;
+    int ret;
+
+    if (cfg == NULL || cfg->target_table == NULL)
+    {
+        *error_msg = pstrdup("load step has no target_table");
+        return false;
+    }
+
+    if (cfg->source_stage == NULL)
+    {
+        *error_msg = pstrdup("load step has no source_stage");
+        return false;
+    }
+
+    /* Optional truncate before load */
+    if (cfg->truncate_target)
+    {
+        initStringInfo(&query);
+        appendStringInfo(&query, "TRUNCATE %s",
+                         quote_identifier(cfg->target_table));
+        ret = SPI_execute(query.data, false, 0);
+        pfree(query.data);
+
+        if (ret < 0)
+        {
+            *error_msg = psprintf("load step: truncate failed with SPI error %d", ret);
+            return false;
+        }
+    }
+
+    /* Insert from staging table into target */
+    initStringInfo(&query);
+    appendStringInfo(&query,
+                     "INSERT INTO %s SELECT * FROM %s",
+                     quote_identifier(cfg->target_table),
+                     quote_identifier(cfg->source_stage));
+
+    ret = SPI_execute(query.data, false, 0);
+    pfree(query.data);
+
+    if (ret < 0)
+    {
+        *error_msg = psprintf("load step failed with SPI error %d", ret);
+        return false;
+    }
+
+    elog(LOG, "load step completed: %" PRId64 " rows inserted into %s",
+         (int64)SPI_processed, cfg->target_table);
+    return true;
+}
+
+/*
+ * Execute a MERGE step: upsert from staging into target
+ */
+static bool
+workflow_execute_merge(WorkflowStep *step, char **error_msg)
+{
+    MergeConfig *cfg = step->config.merge;
+    StringInfoData query;
+    int ret;
+
+    if (cfg == NULL || cfg->target_table == NULL)
+    {
+        *error_msg = pstrdup("merge step has no target_table");
+        return false;
+    }
+
+    if (cfg->source_stage == NULL)
+    {
+        *error_msg = pstrdup("merge step has no source_stage");
+        return false;
+    }
+
+    if (cfg->num_key_columns <= 0 || cfg->key_columns == NULL)
+    {
+        *error_msg = pstrdup("merge step has no key_columns");
+        return false;
+    }
+
+    initStringInfo(&query);
 
     /*
-     * In a real implementation, we would:
-     * - STAGE: Copy data from external source to staging table
-     * - TRANSFORM: Execute transformation query
-     * - LOAD: Copy from staging to target table
-     * - MERGE: Execute MERGE/upsert operation
-     * etc.
+     * Use INSERT ... ON CONFLICT for broad PostgreSQL version compatibility.
+     * Build: INSERT INTO target SELECT * FROM source
+     *        ON CONFLICT (key_cols) DO UPDATE SET ...
      */
+    appendStringInfo(&query,
+                     "INSERT INTO %s SELECT * FROM %s ON CONFLICT (",
+                     quote_identifier(cfg->target_table),
+                     quote_identifier(cfg->source_stage));
 
-    *error_msg = NULL;
+    for (int i = 0; i < cfg->num_key_columns; i++)
+    {
+        if (i > 0)
+            appendStringInfoString(&query, ", ");
+        appendStringInfoString(&query, quote_identifier(cfg->key_columns[i]));
+    }
+
+    appendStringInfoChar(&query, ')');
+
+    if (cfg->when_matched != NULL)
+        appendStringInfo(&query, " DO UPDATE SET %s", cfg->when_matched);
+    else
+        appendStringInfoString(&query, " DO NOTHING");
+
+    ret = SPI_execute(query.data, false, 0);
+    pfree(query.data);
+
+    if (ret < 0)
+    {
+        *error_msg = psprintf("merge step failed with SPI error %d", ret);
+        return false;
+    }
+
+    elog(LOG, "merge step completed: %" PRId64 " rows merged into %s",
+         (int64)SPI_processed, cfg->target_table);
     return true;
+}
+
+/*
+ * Execute a CUSTOM/VALIDATE/NOTIFY step: run custom SQL directly
+ */
+static bool
+workflow_execute_custom(WorkflowStep *step, char **error_msg)
+{
+    char *sql = step->config.custom_sql;
+    int ret;
+
+    if (sql == NULL || sql[0] == '\0')
+    {
+        *error_msg = pstrdup("custom step has no SQL to execute");
+        return false;
+    }
+
+    ret = SPI_execute(sql, false, 0);
+
+    if (ret < 0)
+    {
+        *error_msg = psprintf("custom step failed with SPI error %d", ret);
+        return false;
+    }
+
+    elog(LOG, "custom step completed: %" PRId64 " rows",
+         (int64)SPI_processed);
+    return true;
+}
+
+/*
+ * Execute a single workflow step
+ */
+static bool
+workflow_execute_step(Workflow *wf, WorkflowStep *step, char **error_msg)
+{
+    bool success = false;
+
+    elog(LOG, "executing workflow %s step %d (%s) type=%s",
+         wf->workflow_name, step->step_id,
+         step->step_name ? step->step_name : "unnamed",
+         workflow_step_type_name(step->step_type));
+
+    if (SPI_connect() != SPI_OK_CONNECT)
+    {
+        *error_msg = pstrdup("failed to connect to SPI");
+        return false;
+    }
+
+    PG_TRY();
+    {
+        switch (step->step_type)
+        {
+        case WORKFLOW_STEP_STAGE:
+            success = workflow_execute_stage(step, error_msg);
+            break;
+        case WORKFLOW_STEP_TRANSFORM:
+            success = workflow_execute_transform(step, error_msg);
+            break;
+        case WORKFLOW_STEP_LOAD:
+            success = workflow_execute_load(step, error_msg);
+            break;
+        case WORKFLOW_STEP_MERGE:
+            success = workflow_execute_merge(step, error_msg);
+            break;
+        case WORKFLOW_STEP_VALIDATE:
+        case WORKFLOW_STEP_NOTIFY:
+        case WORKFLOW_STEP_CUSTOM:
+            success = workflow_execute_custom(step, error_msg);
+            break;
+        }
+    }
+    PG_CATCH();
+    {
+        ErrorData *edata = CopyErrorData();
+        *error_msg = pstrdup(edata->message);
+        FlushErrorState();
+        FreeErrorData(edata);
+        success = false;
+    }
+    PG_END_TRY();
+
+    SPI_finish();
+    return success;
 }
 
 /*

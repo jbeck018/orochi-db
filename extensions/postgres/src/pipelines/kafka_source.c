@@ -228,9 +228,71 @@ void *kafka_source_init(KafkaSourceConfig *config)
              config->consumer_group ? config->consumer_group : "(none)");
     }
 #else
-    /* Stub implementation without librdkafka */
-    elog(WARNING, "Kafka support not compiled in (HAVE_LIBRDKAFKA not defined)");
-    consumer->is_initialized = true; /* Mark as initialized for testing */
+    /* Table-based queue fallback when librdkafka is not available */
+    {
+        int spi_ret;
+
+        spi_ret = SPI_connect();
+        if (spi_ret != SPI_OK_CONNECT)
+        {
+            elog(ERROR, "Orochi: failed to connect to SPI for pipeline queue init");
+            MemoryContextSwitchTo(oldcontext);
+            return NULL;
+        }
+
+        PG_TRY();
+        {
+            char *quoted_topic;
+
+            SPI_execute(
+                "CREATE TABLE IF NOT EXISTS orochi.orochi_pipeline_queue ("
+                "  message_id BIGSERIAL PRIMARY KEY,"
+                "  pipeline_id INTEGER NOT NULL,"
+                "  topic TEXT NOT NULL,"
+                "  partition_id INTEGER DEFAULT 0,"
+                "  payload BYTEA NOT NULL,"
+                "  created_at TIMESTAMPTZ DEFAULT now()"
+                ")", false, 0);
+
+            SPI_execute(
+                "CREATE TABLE IF NOT EXISTS orochi.orochi_pipeline_queue_cursors ("
+                "  pipeline_id INTEGER NOT NULL,"
+                "  topic TEXT NOT NULL,"
+                "  partition_id INTEGER DEFAULT 0,"
+                "  committed_offset BIGINT DEFAULT 0,"
+                "  current_offset BIGINT DEFAULT 0,"
+                "  PRIMARY KEY (pipeline_id, topic, partition_id)"
+                ")", false, 0);
+
+            /* Initialize cursor row for this pipeline */
+            quoted_topic = quote_literal_cstr(config->topic);
+            {
+                char query[512];
+                snprintf(query, sizeof(query),
+                    "INSERT INTO orochi.orochi_pipeline_queue_cursors "
+                    "(pipeline_id, topic, partition_id, committed_offset, current_offset) "
+                    "VALUES (%d, %s, 0, 0, 0) "
+                    "ON CONFLICT DO NOTHING",
+                    (int)consumer->pipeline_id, quoted_topic);
+                SPI_execute(query, false, 0);
+            }
+            pfree(quoted_topic);
+
+            SPI_finish();
+
+            consumer->is_initialized = true;
+            consumer->is_subscribed = true;
+
+            elog(LOG, "Orochi: pipeline %d using table-based queue (no Kafka)",
+                 (int)consumer->pipeline_id);
+        }
+        PG_CATCH();
+        {
+            SPI_finish();
+            PG_RE_THROW();
+        }
+        PG_END_TRY();
+    }
 #endif
 
     MemoryContextSwitchTo(oldcontext);
@@ -328,9 +390,95 @@ int kafka_source_poll(void *consumer_ptr, char **messages, int max_messages, int
         }
     }
 #else
-    /* Stub implementation - return no messages */
-    elog(DEBUG1, "Kafka poll stub: would poll for %d messages with %dms timeout", max_messages,
-         timeout_ms);
+    /* Table-based queue fallback: poll messages from orochi_pipeline_queue */
+    {
+        int spi_ret;
+
+        spi_ret = SPI_connect();
+        if (spi_ret != SPI_OK_CONNECT)
+        {
+            elog(WARNING, "Orochi: failed to connect to SPI for pipeline queue poll");
+            return -1;
+        }
+
+        PG_TRY();
+        {
+            char *quoted_topic;
+            char query[1024];
+            int ret;
+
+            quoted_topic = quote_literal_cstr(consumer->config->topic);
+
+            snprintf(query, sizeof(query),
+                "SELECT message_id, payload FROM orochi.orochi_pipeline_queue "
+                "WHERE pipeline_id = %d AND message_id > "
+                "(SELECT current_offset FROM orochi.orochi_pipeline_queue_cursors "
+                " WHERE pipeline_id = %d AND topic = %s AND partition_id = 0) "
+                "ORDER BY message_id LIMIT %d",
+                (int)consumer->pipeline_id, (int)consumer->pipeline_id,
+                quoted_topic, max_messages);
+
+            ret = SPI_execute(query, true, 0);
+            if (ret == SPI_OK_SELECT && SPI_processed > 0)
+            {
+                uint64 i;
+                for (i = 0; i < SPI_processed; i++)
+                {
+                    bool isnull;
+                    Datum msg_id_datum;
+                    Datum payload_datum;
+                    bytea *payload_bytea;
+                    int payload_len;
+                    char *payload_data;
+
+                    msg_id_datum = SPI_getbinval(SPI_tuptable->vals[i],
+                                                 SPI_tuptable->tupdesc, 1, &isnull);
+                    if (isnull)
+                        continue;
+
+                    payload_datum = SPI_getbinval(SPI_tuptable->vals[i],
+                                                  SPI_tuptable->tupdesc, 2, &isnull);
+                    if (isnull)
+                        continue;
+
+                    payload_bytea = DatumGetByteaPP(payload_datum);
+                    payload_len = VARSIZE_ANY_EXHDR(payload_bytea);
+                    payload_data = VARDATA_ANY(payload_bytea);
+
+                    messages[count] = palloc(payload_len + 1);
+                    memcpy(messages[count], payload_data, payload_len);
+                    messages[count][payload_len] = '\0';
+                    count++;
+
+                    /* Update tracking with the latest message_id */
+                    consumer->current_offset = DatumGetInt64(msg_id_datum);
+                    consumer->messages_received++;
+                    consumer->consecutive_errors = 0;
+                }
+
+                /* Update current_offset in the cursors table */
+                if (count > 0)
+                {
+                    snprintf(query, sizeof(query),
+                        "UPDATE orochi.orochi_pipeline_queue_cursors "
+                        "SET current_offset = %ld "
+                        "WHERE pipeline_id = %d AND topic = %s AND partition_id = 0",
+                        (long)consumer->current_offset,
+                        (int)consumer->pipeline_id, quoted_topic);
+                    SPI_execute(query, false, 0);
+                }
+            }
+
+            pfree(quoted_topic);
+            SPI_finish();
+        }
+        PG_CATCH();
+        {
+            SPI_finish();
+            PG_RE_THROW();
+        }
+        PG_END_TRY();
+    }
 #endif
 
     consumer->last_poll_time = GetCurrentTimestamp();
@@ -385,10 +533,56 @@ bool kafka_source_commit(void *consumer_ptr, int64 offset)
              consumer->current_partition);
     }
 #else
-    consumer->committed_offset = offset;
-    consumer->messages_committed++;
-    consumer->last_commit_time = GetCurrentTimestamp();
-    elog(DEBUG1, "Kafka commit stub: offset=%ld", offset);
+    /* Table-based queue fallback: commit offset and purge consumed messages */
+    {
+        int spi_ret;
+
+        spi_ret = SPI_connect();
+        if (spi_ret != SPI_OK_CONNECT)
+        {
+            elog(WARNING, "Orochi: failed to connect to SPI for pipeline queue commit");
+            return false;
+        }
+
+        PG_TRY();
+        {
+            char *quoted_topic;
+            char query[512];
+
+            quoted_topic = quote_literal_cstr(consumer->config->topic);
+
+            /* Update committed offset */
+            snprintf(query, sizeof(query),
+                "UPDATE orochi.orochi_pipeline_queue_cursors "
+                "SET committed_offset = %ld "
+                "WHERE pipeline_id = %d AND topic = %s AND partition_id = 0",
+                (long)offset, (int)consumer->pipeline_id, quoted_topic);
+            SPI_execute(query, false, 0);
+
+            /* Purge consumed messages up to the committed offset */
+            snprintf(query, sizeof(query),
+                "DELETE FROM orochi.orochi_pipeline_queue "
+                "WHERE pipeline_id = %d AND message_id <= %ld",
+                (int)consumer->pipeline_id, (long)offset);
+            SPI_execute(query, false, 0);
+
+            pfree(quoted_topic);
+            SPI_finish();
+
+            consumer->committed_offset = offset;
+            consumer->messages_committed++;
+            consumer->last_commit_time = GetCurrentTimestamp();
+
+            elog(DEBUG1, "Orochi: pipeline %d committed offset %ld (table-based)",
+                 (int)consumer->pipeline_id, (long)offset);
+        }
+        PG_CATCH();
+        {
+            SPI_finish();
+            PG_RE_THROW();
+        }
+        PG_END_TRY();
+    }
 #endif
 
     return true;
@@ -446,8 +640,46 @@ bool kafka_source_seek(void *consumer_ptr, int64 offset)
         elog(LOG, "Seeked Kafka consumer to offset %ld", offset);
     }
 #else
-    consumer->current_offset = offset;
-    elog(DEBUG1, "Kafka seek stub: offset=%ld", offset);
+    /* Table-based queue fallback: update current_offset in cursors table */
+    {
+        int spi_ret;
+
+        spi_ret = SPI_connect();
+        if (spi_ret != SPI_OK_CONNECT)
+        {
+            elog(WARNING, "Orochi: failed to connect to SPI for pipeline queue seek");
+            return false;
+        }
+
+        PG_TRY();
+        {
+            char *quoted_topic;
+            char query[512];
+
+            quoted_topic = quote_literal_cstr(consumer->config->topic);
+
+            snprintf(query, sizeof(query),
+                "UPDATE orochi.orochi_pipeline_queue_cursors "
+                "SET current_offset = %ld "
+                "WHERE pipeline_id = %d AND topic = %s AND partition_id = 0",
+                (long)offset, (int)consumer->pipeline_id, quoted_topic);
+            SPI_execute(query, false, 0);
+
+            pfree(quoted_topic);
+            SPI_finish();
+
+            consumer->current_offset = offset;
+
+            elog(LOG, "Orochi: pipeline %d seeked to offset %ld (table-based)",
+                 (int)consumer->pipeline_id, (long)offset);
+        }
+        PG_CATCH();
+        {
+            SPI_finish();
+            PG_RE_THROW();
+        }
+        PG_END_TRY();
+    }
 #endif
 
     return true;

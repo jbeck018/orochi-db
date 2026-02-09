@@ -3,14 +3,18 @@ package provisioner
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
 	pb "github.com/orochi-db/orochi-db/services/control-plane/api/proto"
 	"github.com/orochi-db/orochi-db/services/control-plane/pkg/config"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 )
@@ -59,8 +63,40 @@ func (c *Client) connect() error {
 	}
 
 	if c.config.TLSEnabled && !c.config.Insecure {
-		// TODO: Add TLS credentials
-		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		tlsConfig := &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		}
+
+		// Load client certificate if provided
+		if c.config.TLSCertFile != "" && c.config.TLSKeyFile != "" {
+			cert, err := tls.LoadX509KeyPair(c.config.TLSCertFile, c.config.TLSKeyFile)
+			if err != nil {
+				return fmt.Errorf("failed to load TLS client cert/key: %w", err)
+			}
+			tlsConfig.Certificates = []tls.Certificate{cert}
+		}
+
+		// Load CA certificate if provided
+		if c.config.TLSCAFile != "" {
+			caCert, err := os.ReadFile(c.config.TLSCAFile)
+			if err != nil {
+				return fmt.Errorf("failed to read TLS CA file: %w", err)
+			}
+			certPool := x509.NewCertPool()
+			if !certPool.AppendCertsFromPEM(caCert) {
+				return fmt.Errorf("failed to parse TLS CA certificate")
+			}
+			tlsConfig.RootCAs = certPool
+		}
+
+		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
+	} else if c.config.TLSEnabled && c.config.Insecure {
+		// TLS with skip-verify for development
+		tlsConfig := &tls.Config{
+			InsecureSkipVerify: true, //nolint:gosec // intentional for dev
+			MinVersion:         tls.VersionTLS12,
+		}
+		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	} else {
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}

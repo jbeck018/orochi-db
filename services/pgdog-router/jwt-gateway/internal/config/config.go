@@ -66,6 +66,9 @@ type JWTConfig struct {
 	// PublicKeyURL is the URL to fetch the public key from.
 	PublicKeyURL string `yaml:"public_key_url"`
 
+	// HMACSecretPath is the file path to the HMAC secret for HS256/HS384/HS512.
+	HMACSecretPath string `yaml:"hmac_secret_path"`
+
 	// Issuer is the expected token issuer.
 	Issuer string `yaml:"issuer"`
 
@@ -334,6 +337,9 @@ func LoadFromEnv(config *Config) {
 	if v := os.Getenv("JWT_GATEWAY_PUBLIC_KEY_URL"); v != "" {
 		config.JWT.PublicKeyURL = v
 	}
+	if v := os.Getenv("JWT_GATEWAY_HMAC_SECRET_PATH"); v != "" {
+		config.JWT.HMACSecretPath = v
+	}
 	if v := os.Getenv("JWT_GATEWAY_ISSUER"); v != "" {
 		config.JWT.Issuer = v
 	}
@@ -483,8 +489,8 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("server.listen_addr is required")
 	}
 
-	if c.JWT.PublicKeyPath == "" && c.JWT.PublicKeyURL == "" {
-		return fmt.Errorf("jwt.public_key_path or jwt.public_key_url is required")
+	if c.JWT.PublicKeyPath == "" && c.JWT.PublicKeyURL == "" && c.JWT.HMACSecretPath == "" {
+		return fmt.Errorf("jwt.public_key_path, jwt.public_key_url, or jwt.hmac_secret_path is required")
 	}
 
 	// Backend is required when SNI routing is disabled

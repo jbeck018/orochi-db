@@ -3,9 +3,14 @@ package proxy
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/md5"
+	cryptorand "crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -881,12 +886,31 @@ func (p *Proxy) handleBackendAuth(conn net.Conn, logger *slog.Logger) error {
 				}
 
 			case authTypeMD5Password:
-				// MD5 auth not implemented - would need salt from body[4:8]
-				return errors.New("MD5 authentication not supported")
+				// MD5 auth: send md5(md5(password + user) + salt)
+				if len(body) < 8 {
+					return errors.New("MD5 auth: invalid salt length")
+				}
+				salt := body[4:8]
+				password := p.config.Backend.Password
+				user := p.config.Backend.Username
+
+				// Step 1: md5(password + user)
+				inner := md5.Sum([]byte(password + user))
+				innerHex := hex.EncodeToString(inner[:])
+
+				// Step 2: md5(inner_hex + salt)
+				outer := md5.Sum(append([]byte(innerHex), salt...))
+				md5Password := "md5" + hex.EncodeToString(outer[:])
+
+				if err := p.sendPassword(conn, md5Password); err != nil {
+					return err
+				}
 
 			case authTypeSASL:
-				// SASL auth not implemented
-				return errors.New("SASL authentication not supported")
+				// SASL/SCRAM-SHA-256 authentication
+				if err := p.handleSASLAuth(conn, body); err != nil {
+					return fmt.Errorf("SASL auth failed: %w", err)
+				}
 
 			default:
 				return fmt.Errorf("unsupported auth type: %d", authType)
@@ -923,6 +947,306 @@ func (p *Proxy) sendPassword(conn net.Conn, password string) error {
 
 	_, err := conn.Write(msg)
 	return err
+}
+
+// handleSASLAuth implements SCRAM-SHA-256 SASL authentication with the backend.
+func (p *Proxy) handleSASLAuth(conn net.Conn, initialBody []byte) error {
+	password := p.config.Backend.Password
+
+	// Parse supported mechanisms from the initial SASL message
+	mechanisms := parseSASLMechanisms(initialBody[4:])
+	if !containsMechanism(mechanisms, "SCRAM-SHA-256") {
+		return errors.New("server does not support SCRAM-SHA-256")
+	}
+
+	// Generate client nonce
+	nonce := make([]byte, 18)
+	if _, err := cryptorand.Read(nonce); err != nil {
+		return fmt.Errorf("failed to generate nonce: %w", err)
+	}
+	clientNonce := hex.EncodeToString(nonce)
+
+	// Send SASLInitialResponse
+	clientFirstBare := fmt.Sprintf("n=,r=%s", clientNonce)
+	clientFirstMsg := fmt.Sprintf("n,,%s", clientFirstBare)
+
+	if err := p.sendSASLInitialResponse(conn, "SCRAM-SHA-256", []byte(clientFirstMsg)); err != nil {
+		return err
+	}
+
+	// Read SASLContinue (AuthenticationSASLContinue = 11)
+	serverFirstMsg, err := p.readSASLResponse(conn, 11)
+	if err != nil {
+		return fmt.Errorf("reading SASL continue: %w", err)
+	}
+
+	// Parse server-first-message: r=<nonce>,s=<salt>,i=<iterations>
+	serverParams := parseSASLServerFirst(string(serverFirstMsg))
+	if serverParams.nonce == "" || serverParams.salt == nil || serverParams.iterations == 0 {
+		return errors.New("invalid server-first-message")
+	}
+
+	// Verify server nonce starts with our client nonce
+	if len(serverParams.nonce) < len(clientNonce) || serverParams.nonce[:len(clientNonce)] != clientNonce {
+		return errors.New("server nonce does not start with client nonce")
+	}
+
+	// Compute SCRAM-SHA-256 proof
+	saltedPassword := derivePBKDF2([]byte(password), serverParams.salt, serverParams.iterations, 32)
+
+	clientKey := computeHMAC(saltedPassword, []byte("Client Key"))
+	storedKey := sha256.Sum256(clientKey)
+
+	channelBinding := "biws" // base64("n,,")
+	clientFinalNoProof := fmt.Sprintf("c=%s,r=%s", channelBinding, serverParams.nonce)
+
+	authMessage := fmt.Sprintf("%s,%s,%s", clientFirstBare, string(serverFirstMsg), clientFinalNoProof)
+
+	clientSignature := computeHMAC(storedKey[:], []byte(authMessage))
+
+	clientProof := make([]byte, len(clientKey))
+	for i := range clientKey {
+		clientProof[i] = clientKey[i] ^ clientSignature[i]
+	}
+
+	// Send client-final-message
+	clientFinalMsg := fmt.Sprintf("%s,p=%s", clientFinalNoProof, base64Encode(clientProof))
+
+	if err := p.sendSASLResponse(conn, []byte(clientFinalMsg)); err != nil {
+		return err
+	}
+
+	// Read SASLFinal (AuthenticationSASLFinal = 12)
+	_, err = p.readSASLResponse(conn, 12)
+	if err != nil {
+		return fmt.Errorf("reading SASL final: %w", err)
+	}
+
+	return nil
+}
+
+// sendSASLInitialResponse sends a SASLInitialResponse message.
+func (p *Proxy) sendSASLInitialResponse(conn net.Conn, mechanism string, data []byte) error {
+	mechBytes := []byte(mechanism)
+	// 'p' + length + mechanism + null + data_length + data
+	totalLen := 4 + len(mechBytes) + 1 + 4 + len(data)
+	msg := make([]byte, 1+totalLen)
+	msg[0] = msgTypePasswordMessage
+	binary.BigEndian.PutUint32(msg[1:5], uint32(totalLen))
+	copy(msg[5:], mechBytes)
+	msg[5+len(mechBytes)] = 0
+	binary.BigEndian.PutUint32(msg[5+len(mechBytes)+1:], uint32(len(data)))
+	copy(msg[5+len(mechBytes)+1+4:], data)
+	_, err := conn.Write(msg)
+	return err
+}
+
+// sendSASLResponse sends a SASLResponse message.
+func (p *Proxy) sendSASLResponse(conn net.Conn, data []byte) error {
+	totalLen := 4 + len(data)
+	msg := make([]byte, 1+totalLen)
+	msg[0] = msgTypePasswordMessage
+	binary.BigEndian.PutUint32(msg[1:5], uint32(totalLen))
+	copy(msg[5:], data)
+	_, err := conn.Write(msg)
+	return err
+}
+
+// readSASLResponse reads a SASL response message from the backend.
+func (p *Proxy) readSASLResponse(conn net.Conn, expectedAuthType int) ([]byte, error) {
+	msgType := make([]byte, 1)
+	if _, err := io.ReadFull(conn, msgType); err != nil {
+		return nil, err
+	}
+
+	lenBuf := make([]byte, 4)
+	if _, err := io.ReadFull(conn, lenBuf); err != nil {
+		return nil, err
+	}
+	length := int(binary.BigEndian.Uint32(lenBuf)) - 4
+
+	body := make([]byte, length)
+	if length > 0 {
+		if _, err := io.ReadFull(conn, body); err != nil {
+			return nil, err
+		}
+	}
+
+	if msgType[0] == msgTypeError {
+		return nil, fmt.Errorf("backend error: %s", parseErrorMessage(body))
+	}
+
+	if msgType[0] != msgTypeAuthentication {
+		return nil, fmt.Errorf("expected authentication message, got %c", msgType[0])
+	}
+
+	authType := int(binary.BigEndian.Uint32(body[0:4]))
+	if authType != expectedAuthType {
+		if authType == authTypeOK {
+			return nil, nil // auth completed early
+		}
+		return nil, fmt.Errorf("expected auth type %d, got %d", expectedAuthType, authType)
+	}
+
+	return body[4:], nil
+}
+
+type saslServerParams struct {
+	nonce      string
+	salt       []byte
+	iterations int
+}
+
+func parseSASLMechanisms(data []byte) []string {
+	var mechanisms []string
+	for len(data) > 0 {
+		idx := 0
+		for idx < len(data) && data[idx] != 0 {
+			idx++
+		}
+		if idx > 0 {
+			mechanisms = append(mechanisms, string(data[:idx]))
+		}
+		if idx < len(data) {
+			data = data[idx+1:]
+		} else {
+			break
+		}
+	}
+	return mechanisms
+}
+
+func containsMechanism(mechanisms []string, target string) bool {
+	for _, m := range mechanisms {
+		if m == target {
+			return true
+		}
+	}
+	return false
+}
+
+func parseSASLServerFirst(msg string) saslServerParams {
+	var params saslServerParams
+	for _, part := range splitSASL(msg) {
+		if len(part) < 2 {
+			continue
+		}
+		switch part[0] {
+		case 'r':
+			params.nonce = part[2:]
+		case 's':
+			params.salt, _ = base64Decode(part[2:])
+		case 'i':
+			fmt.Sscanf(part[2:], "%d", &params.iterations)
+		}
+	}
+	return params
+}
+
+func splitSASL(s string) []string {
+	var parts []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == ',' {
+			parts = append(parts, s[start:i])
+			start = i + 1
+		}
+	}
+	if start < len(s) {
+		parts = append(parts, s[start:])
+	}
+	return parts
+}
+
+// derivePBKDF2 implements PBKDF2 with HMAC-SHA256 (RFC 2898).
+func derivePBKDF2(password, salt []byte, iterations, keyLen int) []byte {
+	dk := make([]byte, 0, keyLen)
+	block := 1
+	for len(dk) < keyLen {
+		// U1 = PRF(password, salt || INT_32_BE(block))
+		u := make([]byte, len(salt)+4)
+		copy(u, salt)
+		u[len(salt)] = byte(block >> 24)
+		u[len(salt)+1] = byte(block >> 16)
+		u[len(salt)+2] = byte(block >> 8)
+		u[len(salt)+3] = byte(block)
+
+		prev := computeHMAC(password, u)
+		result := make([]byte, len(prev))
+		copy(result, prev)
+
+		for i := 1; i < iterations; i++ {
+			prev = computeHMAC(password, prev)
+			for j := range result {
+				result[j] ^= prev[j]
+			}
+		}
+
+		dk = append(dk, result...)
+		block++
+	}
+	return dk[:keyLen]
+}
+
+func computeHMAC(key, data []byte) []byte {
+	mac := hmac.New(sha256.New, key)
+	mac.Write(data)
+	return mac.Sum(nil)
+}
+
+func base64Encode(data []byte) string {
+	const encoder = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+	result := make([]byte, 0, (len(data)+2)/3*4)
+	for i := 0; i < len(data); i += 3 {
+		var n uint32
+		remaining := len(data) - i
+		switch remaining {
+		default:
+			n = uint32(data[i])<<16 | uint32(data[i+1])<<8 | uint32(data[i+2])
+			result = append(result, encoder[n>>18&0x3F], encoder[n>>12&0x3F], encoder[n>>6&0x3F], encoder[n&0x3F])
+		case 2:
+			n = uint32(data[i])<<16 | uint32(data[i+1])<<8
+			result = append(result, encoder[n>>18&0x3F], encoder[n>>12&0x3F], encoder[n>>6&0x3F], '=')
+		case 1:
+			n = uint32(data[i]) << 16
+			result = append(result, encoder[n>>18&0x3F], encoder[n>>12&0x3F], '=', '=')
+		}
+	}
+	return string(result)
+}
+
+func base64Decode(s string) ([]byte, error) {
+	const decoder = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+	lookup := [256]byte{}
+	for i := range lookup {
+		lookup[i] = 0xFF
+	}
+	for i, c := range decoder {
+		lookup[c] = byte(i)
+	}
+
+	// Remove padding
+	for len(s) > 0 && s[len(s)-1] == '=' {
+		s = s[:len(s)-1]
+	}
+
+	result := make([]byte, 0, len(s)*3/4)
+	buf := uint32(0)
+	bits := 0
+	for _, c := range []byte(s) {
+		val := lookup[c]
+		if val == 0xFF {
+			return nil, fmt.Errorf("invalid base64 character: %c", c)
+		}
+		buf = buf<<6 | uint32(val)
+		bits += 6
+		if bits >= 8 {
+			bits -= 8
+			result = append(result, byte(buf>>bits))
+			buf &= (1 << bits) - 1
+		}
+	}
+	return result, nil
 }
 
 // sendAuthOK sends authentication OK to the client.

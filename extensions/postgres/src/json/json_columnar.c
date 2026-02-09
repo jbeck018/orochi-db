@@ -1526,7 +1526,7 @@ Datum orochi_json_enable_hybrid(PG_FUNCTION_ARGS)
 }
 
 /* ============================================================
- * Hybrid Storage Implementation Stubs
+ * Hybrid Storage Implementation
  * ============================================================ */
 
 void json_columnar_enable_hybrid(Oid table_oid, int16 source_attnum, const char **columnar_paths,

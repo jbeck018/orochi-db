@@ -40,7 +40,7 @@ calculate_part_size(int64_t total_size)
 {
     size_t part_size;
 
-    if (total_size <= S3_MULTIPART_THRESHOLD)
+    if (total_size < S3_MULTIPART_THRESHOLD)
         return 0;  /* Don't use multipart */
 
     /* Calculate part size to stay under max parts */
@@ -134,11 +134,15 @@ extract_etag_from_xml(const char *xml_data)
     if (etag_end == NULL)
         return NULL;
 
-    /* Remove quotes if present */
+    /* Remove quotes if present (literal " or &quot; HTML entity) */
     if (*etag_start == '"')
         etag_start++;
-    if (*(etag_end - 1) == '"')
+    else if (strncmp(etag_start, "&quot;", 6) == 0)
+        etag_start += 6;
+    if (etag_end > etag_start && *(etag_end - 1) == '"')
         etag_end--;
+    else if (etag_end - etag_start >= 6 && strncmp(etag_end - 6, "&quot;", 6) == 0)
+        etag_end -= 6;
 
     etag_len = etag_end - etag_start;
     etag = palloc(etag_len + 1);
@@ -493,9 +497,8 @@ static void test_extract_etag_with_html_entities(void)
         char *etag = extract_etag_from_xml(xml);
 
         TEST_ASSERT_NOT_NULL(etag);
-        /* Parser removes literal quote characters, not HTML entities */
-        /* This tests actual behavior */
-        TEST_ASSERT_EQ(0, strcmp(etag, "&quot;abc123&quot;"));
+        /* Parser strips &quot; HTML entities (same as literal quotes) */
+        TEST_ASSERT_STR_EQ("abc123", etag);
 
         pfree(etag);
     TEST_END();

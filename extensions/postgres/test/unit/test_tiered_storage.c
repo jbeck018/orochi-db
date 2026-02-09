@@ -228,12 +228,12 @@ static void test_chunk_header_magic_number(void)
         header.magic = CHUNK_MAGIC;
         TEST_ASSERT_EQ(0x4F524F43, header.magic);
 
-        /* Verify as bytes */
+        /* Verify as bytes (little-endian: 0x4F524F43 -> 43,4F,52,4F) */
         unsigned char *bytes = (unsigned char *)&header.magic;
-        TEST_ASSERT_EQ('C', bytes[0]);  /* Little-endian */
-        TEST_ASSERT_EQ('R', bytes[1]);
-        TEST_ASSERT_EQ('O', bytes[2]);
-        TEST_ASSERT_EQ('O', bytes[3]);
+        TEST_ASSERT_EQ('C', bytes[0]);  /* 0x43 */
+        TEST_ASSERT_EQ('O', bytes[1]);  /* 0x4F */
+        TEST_ASSERT_EQ('R', bytes[2]);  /* 0x52 */
+        TEST_ASSERT_EQ('O', bytes[3]);  /* 0x4F */
     TEST_END();
 }
 
@@ -260,8 +260,8 @@ static void test_checksum_empty_data(void)
         unsigned char data[1] = {0};
         uint32_t checksum = calculate_crc32(data, 0);
 
-        /* Empty data should have consistent checksum */
-        TEST_ASSERT_EQ(0xFFFFFFFF, checksum);
+        /* CRC32 of empty data: init 0xFFFFFFFF, no iterations, ~0xFFFFFFFF = 0 */
+        TEST_ASSERT_EQ(0x00000000, checksum);
     TEST_END();
 }
 
@@ -480,11 +480,24 @@ static void test_zstd_compress_decompress_roundtrip(void)
 static void test_zstd_better_compression_than_lz4(void)
 {
     TEST_BEGIN("zstd_better_compression_than_lz4")
-        /* Create somewhat repetitive data */
-        size_t input_size = 8192;
+        /* Create data with repeated patterns that favors dictionary compression.
+         * ZSTD excels with longer repeated sequences and cross-distance matches. */
+        size_t input_size = 32768;
         char *input = palloc(input_size);
-        for (size_t i = 0; i < input_size; i++)
-            input[i] = (char)((i % 256) < 128 ? 'A' : 'B');
+        const char *phrases[] = {
+            "the quick brown fox jumps over the lazy dog ",
+            "pack my box with five dozen liquor jugs now ",
+            "how vexingly quick daft zebras jump forward ",
+        };
+        size_t offset = 0;
+        for (size_t i = 0; offset < input_size; i++)
+        {
+            const char *p = phrases[i % 3];
+            size_t plen = strlen(p);
+            size_t to_copy = (offset + plen <= input_size) ? plen : input_size - offset;
+            memcpy(input + offset, p, to_copy);
+            offset += to_copy;
+        }
 
         /* Compress with LZ4 */
         size_t lz4_max = LZ4_compressBound(input_size);
@@ -498,7 +511,7 @@ static void test_zstd_better_compression_than_lz4(void)
         size_t zstd_size = compress_zstd(input, input_size, zstd_compressed, zstd_max);
         TEST_ASSERT_FALSE(ZSTD_isError(zstd_size));
 
-        /* ZSTD should typically achieve better compression */
+        /* ZSTD should achieve better or equal compression on text-like data */
         TEST_ASSERT_LTE(zstd_size, lz4_size);
 
         pfree(input);

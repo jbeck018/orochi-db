@@ -6,12 +6,6 @@
  * Tests HyperLogLog, T-Digest, and Sampling implementations
  * without requiring PostgreSQL infrastructure.
  *
- * Compile with:
- *   gcc -o test_approx test_approx.c -lm -I../../src/approx
- *
- * Run with:
- *   ./test_approx
- *
  * Copyright (c) 2024, Orochi DB Contributors
  *
  *-------------------------------------------------------------------------
@@ -26,41 +20,8 @@
 #include <time.h>
 #include <float.h>
 
-/* ============================================================
- * Test Framework (Minimal standalone implementation)
- * ============================================================ */
-
-static int tests_run = 0;
-static int tests_passed = 0;
-static int tests_failed = 0;
-
-#define TEST_ASSERT(condition, message) do { \
-    tests_run++; \
-    if (condition) { \
-        tests_passed++; \
-        printf("  [PASS] %s\n", message); \
-    } else { \
-        tests_failed++; \
-        printf("  [FAIL] %s (at line %d)\n", message, __LINE__); \
-    } \
-} while(0)
-
-#define TEST_ASSERT_NEAR(actual, expected, tolerance, message) do { \
-    tests_run++; \
-    double _a = (actual); \
-    double _e = (expected); \
-    double _t = (tolerance); \
-    if (fabs(_a - _e) <= _t) { \
-        tests_passed++; \
-        printf("  [PASS] %s (%.6f ~ %.6f)\n", message, _a, _e); \
-    } else { \
-        tests_failed++; \
-        printf("  [FAIL] %s (got %.6f, expected %.6f +/- %.6f, at line %d)\n", \
-               message, _a, _e, _t, __LINE__); \
-    } \
-} while(0)
-
-#define TEST_SECTION(name) printf("\n=== %s ===\n", name)
+#include "test_framework.h"
+#include "mocks/postgres_mock.h"
 
 /* ============================================================
  * Standalone implementations for testing
@@ -141,25 +102,26 @@ static uint64_t murmurhash3_64_test(const void *key, size_t len, uint32_t seed)
 
     switch (len & 15)
     {
-        case 15: k2 ^= ((uint64_t)tail[14]) << 48;
-        case 14: k2 ^= ((uint64_t)tail[13]) << 40;
-        case 13: k2 ^= ((uint64_t)tail[12]) << 32;
-        case 12: k2 ^= ((uint64_t)tail[11]) << 24;
-        case 11: k2 ^= ((uint64_t)tail[10]) << 16;
-        case 10: k2 ^= ((uint64_t)tail[9]) << 8;
+        case 15: k2 ^= ((uint64_t)tail[14]) << 48; /* fallthrough */
+        case 14: k2 ^= ((uint64_t)tail[13]) << 40; /* fallthrough */
+        case 13: k2 ^= ((uint64_t)tail[12]) << 32; /* fallthrough */
+        case 12: k2 ^= ((uint64_t)tail[11]) << 24; /* fallthrough */
+        case 11: k2 ^= ((uint64_t)tail[10]) << 16; /* fallthrough */
+        case 10: k2 ^= ((uint64_t)tail[9]) << 8;   /* fallthrough */
         case 9:  k2 ^= ((uint64_t)tail[8]) << 0;
                  k2 *= c2;
                  k2 = rotl64_test(k2, 33);
                  k2 *= c1;
                  h2 ^= k2;
+                 /* fallthrough */
 
-        case 8:  k1 ^= ((uint64_t)tail[7]) << 56;
-        case 7:  k1 ^= ((uint64_t)tail[6]) << 48;
-        case 6:  k1 ^= ((uint64_t)tail[5]) << 40;
-        case 5:  k1 ^= ((uint64_t)tail[4]) << 32;
-        case 4:  k1 ^= ((uint64_t)tail[3]) << 24;
-        case 3:  k1 ^= ((uint64_t)tail[2]) << 16;
-        case 2:  k1 ^= ((uint64_t)tail[1]) << 8;
+        case 8:  k1 ^= ((uint64_t)tail[7]) << 56; /* fallthrough */
+        case 7:  k1 ^= ((uint64_t)tail[6]) << 48; /* fallthrough */
+        case 6:  k1 ^= ((uint64_t)tail[5]) << 40; /* fallthrough */
+        case 5:  k1 ^= ((uint64_t)tail[4]) << 32; /* fallthrough */
+        case 4:  k1 ^= ((uint64_t)tail[3]) << 24; /* fallthrough */
+        case 3:  k1 ^= ((uint64_t)tail[2]) << 16; /* fallthrough */
+        case 2:  k1 ^= ((uint64_t)tail[1]) << 8;  /* fallthrough */
         case 1:  k1 ^= ((uint64_t)tail[0]) << 0;
                  k1 *= c1;
                  k1 = rotl64_test(k1, 31);
@@ -239,7 +201,6 @@ static void test_hll_add_hash(TestHLL *hll, uint64_t hash)
 {
     uint32_t idx;
     uint8_t rank;
-    int num_registers = HLL_REGISTERS(hll->precision);
 
     /* Use top p bits as bucket index */
     idx = hash >> (64 - hll->precision);
@@ -615,479 +576,416 @@ static int64_t test_random_int(int64_t n)
 
 static void test_hll_basic(void)
 {
-    TEST_SECTION("HyperLogLog Basic Operations");
+    TEST_BEGIN("hll_creation_and_basic_ops")
+        TestHLL *hll = test_hll_create(14);
+        TEST_ASSERT_NOT_NULL(hll);
+        TEST_ASSERT_EQ(14, hll->precision);
+        TEST_ASSERT_EQ(0, test_hll_count(hll));
 
-    TestHLL *hll = test_hll_create(14);
-    TEST_ASSERT(hll != NULL, "HLL creation succeeds");
-    TEST_ASSERT(hll->precision == 14, "HLL precision is 14");
-    TEST_ASSERT(test_hll_count(hll) == 0, "Empty HLL has count 0");
+        test_hll_add(hll, "hello", 5);
+        TEST_ASSERT_EQ(1, hll->total_count);
 
-    test_hll_add(hll, "hello", 5);
-    TEST_ASSERT(hll->total_count == 1, "HLL records one addition");
+        test_hll_add(hll, "world", 5);
+        TEST_ASSERT_EQ(2, hll->total_count);
 
-    test_hll_add(hll, "world", 5);
-    TEST_ASSERT(hll->total_count == 2, "HLL records two additions");
-
-    test_hll_free(hll);
+        test_hll_free(hll);
+    TEST_END();
 }
 
 static void test_hll_accuracy(void)
 {
-    TEST_SECTION("HyperLogLog Cardinality Accuracy");
-
-    /* Test with various cardinalities */
     int test_sizes[] = {100, 1000, 10000, 100000};
     int num_tests = sizeof(test_sizes) / sizeof(test_sizes[0]);
 
     for (int t = 0; t < num_tests; t++)
     {
-        int actual_count = test_sizes[t];
-        TestHLL *hll = test_hll_create(14);
+        TEST_BEGIN("hll_cardinality_accuracy")
+            int actual_count = test_sizes[t];
+            TestHLL *hll = test_hll_create(14);
 
-        /* Add unique integers */
-        for (int i = 0; i < actual_count; i++)
-        {
-            test_hll_add(hll, &i, sizeof(i));
-        }
+            for (int i = 0; i < actual_count; i++)
+            {
+                test_hll_add(hll, &i, sizeof(i));
+            }
 
-        int64_t estimated = test_hll_count(hll);
-        double error = fabs((double)(estimated - actual_count)) / (double)actual_count;
+            int64_t estimated = test_hll_count(hll);
+            double error = fabs((double)(estimated - actual_count)) / (double)actual_count;
+            double expected_error = test_hll_error_rate(14);
+            double tolerance = 3.0 * expected_error;
 
-        /* Expected error rate for precision 14 is ~0.8% (1.04/sqrt(16384)) */
-        /* Allow up to 3 standard errors (3 * 0.8% = 2.4%) for test reliability */
-        double expected_error = test_hll_error_rate(14);
-        double tolerance = 3.0 * expected_error;  /* ~2.4% */
+            TEST_ASSERT_MSG(error <= tolerance, "HLL error within tolerance");
 
-        char msg[256];
-        snprintf(msg, sizeof(msg), "HLL accuracy for %d items: error=%.2f%% (tolerance=%.2f%%)",
-                 actual_count, error * 100, tolerance * 100);
-
-        TEST_ASSERT(error <= tolerance, msg);
-
-        test_hll_free(hll);
+            test_hll_free(hll);
+        TEST_END();
     }
 }
 
 static void test_hll_duplicates(void)
 {
-    TEST_SECTION("HyperLogLog Duplicate Handling");
+    TEST_BEGIN("hll_duplicate_handling")
+        TestHLL *hll = test_hll_create(14);
 
-    TestHLL *hll = test_hll_create(14);
+        for (int i = 0; i < 10000; i++)
+        {
+            int val = 42;
+            test_hll_add(hll, &val, sizeof(val));
+        }
 
-    /* Add the same value many times */
-    for (int i = 0; i < 10000; i++)
-    {
-        int val = 42;
-        test_hll_add(hll, &val, sizeof(val));
-    }
+        int64_t count = test_hll_count(hll);
+        TEST_ASSERT_MSG(count <= 5, "HLL handles duplicates correctly");
 
-    int64_t count = test_hll_count(hll);
-
-    /* Should estimate close to 1 distinct value */
-    TEST_ASSERT(count <= 5, "HLL handles duplicates correctly (estimated <= 5 for single distinct)");
-
-    test_hll_free(hll);
+        test_hll_free(hll);
+    TEST_END();
 }
 
 static void test_hll_merge(void)
 {
-    TEST_SECTION("HyperLogLog Merge Operations");
+    TEST_BEGIN("hll_merge_disjoint_sets")
+        TestHLL *hll1 = test_hll_create(14);
+        TestHLL *hll2 = test_hll_create(14);
 
-    TestHLL *hll1 = test_hll_create(14);
-    TestHLL *hll2 = test_hll_create(14);
-
-    /* Add disjoint sets */
-    for (int i = 0; i < 5000; i++)
-    {
-        test_hll_add(hll1, &i, sizeof(i));
-    }
-
-    for (int i = 5000; i < 10000; i++)
-    {
-        test_hll_add(hll2, &i, sizeof(i));
-    }
-
-    /* Merge manually (take max of registers) */
-    TestHLL *merged = test_hll_create(14);
-    int num_regs = HLL_REGISTERS(14);
-    for (int i = 0; i < num_regs; i++)
-    {
-        merged->registers[i] = (hll1->registers[i] > hll2->registers[i]) ?
-                               hll1->registers[i] : hll2->registers[i];
-    }
-
-    int64_t count = test_hll_count(merged);
-    double error = fabs((double)(count - 10000)) / 10000.0;
-
-    char msg[256];
-    snprintf(msg, sizeof(msg), "Merged HLL accuracy: estimated=%ld, error=%.2f%%",
-             count, error * 100);
-    TEST_ASSERT(error <= 0.05, msg);  /* 5% tolerance for merged */
-
-    test_hll_free(hll1);
-    test_hll_free(hll2);
-    test_hll_free(merged);
-}
-
-static void test_tdigest_basic(void)
-{
-    TEST_SECTION("T-Digest Basic Operations");
-
-    TestTDigest *td = test_tdigest_create(100);
-    TEST_ASSERT(td != NULL, "T-Digest creation succeeds");
-    TEST_ASSERT(td->compression == 100.0, "T-Digest compression is 100");
-
-    test_tdigest_add(td, 1.0);
-    test_tdigest_add(td, 2.0);
-    test_tdigest_add(td, 3.0);
-
-    test_tdigest_compress(td);
-    TEST_ASSERT(td->total_weight == 3, "T-Digest records 3 items");
-
-    TEST_ASSERT_NEAR(td->min_value, 1.0, 0.001, "T-Digest min is 1.0");
-    TEST_ASSERT_NEAR(td->max_value, 3.0, 0.001, "T-Digest max is 3.0");
-
-    test_tdigest_free(td);
-}
-
-static void test_tdigest_quantile_accuracy(void)
-{
-    TEST_SECTION("T-Digest Percentile Accuracy");
-
-    /* Create uniform distribution [0, 1000) */
-    TestTDigest *td = test_tdigest_create(100);
-
-    for (int i = 0; i < 10000; i++)
-    {
-        test_tdigest_add(td, (double)i / 10.0);  /* Values from 0 to 999.9 */
-    }
-
-    /* Test various percentiles */
-    double test_quantiles[] = {0.01, 0.05, 0.25, 0.50, 0.75, 0.95, 0.99};
-    int num_q = sizeof(test_quantiles) / sizeof(test_quantiles[0]);
-
-    for (int i = 0; i < num_q; i++)
-    {
-        double q = test_quantiles[i];
-        double expected = q * 1000.0;  /* For uniform [0, 1000) */
-        double actual = test_tdigest_quantile(td, q);
-
-        /* T-Digest should be accurate within ~1% of range at extreme quantiles
-         * and ~2-3% near median */
-        double tolerance;
-        if (q <= 0.05 || q >= 0.95)
-            tolerance = 20.0;  /* 2% of 1000 for tails */
-        else
-            tolerance = 50.0;  /* 5% of 1000 for middle */
-
-        char msg[256];
-        snprintf(msg, sizeof(msg), "T-Digest q=%.2f: expected=%.1f, actual=%.1f",
-                 q, expected, actual);
-        TEST_ASSERT_NEAR(actual, expected, tolerance, msg);
-    }
-
-    test_tdigest_free(td);
-}
-
-static void test_tdigest_merge(void)
-{
-    TEST_SECTION("T-Digest Merge Operations");
-
-    TestTDigest *td1 = test_tdigest_create(100);
-    TestTDigest *td2 = test_tdigest_create(100);
-
-    /* Add different distributions */
-    for (int i = 0; i < 5000; i++)
-    {
-        test_tdigest_add(td1, (double)i);  /* 0-4999 */
-    }
-
-    for (int i = 5000; i < 10000; i++)
-    {
-        test_tdigest_add(td2, (double)i);  /* 5000-9999 */
-    }
-
-    /* Create merged digest */
-    TestTDigest *merged = test_tdigest_create(100);
-    test_tdigest_compress(td1);
-    test_tdigest_compress(td2);
-
-    /* Add all centroids from both */
-    for (int i = 0; i < td1->num_centroids; i++)
-    {
-        for (int j = 0; j < (int)td1->centroids[i].weight; j++)
-            test_tdigest_add(merged, td1->centroids[i].mean);
-    }
-    for (int i = 0; i < td2->num_centroids; i++)
-    {
-        for (int j = 0; j < (int)td2->centroids[i].weight; j++)
-            test_tdigest_add(merged, td2->centroids[i].mean);
-    }
-
-    double median = test_tdigest_quantile(merged, 0.5);
-    /* Median of 0-9999 should be around 5000 */
-    TEST_ASSERT_NEAR(median, 5000.0, 300.0, "Merged T-Digest median accuracy");
-
-    test_tdigest_free(td1);
-    test_tdigest_free(td2);
-    test_tdigest_free(merged);
-}
-
-static void test_tdigest_edge_cases(void)
-{
-    TEST_SECTION("T-Digest Edge Cases");
-
-    TestTDigest *td = test_tdigest_create(100);
-
-    /* Single value */
-    test_tdigest_add(td, 42.0);
-    double q50 = test_tdigest_quantile(td, 0.5);
-    TEST_ASSERT_NEAR(q50, 42.0, 0.001, "Single value median is the value itself");
-
-    /* Two values */
-    test_tdigest_add(td, 100.0);
-    q50 = test_tdigest_quantile(td, 0.5);
-    TEST_ASSERT(q50 >= 42.0 && q50 <= 100.0, "Two values: median between values");
-
-    test_tdigest_free(td);
-
-    /* Empty digest */
-    td = test_tdigest_create(100);
-    double empty_q = test_tdigest_quantile(td, 0.5);
-    TEST_ASSERT(isnan(empty_q), "Empty T-Digest quantile returns NaN");
-
-    test_tdigest_free(td);
-}
-
-static void test_sampling_uniformity(void)
-{
-    TEST_SECTION("Sampling Uniformity");
-
-    /* Initialize RNG with known seed for reproducibility */
-    test_rng_init(12345);
-
-    /* Test random double distribution */
-    int num_samples = 100000;
-    int buckets[10] = {0};
-
-    for (int i = 0; i < num_samples; i++)
-    {
-        double r = test_random_double();
-        int bucket = (int)(r * 10);
-        if (bucket >= 10) bucket = 9;
-        buckets[bucket]++;
-    }
-
-    /* Each bucket should have ~10% of samples */
-    double expected = num_samples / 10.0;
-    bool uniform = true;
-
-    for (int i = 0; i < 10; i++)
-    {
-        double ratio = (double)buckets[i] / expected;
-        /* Allow 5% deviation from expected */
-        if (ratio < 0.90 || ratio > 1.10)
+        for (int i = 0; i < 5000; i++)
         {
-            uniform = false;
-            printf("    Bucket %d: got %d, expected %.0f (ratio=%.3f)\n",
-                   i, buckets[i], expected, ratio);
+            test_hll_add(hll1, &i, sizeof(i));
         }
-    }
 
-    TEST_ASSERT(uniform, "Random double distribution is uniform across buckets");
-}
-
-static void test_sampling_random_int(void)
-{
-    TEST_SECTION("Random Integer Generation");
-
-    test_rng_init(54321);
-
-    /* Test random int distribution for small n */
-    int n = 6;
-    int counts[6] = {0};
-    int num_samples = 60000;
-
-    for (int i = 0; i < num_samples; i++)
-    {
-        int64_t r = test_random_int(n);
-        if (r >= 0 && r < n)
-            counts[r]++;
-    }
-
-    double expected = num_samples / (double)n;
-    bool uniform = true;
-
-    for (int i = 0; i < n; i++)
-    {
-        double ratio = (double)counts[i] / expected;
-        if (ratio < 0.90 || ratio > 1.10)
+        for (int i = 5000; i < 10000; i++)
         {
-            uniform = false;
-            printf("    Value %d: got %d, expected %.0f (ratio=%.3f)\n",
-                   i, counts[i], expected, ratio);
+            test_hll_add(hll2, &i, sizeof(i));
         }
-    }
 
-    TEST_ASSERT(uniform, "Random int distribution is uniform");
-
-    /* Test edge cases */
-    TEST_ASSERT(test_random_int(0) == 0, "random_int(0) returns 0");
-    TEST_ASSERT(test_random_int(1) == 0, "random_int(1) returns 0");
-}
-
-static void test_reservoir_sampling(void)
-{
-    TEST_SECTION("Reservoir Sampling");
-
-    test_rng_init(98765);
-
-    /* Simple reservoir sampling simulation */
-    int reservoir_size = 100;
-    int stream_size = 10000;
-    int *reservoir = malloc(reservoir_size * sizeof(int));
-
-    for (int i = 0; i < stream_size; i++)
-    {
-        if (i < reservoir_size)
+        TestHLL *merged = test_hll_create(14);
+        int num_regs = HLL_REGISTERS(14);
+        for (int i = 0; i < num_regs; i++)
         {
-            reservoir[i] = i;
+            merged->registers[i] = (hll1->registers[i] > hll2->registers[i]) ?
+                                   hll1->registers[i] : hll2->registers[i];
         }
-        else
-        {
-            int64_t j = test_random_int(i + 1);
-            if (j < reservoir_size)
-                reservoir[j] = i;
-        }
-    }
 
-    /* Check that reservoir contains values from across the stream */
-    int early = 0, middle = 0, late = 0;
-    for (int i = 0; i < reservoir_size; i++)
-    {
-        if (reservoir[i] < stream_size / 3) early++;
-        else if (reservoir[i] < 2 * stream_size / 3) middle++;
-        else late++;
-    }
+        int64_t count = test_hll_count(merged);
+        double error = fabs((double)(count - 10000)) / 10000.0;
 
-    char msg[256];
-    snprintf(msg, sizeof(msg), "Reservoir distribution: early=%d, middle=%d, late=%d",
-             early, middle, late);
+        TEST_ASSERT_MSG(error <= 0.05, "Merged HLL accuracy within 5%");
 
-    /* Each third should have roughly 33 items (with some variance) */
-    bool balanced = (early >= 20 && early <= 50) &&
-                    (middle >= 20 && middle <= 50) &&
-                    (late >= 20 && late <= 50);
-
-    TEST_ASSERT(balanced, msg);
-
-    free(reservoir);
-}
-
-static void test_bernoulli_sampling(void)
-{
-    TEST_SECTION("Bernoulli Sampling");
-
-    test_rng_init(11111);
-
-    double probability = 0.1;  /* 10% */
-    int num_trials = 100000;
-    int selected = 0;
-
-    for (int i = 0; i < num_trials; i++)
-    {
-        if (test_random_double() < probability)
-            selected++;
-    }
-
-    double actual_rate = (double)selected / num_trials;
-    double error = fabs(actual_rate - probability);
-
-    char msg[256];
-    snprintf(msg, sizeof(msg), "Bernoulli sampling rate: expected=%.2f%%, actual=%.2f%%",
-             probability * 100, actual_rate * 100);
-
-    /* Allow 1% absolute deviation */
-    TEST_ASSERT(error < 0.01, msg);
+        test_hll_free(hll1);
+        test_hll_free(hll2);
+        test_hll_free(merged);
+    TEST_END();
 }
 
 static void test_hll_precision_levels(void)
 {
-    TEST_SECTION("HyperLogLog Precision Levels");
-
     uint8_t precisions[] = {4, 8, 12, 14, 16};
     int num_precisions = sizeof(precisions) / sizeof(precisions[0]);
     int test_count = 10000;
 
     for (int p = 0; p < num_precisions; p++)
     {
-        uint8_t precision = precisions[p];
-        TestHLL *hll = test_hll_create(precision);
+        TEST_BEGIN("hll_precision_level")
+            uint8_t precision = precisions[p];
+            TestHLL *hll = test_hll_create(precision);
 
-        for (int i = 0; i < test_count; i++)
+            for (int i = 0; i < test_count; i++)
+            {
+                test_hll_add(hll, &i, sizeof(i));
+            }
+
+            int64_t estimated = test_hll_count(hll);
+            double error = fabs((double)(estimated - test_count)) / test_count;
+            double expected_error = test_hll_error_rate(precision);
+
+            TEST_ASSERT_MSG(error <= 5.0 * expected_error, "HLL precision error within bounds");
+
+            test_hll_free(hll);
+        TEST_END();
+    }
+}
+
+static void test_tdigest_basic(void)
+{
+    TEST_BEGIN("tdigest_creation_and_basic_ops")
+        TestTDigest *td = test_tdigest_create(100);
+        TEST_ASSERT_NOT_NULL(td);
+        TEST_ASSERT_NEAR(100.0, td->compression, 0.001);
+
+        test_tdigest_add(td, 1.0);
+        test_tdigest_add(td, 2.0);
+        test_tdigest_add(td, 3.0);
+
+        test_tdigest_compress(td);
+        TEST_ASSERT_EQ(3, td->total_weight);
+
+        TEST_ASSERT_NEAR(1.0, td->min_value, 0.001);
+        TEST_ASSERT_NEAR(3.0, td->max_value, 0.001);
+
+        test_tdigest_free(td);
+    TEST_END();
+}
+
+static void test_tdigest_quantile_accuracy(void)
+{
+    TEST_BEGIN("tdigest_percentile_accuracy")
+        TestTDigest *td = test_tdigest_create(100);
+
+        for (int i = 0; i < 10000; i++)
         {
-            test_hll_add(hll, &i, sizeof(i));
+            test_tdigest_add(td, (double)i / 10.0);
         }
 
-        int64_t estimated = test_hll_count(hll);
-        double error = fabs((double)(estimated - test_count)) / test_count;
-        double expected_error = test_hll_error_rate(precision);
+        double test_quantiles[] = {0.01, 0.05, 0.25, 0.50, 0.75, 0.95, 0.99};
+        int num_q = sizeof(test_quantiles) / sizeof(test_quantiles[0]);
 
-        char msg[256];
-        snprintf(msg, sizeof(msg), "HLL precision=%d: error=%.2f%%, expected=%.2f%%",
-                 precision, error * 100, expected_error * 100);
+        bool all_accurate = true;
+        for (int i = 0; i < num_q; i++)
+        {
+            double q = test_quantiles[i];
+            double expected = q * 1000.0;
+            double actual = test_tdigest_quantile(td, q);
 
-        /* Higher precision should have lower error */
-        TEST_ASSERT(error <= 5.0 * expected_error, msg);
+            double tolerance;
+            if (q <= 0.05 || q >= 0.95)
+                tolerance = 20.0;
+            else
+                tolerance = 50.0;
 
-        test_hll_free(hll);
-    }
+            if (fabs(actual - expected) > tolerance)
+                all_accurate = false;
+        }
+
+        TEST_ASSERT_MSG(all_accurate, "T-Digest quantiles within tolerance");
+
+        test_tdigest_free(td);
+    TEST_END();
+}
+
+static void test_tdigest_merge(void)
+{
+    TEST_BEGIN("tdigest_merge_disjoint_ranges")
+        TestTDigest *td1 = test_tdigest_create(100);
+        TestTDigest *td2 = test_tdigest_create(100);
+
+        for (int i = 0; i < 5000; i++)
+        {
+            test_tdigest_add(td1, (double)i);
+        }
+
+        for (int i = 5000; i < 10000; i++)
+        {
+            test_tdigest_add(td2, (double)i);
+        }
+
+        TestTDigest *merged = test_tdigest_create(100);
+        test_tdigest_compress(td1);
+        test_tdigest_compress(td2);
+
+        for (int i = 0; i < td1->num_centroids; i++)
+        {
+            for (int j = 0; j < (int)td1->centroids[i].weight; j++)
+                test_tdigest_add(merged, td1->centroids[i].mean);
+        }
+        for (int i = 0; i < td2->num_centroids; i++)
+        {
+            for (int j = 0; j < (int)td2->centroids[i].weight; j++)
+                test_tdigest_add(merged, td2->centroids[i].mean);
+        }
+
+        double median = test_tdigest_quantile(merged, 0.5);
+        TEST_ASSERT_NEAR(5000.0, median, 300.0);
+
+        test_tdigest_free(td1);
+        test_tdigest_free(td2);
+        test_tdigest_free(merged);
+    TEST_END();
+}
+
+static void test_tdigest_edge_cases(void)
+{
+    TEST_BEGIN("tdigest_single_value")
+        TestTDigest *td = test_tdigest_create(100);
+        test_tdigest_add(td, 42.0);
+        double q50 = test_tdigest_quantile(td, 0.5);
+        TEST_ASSERT_NEAR(42.0, q50, 0.001);
+        test_tdigest_free(td);
+    TEST_END();
+
+    TEST_BEGIN("tdigest_two_values")
+        TestTDigest *td = test_tdigest_create(100);
+        test_tdigest_add(td, 42.0);
+        test_tdigest_add(td, 100.0);
+        double q50 = test_tdigest_quantile(td, 0.5);
+        TEST_ASSERT_MSG(q50 >= 42.0 && q50 <= 100.0, "Two values: median between values");
+        test_tdigest_free(td);
+    TEST_END();
+
+    TEST_BEGIN("tdigest_empty_returns_nan")
+        TestTDigest *td = test_tdigest_create(100);
+        double empty_q = test_tdigest_quantile(td, 0.5);
+        TEST_ASSERT_MSG(isnan(empty_q), "Empty T-Digest quantile returns NaN");
+        test_tdigest_free(td);
+    TEST_END();
 }
 
 static void test_tdigest_compression_levels(void)
 {
-    TEST_SECTION("T-Digest Compression Levels");
-
     double compressions[] = {25.0, 50.0, 100.0, 200.0};
     int num_compressions = sizeof(compressions) / sizeof(compressions[0]);
     int test_count = 10000;
 
     for (int c = 0; c < num_compressions; c++)
     {
-        TestTDigest *td = test_tdigest_create(compressions[c]);
+        TEST_BEGIN("tdigest_compression_level")
+            TestTDigest *td = test_tdigest_create(compressions[c]);
 
-        /* Add uniform distribution */
-        for (int i = 0; i < test_count; i++)
-        {
-            test_tdigest_add(td, (double)i);
-        }
+            for (int i = 0; i < test_count; i++)
+            {
+                test_tdigest_add(td, (double)i);
+            }
 
-        /* Test median accuracy */
-        double expected_median = (test_count - 1) / 2.0;
-        double actual_median = test_tdigest_quantile(td, 0.5);
-        double error = fabs(actual_median - expected_median) / test_count;
+            double expected_median = (test_count - 1) / 2.0;
+            double actual_median = test_tdigest_quantile(td, 0.5);
+            double error = fabs(actual_median - expected_median) / test_count;
 
-        char msg[256];
-        snprintf(msg, sizeof(msg), "T-Digest compression=%.0f: median error=%.2f%%",
-                 compressions[c], error * 100);
+            TEST_ASSERT_MSG(error <= 0.05, "T-Digest compression median within 5%");
 
-        /* Higher compression should generally have lower error */
-        TEST_ASSERT(error <= 0.05, msg);  /* 5% tolerance */
-
-        test_tdigest_free(td);
+            test_tdigest_free(td);
+        TEST_END();
     }
 }
 
+static void test_sampling_uniformity(void)
+{
+    TEST_BEGIN("sampling_uniformity")
+        test_rng_init(12345);
+
+        int num_samples = 100000;
+        int buckets[10] = {0};
+
+        for (int i = 0; i < num_samples; i++)
+        {
+            double r = test_random_double();
+            int bucket = (int)(r * 10);
+            if (bucket >= 10) bucket = 9;
+            buckets[bucket]++;
+        }
+
+        double expected = num_samples / 10.0;
+        bool uniform = true;
+
+        for (int i = 0; i < 10; i++)
+        {
+            double ratio = (double)buckets[i] / expected;
+            if (ratio < 0.90 || ratio > 1.10)
+                uniform = false;
+        }
+
+        TEST_ASSERT_MSG(uniform, "Random double distribution is uniform across buckets");
+    TEST_END();
+}
+
+static void test_sampling_random_int(void)
+{
+    TEST_BEGIN("sampling_random_int_uniformity")
+        test_rng_init(54321);
+
+        int n = 6;
+        int counts[6] = {0};
+        int num_samples = 60000;
+
+        for (int i = 0; i < num_samples; i++)
+        {
+            int64_t r = test_random_int(n);
+            if (r >= 0 && r < n)
+                counts[r]++;
+        }
+
+        double expected = num_samples / (double)n;
+        bool uniform = true;
+
+        for (int i = 0; i < n; i++)
+        {
+            double ratio = (double)counts[i] / expected;
+            if (ratio < 0.90 || ratio > 1.10)
+                uniform = false;
+        }
+
+        TEST_ASSERT_MSG(uniform, "Random int distribution is uniform");
+    TEST_END();
+
+    TEST_BEGIN("sampling_random_int_edge_cases")
+        TEST_ASSERT_EQ(0, test_random_int(0));
+        TEST_ASSERT_EQ(0, test_random_int(1));
+    TEST_END();
+}
+
+static void test_reservoir_sampling(void)
+{
+    TEST_BEGIN("reservoir_sampling_coverage")
+        test_rng_init(98765);
+
+        int reservoir_size = 100;
+        int stream_size = 10000;
+        int *reservoir = malloc(reservoir_size * sizeof(int));
+
+        for (int i = 0; i < stream_size; i++)
+        {
+            if (i < reservoir_size)
+            {
+                reservoir[i] = i;
+            }
+            else
+            {
+                int64_t j = test_random_int(i + 1);
+                if (j < reservoir_size)
+                    reservoir[j] = i;
+            }
+        }
+
+        int early = 0, middle = 0, late = 0;
+        for (int i = 0; i < reservoir_size; i++)
+        {
+            if (reservoir[i] < stream_size / 3) early++;
+            else if (reservoir[i] < 2 * stream_size / 3) middle++;
+            else late++;
+        }
+
+        bool balanced = (early >= 20 && early <= 50) &&
+                        (middle >= 20 && middle <= 50) &&
+                        (late >= 20 && late <= 50);
+
+        TEST_ASSERT_MSG(balanced, "Reservoir sampling covers all stream regions");
+
+        free(reservoir);
+    TEST_END();
+}
+
+static void test_bernoulli_sampling(void)
+{
+    TEST_BEGIN("bernoulli_sampling_rate")
+        test_rng_init(11111);
+
+        double probability = 0.1;
+        int num_trials = 100000;
+        int selected = 0;
+
+        for (int i = 0; i < num_trials; i++)
+        {
+            if (test_random_double() < probability)
+                selected++;
+        }
+
+        double actual_rate = (double)selected / num_trials;
+        double error = fabs(actual_rate - probability);
+
+        TEST_ASSERT_MSG(error < 0.01, "Bernoulli sampling rate within 1%");
+    TEST_END();
+}
+
 /* ============================================================
- * Main Test Runner
+ * Test Suite Entry Point
  * ============================================================ */
 
-int main(int argc, char *argv[])
+void test_approx(void)
 {
-    printf("==============================================\n");
-    printf("  Orochi DB Approximate Algorithms Test Suite\n");
-    printf("==============================================\n");
-
     /* HyperLogLog Tests */
     test_hll_basic();
     test_hll_accuracy();
@@ -1107,15 +1005,4 @@ int main(int argc, char *argv[])
     test_sampling_random_int();
     test_reservoir_sampling();
     test_bernoulli_sampling();
-
-    /* Summary */
-    printf("\n==============================================\n");
-    printf("  Test Summary\n");
-    printf("==============================================\n");
-    printf("  Total:  %d\n", tests_run);
-    printf("  Passed: %d\n", tests_passed);
-    printf("  Failed: %d\n", tests_failed);
-    printf("==============================================\n");
-
-    return tests_failed > 0 ? 1 : 0;
 }

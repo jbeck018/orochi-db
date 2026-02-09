@@ -339,8 +339,8 @@ static void test_url_encode_special_chars(void)
 
         TEST_ASSERT_NOT_NULL(encoded);
         /* = and & should be encoded */
-        TEST_ASSERT_EQ(0, strstr(encoded, "%3D") != NULL);  /* = */
-        TEST_ASSERT_EQ(0, strstr(encoded, "%26") != NULL);  /* & */
+        TEST_ASSERT_TRUE(strstr(encoded, "%3D") != NULL);  /* = */
+        TEST_ASSERT_TRUE(strstr(encoded, "%26") != NULL);  /* & */
 
         pfree(encoded);
     TEST_END();

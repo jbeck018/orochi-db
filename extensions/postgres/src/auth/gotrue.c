@@ -437,17 +437,29 @@ OrochiAuthUser *orochi_auth_create_user(const char *email, const char *phone, co
         ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("failed to connect to SPI")));
 
     initStringInfo(&query);
-    appendStringInfo(&query,
-                     "INSERT INTO auth.users "
-                     "(email, phone, encrypted_password, raw_user_meta_data, "
-                     "raw_app_meta_data, role, is_anonymous, created_at, updated_at) "
-                     "VALUES (%s, %s, %s, %s, "
-                     "'{}', 'authenticated', FALSE, NOW(), NOW()) "
-                     "RETURNING id, email, phone, role, created_at",
-                     email ? quote_literal_cstr(email) : "NULL",
-                     phone ? quote_literal_cstr(phone) : "NULL",
-                     encrypted_password ? quote_literal_cstr(encrypted_password) : "NULL",
-                     user_metadata ? "'{}'" : "'{}'"); /* TODO: proper JSONB serialization */
+    {
+        char *metadata_str;
+
+        if (user_metadata != NULL) {
+            Datum jsonb_text = DirectFunctionCall1(jsonb_out,
+                                                    JsonbPGetDatum(user_metadata));
+            metadata_str = quote_literal_cstr(DatumGetCString(jsonb_text));
+        } else {
+            metadata_str = "'{}'";
+        }
+
+        appendStringInfo(&query,
+                         "INSERT INTO auth.users "
+                         "(email, phone, encrypted_password, raw_user_meta_data, "
+                         "raw_app_meta_data, role, is_anonymous, created_at, updated_at) "
+                         "VALUES (%s, %s, %s, %s::jsonb, "
+                         "'{}', 'authenticated', FALSE, NOW(), NOW()) "
+                         "RETURNING id, email, phone, role, created_at",
+                         email ? quote_literal_cstr(email) : "NULL",
+                         phone ? quote_literal_cstr(phone) : "NULL",
+                         encrypted_password ? quote_literal_cstr(encrypted_password) : "NULL",
+                         metadata_str);
+    }
 
     ret = SPI_execute(query.data, false, 0);
 

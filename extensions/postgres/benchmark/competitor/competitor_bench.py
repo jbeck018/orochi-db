@@ -417,15 +417,29 @@ class BenchmarkRunner:
         return metrics, result.stdout
 
     def _run_tpch(self, target: str, config: Dict) -> tuple:
-        """Run TPC-H benchmark."""
-        # TPC-H implementation would go here
-        # For now, return placeholder
-        metrics = {
-            'scale_factor': 1,
-            'total_time_seconds': 0,
-            'query_times': {}
-        }
-        return metrics, "TPC-H benchmark placeholder"
+        """Run TPC-H benchmark suite."""
+        script_path = os.path.join(os.path.dirname(__file__), 'tpch_wrapper.sh')
+
+        env = os.environ.copy()
+        env.update({
+            'PGHOST': config.get('host', 'localhost'),
+            'PGPORT': str(config.get('port', 5432)),
+            'PGDATABASE': config.get('database', 'orochi_bench'),
+            'PGUSER': config.get('user', 'postgres'),
+            'TPCH_SCALE': str(config.get('scale_factor', 1)),
+            'TPCH_QUERIES_DIR': os.path.join(os.path.dirname(__file__), '..', 'tpch', 'queries'),
+        })
+
+        result = subprocess.run(
+            ['bash', script_path],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=3600  # 1 hour timeout
+        )
+
+        metrics = self._parse_tpch_output(result.stdout)
+        return metrics, result.stdout
 
     def _run_tsbs(self, target: str, config: Dict) -> tuple:
         """Run TSBS benchmark using wrapper script."""
@@ -517,6 +531,33 @@ class BenchmarkRunner:
                     pass
 
         return metrics
+
+    def _parse_tpch_output(self, output: str) -> Dict:
+        """Parse TPC-H wrapper script output."""
+        results = {}
+        total_time_ms = 0
+        query_count = 0
+
+        for line in output.strip().split('\n'):
+            if line.startswith('QUERY:'):
+                parts = line.split(':')
+                if len(parts) >= 3:
+                    query_name = parts[1]
+                    time_ms = float(parts[2])
+                    results[query_name] = {
+                        'time_ms': time_ms,
+                        'status': 'ok' if time_ms >= 0 else 'error'
+                    }
+                    if time_ms >= 0:
+                        total_time_ms += time_ms
+                        query_count += 1
+
+        return {
+            'scale_factor': 1,
+            'total_time_seconds': total_time_ms / 1000.0,
+            'query_count': query_count,
+            'query_times': results
+        }
 
     def _parse_tsbs_output(self, output: str) -> Dict:
         """Parse TSBS benchmark output."""

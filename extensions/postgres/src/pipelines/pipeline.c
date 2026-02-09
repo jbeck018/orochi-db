@@ -1290,45 +1290,28 @@ PipelineFormat pipeline_parse_format(const char *name)
  * Batch Insert Functions
  * ============================================================ */
 
+#define PIPELINE_BATCH_SIZE 500
+
 /*
- * pipeline_insert_batch
- *    Insert a batch of records into the target table
- *    Records is a List of char* (JSON strings)
- *    Returns the number of rows successfully inserted
+ * pipeline_insert_batch_spi
+ *    Insert records one at a time using SPI parameterized queries.
+ *    Used as fallback when batch insert is not requested.
  */
-int64 pipeline_insert_batch(Pipeline *pipeline, List *records, bool use_copy)
+static int64
+pipeline_insert_batch_spi(Pipeline *pipeline, List *records, const char *relname)
 {
     ListCell *lc;
     int64 inserted = 0;
-    char *relname;
-    Oid argtypes[1] = { JSONBOID };
+    Oid argtypes[1] = {JSONBOID};
     StringInfoData query;
 
-    if (pipeline == NULL || records == NIL)
-        return 0;
-
-    /*
-     * For now, use simple INSERT statements with parameterized queries.
-     * TODO: Implement COPY protocol for better performance when use_copy is true
-     */
-    if (SPI_connect() != SPI_OK_CONNECT) {
-        elog(WARNING, "pipeline_insert_batch: failed to connect to SPI");
-        return 0;
-    }
-
-    relname = get_rel_name(pipeline->target_table_oid);
-    if (relname == NULL) {
-        elog(WARNING, "pipeline_insert_batch: target table not found");
-        SPI_finish();
-        return 0;
-    }
-
-    /* Build parameterized INSERT query */
     initStringInfo(&query);
-    appendStringInfo(&query, "INSERT INTO %s SELECT * FROM jsonb_populate_record(NULL::%s, $1)",
+    appendStringInfo(&query,
+                     "INSERT INTO %s SELECT * FROM jsonb_populate_record(NULL::%s, $1)",
                      quote_identifier(relname), quote_identifier(relname));
 
-    foreach (lc, records) {
+    foreach (lc, records)
+    {
         char *record_json = (char *)lfirst(lc);
         Datum argvals[1];
         Jsonb *jb;
@@ -1337,28 +1320,158 @@ int64 pipeline_insert_batch(Pipeline *pipeline, List *records, bool use_copy)
         if (record_json == NULL || record_json[0] == '\0')
             continue;
 
-        /* Convert JSON string to jsonb datum */
         PG_TRY();
         {
-            jb = DatumGetJsonbP(DirectFunctionCall1(jsonb_in, CStringGetDatum(record_json)));
+            jb = DatumGetJsonbP(
+                DirectFunctionCall1(jsonb_in, CStringGetDatum(record_json)));
             argvals[0] = JsonbPGetDatum(jb);
 
-            ret = SPI_execute_with_args(query.data, 1, argtypes, argvals, NULL, false, 0);
+            ret = SPI_execute_with_args(query.data, 1, argtypes, argvals, NULL,
+                                        false, 0);
             if (ret == SPI_OK_INSERT)
                 inserted++;
             else
-                elog(DEBUG1, "pipeline_insert_batch: insert failed for record");
+                elog(DEBUG1, "pipeline_insert_batch_spi: insert failed for record");
         }
         PG_CATCH();
         {
-            /* Log and continue on error */
-            elog(DEBUG1, "pipeline_insert_batch: failed to parse/insert record");
+            elog(DEBUG1, "pipeline_insert_batch_spi: failed to parse/insert record");
             FlushErrorState();
         }
         PG_END_TRY();
     }
 
     pfree(query.data);
+    return inserted;
+}
+
+/*
+ * pipeline_insert_batch_copy
+ *    Insert records in batches using multi-VALUES INSERT for better performance.
+ *    Falls back to row-by-row for any batch that fails.
+ */
+static int64
+pipeline_insert_batch_copy(Pipeline *pipeline, List *records, const char *relname)
+{
+    int64 inserted = 0;
+    int batch_count = 0;
+    StringInfoData batch_query;
+    List *current_batch = NIL;
+    ListCell *lc;
+
+    initStringInfo(&batch_query);
+
+    foreach (lc, records)
+    {
+        char *record_json = (char *)lfirst(lc);
+
+        if (record_json == NULL || record_json[0] == '\0')
+            continue;
+
+        current_batch = lappend(current_batch, record_json);
+        batch_count++;
+
+        if (batch_count >= PIPELINE_BATCH_SIZE || lnext(records, lc) == NULL)
+        {
+            ListCell *blc;
+            int ret;
+            bool batch_ok = true;
+
+            /* Build: INSERT INTO tbl
+             *   SELECT * FROM jsonb_populate_record(NULL::tbl, v.j)
+             *   FROM (VALUES (cast1), (cast2), ...) AS v(j) */
+            resetStringInfo(&batch_query);
+            appendStringInfo(
+                &batch_query,
+                "INSERT INTO %s SELECT * FROM jsonb_populate_record(NULL::%s, v.j) "
+                "FROM (VALUES ",
+                quote_identifier(relname), quote_identifier(relname));
+
+            {
+                bool first = true;
+                foreach (blc, current_batch)
+                {
+                    char *json = (char *)lfirst(blc);
+                    if (!first)
+                        appendStringInfoString(&batch_query, ", ");
+                    first = false;
+                    appendStringInfoChar(&batch_query, '(');
+                    appendStringInfoString(&batch_query,
+                                           quote_literal_cstr(json));
+                    appendStringInfoString(&batch_query, "::jsonb)");
+                }
+            }
+            appendStringInfoString(&batch_query, ") AS v(j)");
+
+            PG_TRY();
+            {
+                ret = SPI_execute(batch_query.data, false, 0);
+                if (ret == SPI_OK_INSERT)
+                    inserted += SPI_processed;
+                else
+                    batch_ok = false;
+            }
+            PG_CATCH();
+            {
+                FlushErrorState();
+                batch_ok = false;
+            }
+            PG_END_TRY();
+
+            /* If batch failed, fall back to row-by-row for this batch */
+            if (!batch_ok)
+            {
+                elog(DEBUG1, "pipeline_insert_batch_copy: batch failed, "
+                             "falling back to row-by-row");
+                inserted += pipeline_insert_batch_spi(pipeline, current_batch,
+                                                      relname);
+            }
+
+            list_free(current_batch);
+            current_batch = NIL;
+            batch_count = 0;
+        }
+    }
+
+    pfree(batch_query.data);
+    return inserted;
+}
+
+/*
+ * pipeline_insert_batch
+ *    Insert a batch of records into the target table.
+ *    Records is a List of char* (JSON strings).
+ *    When use_copy is true, uses batched multi-VALUES inserts for performance.
+ *    Returns the number of rows successfully inserted.
+ */
+int64
+pipeline_insert_batch(Pipeline *pipeline, List *records, bool use_copy)
+{
+    int64 inserted;
+    char *relname;
+
+    if (pipeline == NULL || records == NIL)
+        return 0;
+
+    if (SPI_connect() != SPI_OK_CONNECT)
+    {
+        elog(WARNING, "pipeline_insert_batch: failed to connect to SPI");
+        return 0;
+    }
+
+    relname = get_rel_name(pipeline->target_table_oid);
+    if (relname == NULL)
+    {
+        elog(WARNING, "pipeline_insert_batch: target table not found");
+        SPI_finish();
+        return 0;
+    }
+
+    if (use_copy)
+        inserted = pipeline_insert_batch_copy(pipeline, records, relname);
+    else
+        inserted = pipeline_insert_batch_spi(pipeline, records, relname);
+
     SPI_finish();
 
     return inserted;

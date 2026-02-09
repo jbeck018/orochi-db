@@ -20,11 +20,12 @@ commonAnnotations:
 namespace: orochi-cloud
 
 # Resources to include
+# NOTE: secret.yaml is a template only. Real secrets are deployed via deploy-secrets.sh
 resources:
   - deployment.yaml
   - service.yaml
   - configmap.yaml
-  - secret.yaml
+  # - secret.yaml  # Secrets managed via deploy-secrets.sh (never committed with real values)
   - pdb.yaml
   - hpa.yaml
   - networkpolicy.yaml

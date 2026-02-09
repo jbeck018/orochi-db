@@ -6,7 +6,7 @@
  * This module handles:
  *   - Parsing CREATE TASK statements
  *   - Storing task definitions in catalog
- *   - Task scheduling and execution (stub)
+ *   - Task scheduling and execution
  *
  * Copyright (c) 2024, Orochi DB Contributors
  *

@@ -1955,7 +1955,7 @@ List *orochi_catalog_get_table_stripes(Oid table_oid)
 }
 
 /* ============================================================
- * Missing catalog function implementations (stubs/minimal)
+ * Additional catalog query functions
  * ============================================================ */
 
 OrochiTableInfo *orochi_catalog_get_table_by_name(const char *schema, const char *table)

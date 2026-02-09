@@ -35,7 +35,11 @@ TEST_SRCS = run_tests.c \
             test_branch_access.c \
             test_tiered_storage.c \
             test_s3_multipart.c \
-            test_s3_operations.c
+            test_s3_operations.c \
+            test_s3_functions.c \
+            test_approx.c \
+            test_vectorized.c \
+            test_compression.c
 
 # Object files for tests
 TEST_OBJS = $(TEST_SRCS:.c=.o)
@@ -123,7 +127,13 @@ test_branch_access.o: test_branch_access.c test_framework.h mocks/postgres_mock.
 test_tiered_storage.o: test_tiered_storage.c test_framework.h mocks/postgres_mock.h
 test_s3_multipart.o: test_s3_multipart.c test_framework.h mocks/postgres_mock.h
 test_s3_operations.o: test_s3_operations.c test_framework.h mocks/postgres_mock.h
+test_s3_functions.o: test_s3_functions.c test_framework.h mocks/postgres_mock.h
 
-# Additional test files (add as implemented)
-# test_hyperloglog.o: test_hyperloglog.c test_framework.h mocks/postgres_mock.h
-# test_tdigest.o: test_tdigest.c test_framework.h mocks/postgres_mock.h
+# Approximate algorithms test files
+test_approx.o: test_approx.c test_framework.h mocks/postgres_mock.h
+
+# Vectorized execution test files
+test_vectorized.o: test_vectorized.c test_framework.h mocks/postgres_mock.h
+
+# Compression test files
+test_compression.o: test_compression.c test_framework.h mocks/postgres_mock.h

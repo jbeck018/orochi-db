@@ -2,6 +2,7 @@
 package auth
 
 import (
+	"bytes"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
@@ -35,8 +36,11 @@ var (
 	// ErrMissingClaims is returned when required claims are missing.
 	ErrMissingClaims = errors.New("missing required claims")
 
-	// ErrPublicKeyNotLoaded is returned when attempting to validate without a key.
-	ErrPublicKeyNotLoaded = errors.New("public key not loaded")
+	// ErrKeyNotLoaded is returned when attempting to validate without a key.
+	ErrKeyNotLoaded = errors.New("signing key not loaded")
+
+	// ErrPublicKeyNotLoaded is an alias for backward compatibility.
+	ErrPublicKeyNotLoaded = ErrKeyNotLoaded
 )
 
 // ValidatorConfig holds configuration for JWT validation.
@@ -46,6 +50,11 @@ type ValidatorConfig struct {
 
 	// PublicKeyURL is an HTTP(S) URL to fetch the public key from.
 	PublicKeyURL string
+
+	// HMACSecretPath is the file path to the HMAC secret for HS256/HS384/HS512.
+	// When set, the validator accepts HMAC-signed tokens in addition to (or
+	// instead of) RSA-signed tokens.
+	HMACSecretPath string
 
 	// Issuer is the expected "iss" claim value.
 	Issuer string
@@ -66,11 +75,12 @@ type ValidatorConfig struct {
 	KeyRefreshInterval time.Duration
 }
 
-// Validator validates JWT tokens using RS256.
+// Validator validates JWT tokens using RS256 or HS256.
 type Validator struct {
-	config    ValidatorConfig
-	publicKey *rsa.PublicKey
-	keyMutex  sync.RWMutex
+	config     ValidatorConfig
+	publicKey  *rsa.PublicKey
+	hmacSecret []byte
+	keyMutex   sync.RWMutex
 
 	cache      map[string]*cacheEntry
 	cacheMutex sync.RWMutex
@@ -91,9 +101,9 @@ func NewValidator(config ValidatorConfig) (*Validator, error) {
 		stopChan: make(chan struct{}),
 	}
 
-	// Load initial public key
-	if err := v.loadPublicKey(); err != nil {
-		return nil, fmt.Errorf("failed to load public key: %w", err)
+	// Load signing keys
+	if err := v.loadKeys(); err != nil {
+		return nil, fmt.Errorf("failed to load signing keys: %w", err)
 	}
 
 	// Start key refresh goroutine if using URL
@@ -105,6 +115,48 @@ func NewValidator(config ValidatorConfig) (*Validator, error) {
 	go v.cacheCleanupLoop()
 
 	return v, nil
+}
+
+// loadKeys loads RSA public key and/or HMAC secret.
+func (v *Validator) loadKeys() error {
+	hasRSA := false
+	hasHMAC := false
+
+	// Load HMAC secret if configured
+	if v.config.HMACSecretPath != "" {
+		secretData, err := os.ReadFile(v.config.HMACSecretPath)
+		if err != nil {
+			return fmt.Errorf("failed to read HMAC secret file: %w", err)
+		}
+		secret := bytes.TrimSpace(secretData)
+		if len(secret) == 0 {
+			return errors.New("HMAC secret file is empty")
+		}
+		v.keyMutex.Lock()
+		v.hmacSecret = secret
+		v.keyMutex.Unlock()
+		hasHMAC = true
+	}
+
+	// Load RSA public key if configured
+	if v.config.PublicKeyPath != "" || v.config.PublicKeyURL != "" {
+		if err := v.loadPublicKey(); err != nil {
+			// If HMAC is available, RSA failure is non-fatal
+			if hasHMAC {
+				fmt.Printf("Warning: RSA key load failed (HMAC available): %v\n", err)
+			} else {
+				return err
+			}
+		} else {
+			hasRSA = true
+		}
+	}
+
+	if !hasRSA && !hasHMAC {
+		return errors.New("no signing key configured: set PublicKeyPath/PublicKeyURL for RSA or HMACSecretPath for HMAC")
+	}
+
+	return nil
 }
 
 // loadPublicKey loads the RSA public key from file or URL.
@@ -236,19 +288,29 @@ func (v *Validator) Validate(tokenString string) (*OrochiClaims, error) {
 
 	v.keyMutex.RLock()
 	publicKey := v.publicKey
+	hmacSecret := v.hmacSecret
 	v.keyMutex.RUnlock()
 
-	if publicKey == nil {
-		return nil, ErrPublicKeyNotLoaded
+	if publicKey == nil && len(hmacSecret) == 0 {
+		return nil, ErrKeyNotLoaded
 	}
 
 	// Parse and validate the token
 	token, err := jwt.ParseWithClaims(tokenString, &OrochiClaims{}, func(token *jwt.Token) (interface{}, error) {
-		// Verify signing method
-		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+		switch token.Method.(type) {
+		case *jwt.SigningMethodRSA:
+			if publicKey == nil {
+				return nil, errors.New("RSA token received but no public key configured")
+			}
+			return publicKey, nil
+		case *jwt.SigningMethodHMAC:
+			if len(hmacSecret) == 0 {
+				return nil, errors.New("HMAC token received but no HMAC secret configured")
+			}
+			return hmacSecret, nil
+		default:
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
-		return publicKey, nil
 	})
 
 	if err != nil {

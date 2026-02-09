@@ -52,12 +52,16 @@ extern void test_branch_access(void);
 extern void test_tiered_storage(void);
 extern void test_s3_multipart(void);
 extern void test_s3_operations(void);
+extern void test_s3_functions(void);
 
-/* Placeholder for future test suites - uncomment as implemented */
-/* extern void test_hyperloglog(void); */
-/* extern void test_tdigest(void); */
-/* extern void test_compression(void); */
-/* extern void test_vector_ops(void); */
+/* Approximate algorithms test suites */
+extern void test_approx(void);
+
+/* Vectorized execution test suites */
+extern void test_vectorized(void);
+
+/* Compression test suites */
+extern void test_compression(void);
 
 /* ============================================================
  * Run All Tests
@@ -86,13 +90,16 @@ static void run_all_tests(void)
     RUN_TEST_SUITE(test_tiered_storage);
     RUN_TEST_SUITE(test_s3_multipart);
     RUN_TEST_SUITE(test_s3_operations);
+    RUN_TEST_SUITE(test_s3_functions);
 
-    /* Add test suites here as they are implemented:
-     * RUN_TEST_SUITE(test_hyperloglog);
-     * RUN_TEST_SUITE(test_tdigest);
-     * RUN_TEST_SUITE(test_compression);
-     * RUN_TEST_SUITE(test_vector_ops);
-     */
+    /* Approximate algorithms test suites */
+    RUN_TEST_SUITE(test_approx);
+
+    /* Vectorized execution test suites */
+    RUN_TEST_SUITE(test_vectorized);
+
+    /* Compression test suites */
+    RUN_TEST_SUITE(test_compression);
 }
 
 /* ============================================================

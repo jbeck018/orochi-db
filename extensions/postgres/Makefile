@@ -24,7 +24,6 @@ OBJS = \
 	src/jit/jit_expr.o \
 	src/consensus/raft.o \
 	src/consensus/raft_log.o \
-	src/consensus/raft_stubs.o \
 	src/approx/hyperloglog.o \
 	src/approx/tdigest.o \
 	src/approx/sampling.o \
@@ -37,7 +36,34 @@ OBJS = \
 	src/ddl/ddl_stream.o \
 	src/ddl/ddl_task.o \
 	src/ddl/ddl_dynamic.o \
+	src/cdc/cdc.o \
+	src/cdc/cdc_sink.o \
+	src/pipelines/s3_source.o \
+	src/workload/resource_governor.o \
+	src/workload/workload.o \
+	src/auth/auth.o \
+	src/auth/jwt.o \
+	src/auth/jwt_claims.o \
+	src/auth/webauthn.o \
+	src/auth/magic_link.o \
+	src/auth/branch_access.o \
+	src/auth/anonymous_auth.o \
+	src/auth/role_mapping.o \
+	src/auth/auth_hooks.o \
+	src/auth/gotrue.o \
+	src/auth/auth_cache.o \
+	src/auth/endpoint_auth.o \
+	src/auth/auth_webhooks.o \
 	src/utils/utils.o
+
+# Raft: use full integration or stubs
+ifdef RAFT_INTEGRATION
+    OBJS += src/consensus/raft_integration.o
+    OBJS += src/consensus/raft_health_worker.o
+    OBJS += src/consensus/raft_compaction_worker.o
+else
+    OBJS += src/consensus/raft_stubs.o
+endif
 
 DATA = sql/orochi--1.0.sql sql/ddl.sql
 PGFILEDESC = "Orochi DB - Modern HTAP PostgreSQL Extension"
@@ -66,8 +92,35 @@ endif
 # Warnings
 PG_CFLAGS += -Wall -Wextra -Wno-unused-parameter
 
-# Link against compression libraries, OpenSSL (for S3 signing), Kafka, and libpq (for distributed queries)
-SHLIB_LINK = -llz4 -lzstd -lcurl -lssl -lcrypto -lrdkafka -lpq
+# Detect optional libraries
+HAVE_RDKAFKA := $(shell pkg-config --exists rdkafka 2>/dev/null && echo yes || echo no)
+ifeq ($(HAVE_RDKAFKA),yes)
+    PG_CFLAGS += -DHAVE_LIBRDKAFKA
+    SHLIB_LINK_RDKAFKA = $(shell pkg-config --libs rdkafka)
+else
+    HAVE_RDKAFKA := $(shell echo 'int main(){}' | $(CC) -lrdkafka -xc - -o /dev/null 2>/dev/null && echo yes || echo no)
+    ifeq ($(HAVE_RDKAFKA),yes)
+        PG_CFLAGS += -DHAVE_LIBRDKAFKA
+        SHLIB_LINK_RDKAFKA = -lrdkafka
+    endif
+endif
+
+HAVE_CURL := $(shell pkg-config --exists libcurl 2>/dev/null && echo yes || echo no)
+ifeq ($(HAVE_CURL),yes)
+    PG_CFLAGS += -DHAVE_LIBCURL
+    SHLIB_LINK_CURL = $(shell pkg-config --libs libcurl)
+else
+    HAVE_CURL := $(shell echo 'int main(){}' | $(CC) -lcurl -xc - -o /dev/null 2>/dev/null && echo yes || echo no)
+    ifeq ($(HAVE_CURL),yes)
+        PG_CFLAGS += -DHAVE_LIBCURL
+        SHLIB_LINK_CURL = -lcurl
+    endif
+endif
+
+# Core libraries (always required)
+SHLIB_LINK = -llz4 -lzstd -lssl -lcrypto -lpq
+# Optional libraries (appended by detection above)
+SHLIB_LINK += $(SHLIB_LINK_RDKAFKA) $(SHLIB_LINK_CURL)
 
 # Regression tests
 REGRESS = basic distributed hypertable columnar vector tiering json
@@ -86,7 +139,7 @@ MIN_PG_VERSION := 16
 MAX_PG_VERSION := 18
 
 # Additional targets
-.PHONY: format check-format lint test docs clean-all check-version
+.PHONY: format check-format lint test docs clean-all check-version info
 
 # Check PostgreSQL version compatibility
 check-version:
@@ -154,6 +207,16 @@ install-deps:
 		librdkafka-dev \
 		clang-format \
 		cppcheck
+
+# Print build configuration
+info:
+	@echo "Orochi DB Build Configuration"
+	@echo "=============================="
+	@echo "PostgreSQL:  $(PG_VERSION)"
+	@echo "librdkafka:  $(HAVE_RDKAFKA)"
+	@echo "libcurl:     $(HAVE_CURL)"
+	@echo "Debug:       $(if $(DEBUG),yes,no)"
+	@echo "OBJS count:  $(words $(OBJS))"
 
 # Create release tarball
 dist:

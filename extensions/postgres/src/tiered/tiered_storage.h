@@ -183,17 +183,10 @@ extern char *s3_multipart_upload_start(S3Client *client, const char *key);
 extern char *s3_multipart_upload_part_ex(S3Client *client, const char *key, const char *upload_id,
                                          int part_number, const char *data, int64 size);
 
-/* Legacy wrapper - returns bool but doesn't track ETags (deprecated) */
-extern bool s3_multipart_upload_part(S3Client *client, const char *key, const char *upload_id,
-                                     int part_number, const char *data, int64 size);
-
-/* Complete upload with parts array containing ETags - USE THIS */
+/* Complete upload with parts array containing ETags */
 extern bool s3_multipart_upload_complete_with_parts(S3Client *client, const char *key,
                                                     const char *upload_id, S3MultipartPart *parts,
                                                     int num_parts);
-
-/* Legacy - will fail without ETags (deprecated) */
-extern bool s3_multipart_upload_complete(S3Client *client, const char *key, const char *upload_id);
 
 extern void s3_multipart_upload_abort(S3Client *client, const char *key, const char *upload_id);
 

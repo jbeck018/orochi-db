@@ -57,6 +57,7 @@ func main() {
 	jwtValidator, err := auth.NewValidator(auth.ValidatorConfig{
 		PublicKeyPath:      cfg.JWT.PublicKeyPath,
 		PublicKeyURL:       cfg.JWT.PublicKeyURL,
+		HMACSecretPath:     cfg.JWT.HMACSecretPath,
 		Issuer:             cfg.JWT.Issuer,
 		Audience:           cfg.JWT.Audience,
 		RequireUserID:      cfg.JWT.RequireUserID,

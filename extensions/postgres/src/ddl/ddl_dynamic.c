@@ -6,7 +6,7 @@
  * This module handles:
  *   - Parsing CREATE DYNAMIC TABLE statements
  *   - Storing dynamic table definitions in catalog
- *   - Auto-refresh scheduling and execution (stub)
+ *   - Auto-refresh scheduling and execution
  *
  * Copyright (c) 2024, Orochi DB Contributors
  *

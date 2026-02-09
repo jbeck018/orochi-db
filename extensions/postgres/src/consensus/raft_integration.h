@@ -197,4 +197,29 @@ extern Datum orochi_raft_status(PG_FUNCTION_ARGS);
 extern Datum orochi_raft_leader(PG_FUNCTION_ARGS);
 extern Datum orochi_raft_cluster_info(PG_FUNCTION_ARGS);
 
+/* Raft cluster management SQL functions */
+extern Datum orochi_raft_step_down(PG_FUNCTION_ARGS);
+extern Datum orochi_raft_transfer_leadership(PG_FUNCTION_ARGS);
+extern Datum orochi_raft_add_node(PG_FUNCTION_ARGS);
+extern Datum orochi_raft_remove_node(PG_FUNCTION_ARGS);
+
+/* Raft state query SQL functions */
+extern Datum orochi_raft_is_leader_sql(PG_FUNCTION_ARGS);
+extern Datum orochi_raft_get_leader_sql(PG_FUNCTION_ARGS);
+extern Datum orochi_raft_status_sql(PG_FUNCTION_ARGS);
+
+/* Raft read path SQL functions */
+extern Datum orochi_raft_read_index_sql(PG_FUNCTION_ARGS);
+extern Datum orochi_raft_leader_read_index_sql(PG_FUNCTION_ARGS);
+extern Datum orochi_raft_can_read_stale_sql(PG_FUNCTION_ARGS);
+extern Datum orochi_raft_follower_read_sql(PG_FUNCTION_ARGS);
+
+/* Raft snapshot SQL functions */
+extern Datum orochi_raft_create_snapshot_sql(PG_FUNCTION_ARGS);
+extern Datum orochi_raft_install_snapshot_sql(PG_FUNCTION_ARGS);
+
+/* Raft RPC handler SQL functions */
+extern Datum orochi_raft_request_vote_sql(PG_FUNCTION_ARGS);
+extern Datum orochi_raft_append_entries_sql(PG_FUNCTION_ARGS);
+
 #endif /* OROCHI_RAFT_INTEGRATION_H */

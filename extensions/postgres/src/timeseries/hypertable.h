@@ -181,9 +181,9 @@ extern List *orochi_get_invalidations(Oid agg_id);
  * Policies
  * ============================================================ */
 
-extern void orochi_add_retention_policy(Oid hypertable_oid, Interval *drop_after);
+extern int orochi_add_retention_policy(Oid hypertable_oid, Interval *drop_after);
 extern void orochi_remove_retention_policy(Oid hypertable_oid);
-extern void orochi_add_compression_policy(Oid hypertable_oid, Interval *compress_after);
+extern int orochi_add_compression_policy(Oid hypertable_oid, Interval *compress_after);
 extern void orochi_remove_compression_policy(Oid hypertable_oid);
 extern void orochi_enable_compression(Oid hypertable_oid, const char *segment_by,
                                       const char *order_by);

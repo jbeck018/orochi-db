@@ -26,6 +26,9 @@ type ProvisionerConfig struct {
 	MaxRetries     int           // Maximum retry attempts
 	TLSEnabled     bool          // Whether to use TLS
 	Insecure       bool          // Skip TLS verification (for development)
+	TLSCertFile    string        // Path to TLS certificate file
+	TLSKeyFile     string        // Path to TLS key file
+	TLSCAFile      string        // Path to CA certificate file
 	DefaultTimeout time.Duration // Default timeout for provisioning operations
 }
 
@@ -103,6 +106,9 @@ func Load() *Config {
 			MaxRetries:     getEnvAsInt("PROVISIONER_MAX_RETRIES", 3),
 			TLSEnabled:     getEnvAsBool("PROVISIONER_TLS_ENABLED", false),
 			Insecure:       getEnvAsBool("PROVISIONER_TLS_INSECURE", true),
+			TLSCertFile:    getEnv("PROVISIONER_TLS_CERT_FILE", ""),
+			TLSKeyFile:     getEnv("PROVISIONER_TLS_KEY_FILE", ""),
+			TLSCAFile:      getEnv("PROVISIONER_TLS_CA_FILE", ""),
 			DefaultTimeout: getEnvAsDuration("PROVISIONER_DEFAULT_TIMEOUT", 10*time.Minute),
 		},
 	}

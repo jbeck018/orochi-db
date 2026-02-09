@@ -11,181 +11,66 @@ metadata:
 data:
   pgdog.toml: |
     # PgDog Configuration for Orochi Cloud Production
-    # Documentation: https://github.com/pgdog/pgdog
+    # Validated against pgdog-config structs with deny_unknown_fields
+    #
+    # Auth chain: client -> jwt-proxy (JWT validation) -> PgDog (trust) -> DO managed DB (SCRAM)
+    # Users and backend credentials are in users.toml (mounted from K8s secret)
 
     [general]
-    # Host and port configuration
     host = "0.0.0.0"
     port = 6432
-    admin_port = 6433
-
-    # Connection settings
-    connect_timeout = 5000        # 5 seconds
-    query_timeout = 300000        # 5 minutes
-    idle_timeout = 600000         # 10 minutes
-    checkout_timeout = 5000       # 5 seconds
-
-    # Worker threads (0 = auto-detect based on CPU cores)
     workers = 0
 
-    # Enable TCP keepalive
-    tcp_keepalive = true
-    tcp_keepalive_idle = 60
-    tcp_keepalive_interval = 15
-    tcp_keepalive_count = 3
+    # Transaction-level pooling for maximum connection efficiency
+    pooler_mode = "transaction"
 
-    # TLS configuration
-    tls = true
+    # Trust auth: only jwt-proxy on localhost connects to PgDog
+    auth_type = "trust"
+
+    # Pool sizing (conservative for DO managed DB connection limits)
+    # DO basic plan has ~25 total connections; control-plane uses some
+    default_pool_size = 5
+    min_pool_size = 0
+
+    # Load balancing
+    load_balancing_strategy = "random"
+
+    # Timeouts (milliseconds)
+    connect_timeout = 5000
+    query_timeout = 300000
+    idle_timeout = 600000
+    checkout_timeout = 5000
+    shutdown_timeout = 10000
+    server_lifetime = 3600000
+
+    # Logging
+    log_connections = true
+    log_disconnections = true
+
+    # Prometheus metrics
+    openmetrics_port = 9090
+
+    # TLS for client connections (jwt-proxy -> PgDog)
     tls_certificate = "/etc/pgdog/tls/tls.crt"
     tls_private_key = "/etc/pgdog/tls/tls.key"
 
-    # Prometheus metrics
-    prometheus_enabled = true
-    prometheus_port = 9090
+    # Query parser for read/write splitting
+    query_parser = "on"
 
-    # Logging
-    log_level = "info"
-    log_client_connections = true
-    log_client_disconnections = true
+    [admin]
+    name = "pgdog"
+    user = "pgdog_admin"
+    password = "pgdog_admin"
 
-    [auth]
-    # Authentication method
-    auth_type = "scram-sha-256"
+    # =========================================================================
+    # Backend Database: DigitalOcean Managed PostgreSQL
+    # =========================================================================
+    # Backend credentials (user/password) are set per-user in users.toml
+    # via server_user/server_password fields (mounted from K8s secret).
 
-    # Path to auth query or password file
-    auth_file = "/etc/pgdog/secrets/userlist.txt"
-
-    # Optional: Query-based authentication
-    # auth_query = "SELECT username, password FROM pgdog_users WHERE username = $1"
-
-    [pools]
-    # Default pool settings
-    default_pool_size = 25
-    min_pool_size = 5
-    max_pool_size = 100
-
-    # Pool mode: session, transaction, statement
-    pool_mode = "transaction"
-
-    # Reserve connections for superusers
-    reserve_pool_size = 5
-    reserve_pool_timeout = 3000
-
-    # Server lifetime (ms) - how long to keep server connections
-    server_lifetime = 3600000     # 1 hour
-    server_idle_timeout = 600000  # 10 minutes
-
-    # Client-side prepared statements
-    prepared_statements = true
-
-    # Load balancing strategy: round_robin, random, least_connections
-    load_balancing = "least_connections"
-
-    [sharding]
-    # Enable sharding support
-    enabled = true
-
-    # Sharding method: hash, range, custom
-    method = "hash"
-
-    # Number of shards (should match Orochi shard count)
-    shard_count = 32
-
-    # Parse sharding key from queries
-    automatic_sharding = true
-
-    # Default shard for queries without sharding key
-    default_shard = "any"
-
-    [plugins]
-    # Enable query rewriting plugin for Orochi
-    [plugins.query_rewrite]
-    enabled = true
-
-    # Enable query caching plugin
-    [plugins.query_cache]
-    enabled = false
-    cache_size_mb = 256
-    ttl_seconds = 60
-
-    # Enable query routing plugin
-    [plugins.query_router]
-    enabled = true
-    # Route read queries to replicas
-    read_write_splitting = true
-
-    [mirrors]
-    # Optional: Mirror queries to analytics cluster
-    # enabled = false
-    # percentage = 10
-    # target = "analytics"
-
-    # =============================================================================
-    # Database Clusters Configuration
-    # These are template placeholders - replace with actual cluster details
-    # =============================================================================
-
-    # Primary cluster configuration
-    [[clusters]]
-    name = "primary"
-
-      [[clusters.databases]]
-      name = "orochi"
-      host = "${PRIMARY_DB_HOST}"
-      port = 5432
-      database = "orochi"
-      role = "primary"
-
-      [[clusters.databases]]
-      name = "orochi_replica_1"
-      host = "${REPLICA_1_DB_HOST}"
-      port = 5432
-      database = "orochi"
-      role = "replica"
-
-      [[clusters.databases]]
-      name = "orochi_replica_2"
-      host = "${REPLICA_2_DB_HOST}"
-      port = 5432
-      database = "orochi"
-      role = "replica"
-
-    # Example shard cluster configuration
-    # [[clusters]]
-    # name = "shard_0"
-    #
-    #   [[clusters.databases]]
-    #   name = "shard_0_primary"
-    #   host = "${SHARD_0_HOST}"
-    #   port = 5432
-    #   database = "orochi_shard_0"
-    #   role = "primary"
-    #   shard_id = 0
-
-    # =============================================================================
-    # User Configuration
-    # =============================================================================
-
-    [[users]]
-    name = "orochi_app"
-    pool_size = 50
-    pool_mode = "transaction"
-
-    [[users]]
-    name = "orochi_admin"
-    pool_size = 10
-    pool_mode = "session"
-
-    [[users]]
-    name = "orochi_readonly"
-    pool_size = 100
-    pool_mode = "transaction"
-    # Route all queries to replicas
-    default_role = "replica"
-
-    [[users]]
-    name = "orochi_analytics"
-    pool_size = 20
-    pool_mode = "transaction"
-    query_timeout = 1800000  # 30 minutes for analytics queries
-    default_role = "replica"
+    [[databases]]
+    name = "orochi_cloud"
+    host = "orochi-metadata-do-user-32140747-0.e.db.ondigitalocean.com"
+    port = 25060
+    database_name = "orochi_cloud"
+    role = "primary"

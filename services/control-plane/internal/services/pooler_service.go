@@ -103,10 +103,16 @@ func (s *PoolerService) GetPoolerStatus(ctx context.Context, clusterID uuid.UUID
 		}
 	}
 
-	// Get replica status from Kubernetes (placeholder - would use k8s client in production)
-	status.Replicas = 1
-	status.ReadyReplicas = 1
-	if !status.Healthy {
+	// Derive replica counts from cluster configuration and health status.
+	// The provisioner manages the actual K8s deployments; here we use
+	// the cluster's configured node count as the desired replicas.
+	status.Replicas = cluster.NodeCount
+	if status.Replicas < 1 {
+		status.Replicas = 1
+	}
+	if status.Healthy {
+		status.ReadyReplicas = status.Replicas
+	} else {
 		status.ReadyReplicas = 0
 	}
 

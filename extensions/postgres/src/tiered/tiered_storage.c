@@ -30,7 +30,9 @@
 #include "utils/memutils.h"
 #include "utils/timestamp.h"
 
+#ifdef HAVE_LIBCURL
 #include <curl/curl.h>
+#endif
 #include <openssl/hmac.h>
 #include <openssl/sha.h>
 #include <time.h>
@@ -75,6 +77,8 @@ static bool do_tier_transition(int64 chunk_id, OrochiStorageTier to_tier);
 /* ============================================================
  * AWS Signature V4 Helper Functions
  * ============================================================ */
+
+#ifdef HAVE_LIBCURL
 
 /* Buffer for CURL response */
 typedef struct {
@@ -1218,6 +1222,120 @@ List *s3_list_objects(S3Client *client, const char *prefix)
     return objects;
 }
 
+#else /* !HAVE_LIBCURL */
+
+/*
+ * Stub implementations when libcurl is not available.
+ * S3 operations require libcurl to function.
+ */
+
+char *
+generate_aws_signature_v4(S3Client *client, const char *method, const char *uri,
+                          const char *query_string, const char *payload, size_t payload_len,
+                          const char *date_stamp, const char *amz_date, char **out_authorization)
+{
+    elog(WARNING, "Orochi: AWS signature generation requires libcurl");
+    *out_authorization = pstrdup("");
+    return pstrdup("");
+}
+
+bool
+s3_client_test_connection(S3Client *client)
+{
+    elog(WARNING, "Orochi: S3 connection test requires libcurl");
+    return false;
+}
+
+S3UploadResult *
+s3_upload(S3Client *client, const char *key, const char *data, int64 size,
+          const char *content_type)
+{
+    S3UploadResult *result = palloc0(sizeof(S3UploadResult));
+    result->success = false;
+    result->error_message = pstrdup("S3 upload requires libcurl");
+    elog(WARNING, "Orochi: S3 upload requires libcurl");
+    return result;
+}
+
+S3DownloadResult *
+s3_download(S3Client *client, const char *key)
+{
+    S3DownloadResult *result = palloc0(sizeof(S3DownloadResult));
+    result->success = false;
+    result->error_message = pstrdup("S3 download requires libcurl");
+    elog(WARNING, "Orochi: S3 download requires libcurl");
+    return result;
+}
+
+bool
+s3_delete(S3Client *client, const char *key)
+{
+    elog(WARNING, "Orochi: S3 delete requires libcurl");
+    return false;
+}
+
+bool
+s3_object_exists(S3Client *client, const char *key)
+{
+    elog(WARNING, "Orochi: S3 object check requires libcurl");
+    return false;
+}
+
+S3Object *
+s3_head_object(S3Client *client, const char *key)
+{
+    elog(WARNING, "Orochi: S3 head object requires libcurl");
+    return NULL;
+}
+
+List *
+s3_list_objects(S3Client *client, const char *prefix)
+{
+    elog(WARNING, "Orochi: S3 list objects requires libcurl");
+    return NIL;
+}
+
+S3Client *
+s3_client_create(OrochiS3Config *config)
+{
+    S3Client *client;
+
+    if (config == NULL)
+        return NULL;
+
+    client = palloc0(sizeof(S3Client));
+    client->endpoint = config->endpoint ? pstrdup(config->endpoint) : NULL;
+    client->bucket = config->bucket ? pstrdup(config->bucket) : NULL;
+    client->access_key = config->access_key ? pstrdup(config->access_key) : NULL;
+    client->secret_key = config->secret_key ? pstrdup(config->secret_key) : NULL;
+    client->region = config->region ? pstrdup(config->region) : pstrdup("us-east-1");
+    client->use_ssl = config->use_ssl;
+    client->timeout_ms = config->connection_timeout > 0 ? config->connection_timeout : 30000;
+    client->curl_handle = NULL;
+
+    return client;
+}
+
+void
+s3_client_destroy(S3Client *client)
+{
+    if (client == NULL)
+        return;
+    if (client->endpoint)
+        pfree(client->endpoint);
+    if (client->bucket)
+        pfree(client->bucket);
+    if (client->access_key)
+        pfree(client->access_key);
+    if (client->secret_key)
+        pfree(client->secret_key);
+    if (client->region)
+        pfree(client->region);
+    pfree(client);
+}
+
+#endif /* HAVE_LIBCURL */
+
 char *orochi_generate_s3_key(int64 chunk_id)
 {
     char *key = palloc(128);
@@ -1747,6 +1865,7 @@ static bool orochi_restore_chunk_from_s3(int64 chunk_id, S3Client *client, const
     S3DownloadResult *download_result = NULL;
     char *data_ptr;
     char chunk_table_name[NAMEDATALEN * 2];
+    char temp_file_path[MAXPGPATH];
     StringInfoData create_table_query;
     StringInfoData copy_cmd;
     int spi_ret;
@@ -1958,6 +2077,8 @@ static bool orochi_restore_chunk_from_s3(int64 chunk_id, S3Client *client, const
         return false;
     }
 
+    temp_file_path[0] = '\0';
+
     PG_TRY();
     {
         /* Drop existing chunk table if it exists */
@@ -1974,17 +2095,53 @@ static bool orochi_restore_chunk_from_s3(int64 chunk_id, S3Client *client, const
         pfree(create_table_query.data);
 
         /*
-         * Recreate chunk table structure
-         * TODO: Get actual schema from catalog metadata
-         * For now, create a simple time-series table
+         * Recreate chunk table structure by looking up the parent
+         * hypertable schema from catalog metadata.
          */
-        initStringInfo(&create_table_query);
-        appendStringInfo(&create_table_query,
-                         "CREATE UNLOGGED TABLE %s ("
-                         "    time timestamptz NOT NULL,"
-                         "    value double precision"
-                         ") WITH (autovacuum_enabled = false)",
-                         chunk_table_name);
+        {
+            OrochiChunkInfo *chunk_info = orochi_catalog_get_chunk(chunk_id);
+            if (chunk_info != NULL && OidIsValid(chunk_info->hypertable_oid)) {
+                /*
+                 * Clone the parent hypertable schema using CREATE TABLE ... (LIKE ...)
+                 * which copies column definitions, constraints, and defaults.
+                 */
+                char *parent_relname = get_rel_name(chunk_info->hypertable_oid);
+                char *parent_nspname = get_namespace_name(
+                    get_rel_namespace(chunk_info->hypertable_oid));
+
+                initStringInfo(&create_table_query);
+                if (parent_relname != NULL && parent_nspname != NULL) {
+                    appendStringInfo(&create_table_query,
+                                     "CREATE UNLOGGED TABLE %s "
+                                     "(LIKE %s.%s INCLUDING DEFAULTS INCLUDING CONSTRAINTS) "
+                                     "WITH (autovacuum_enabled = false)",
+                                     chunk_table_name,
+                                     quote_identifier(parent_nspname),
+                                     quote_identifier(parent_relname));
+                } else {
+                    /* Fallback: minimal time-series schema */
+                    elog(WARNING, "Could not resolve parent hypertable for chunk %ld, "
+                                 "using default schema", chunk_id);
+                    appendStringInfo(&create_table_query,
+                                     "CREATE UNLOGGED TABLE %s ("
+                                     "    time timestamptz NOT NULL,"
+                                     "    value double precision"
+                                     ") WITH (autovacuum_enabled = false)",
+                                     chunk_table_name);
+                }
+            } else {
+                /* No catalog entry - use fallback schema */
+                elog(WARNING, "No catalog entry for chunk %ld, using default schema",
+                     chunk_id);
+                initStringInfo(&create_table_query);
+                appendStringInfo(&create_table_query,
+                                 "CREATE UNLOGGED TABLE %s ("
+                                 "    time timestamptz NOT NULL,"
+                                 "    value double precision"
+                                 ") WITH (autovacuum_enabled = false)",
+                                 chunk_table_name);
+            }
+        }
 
         spi_ret = SPI_execute(create_table_query.data, false, 0);
         if (spi_ret < 0) {
@@ -2003,7 +2160,6 @@ static bool orochi_restore_chunk_from_s3(int64 chunk_id, S3Client *client, const
          * and use COPY FROM file path.
          */
         {
-            char temp_file_path[MAXPGPATH];
             FILE *temp_file;
             int64 data_size;
             int written;
@@ -2012,9 +2168,10 @@ static bool orochi_restore_chunk_from_s3(int64 chunk_id, S3Client *client, const
             data_size =
                 compression_type == OROCHI_COMPRESS_NONE ? compressed_size : uncompressed_size;
 
-            /* Create temporary file in /tmp (accessible by PostgreSQL) */
-            snprintf(temp_file_path, sizeof(temp_file_path), "/tmp/orochi_chunk_%ld_restore_%d.bin",
-                     chunk_id, MyProcPid);
+            /* Use PG data directory for temp files */
+            snprintf(temp_file_path, sizeof(temp_file_path),
+                     "%s/pgsql_tmp/orochi_chunk_%ld_restore_%d.bin",
+                     DataDir, chunk_id, MyProcPid);
 
             temp_file = AllocateFile(temp_file_path, "wb");
             if (temp_file == NULL) {
@@ -2079,6 +2236,18 @@ static bool orochi_restore_chunk_from_s3(int64 chunk_id, S3Client *client, const
             /* Non-fatal, continue */
         }
 
+        pfree(create_table_query.data);
+
+        /* Run ANALYZE on restored table for planner stats */
+        initStringInfo(&create_table_query);
+        appendStringInfo(&create_table_query, "ANALYZE %s", chunk_table_name);
+
+        spi_ret = SPI_execute(create_table_query.data, false, 0);
+        if (spi_ret < 0) {
+            elog(WARNING, "Failed to ANALYZE restored chunk table %s", chunk_table_name);
+            /* Non-fatal, continue */
+        }
+
         success = true;
         elog(LOG, "Successfully restored chunk %ld with %ld rows from S3", chunk_id, row_count);
 
@@ -2089,6 +2258,9 @@ static bool orochi_restore_chunk_from_s3(int64 chunk_id, S3Client *client, const
     PG_CATCH();
     {
         elog(WARNING, "Exception during chunk %ld restoration", chunk_id);
+        /* Clean up temp file on error */
+        if (temp_file_path[0] != '\0')
+            unlink(temp_file_path);
         success = false;
     }
     PG_END_TRY();

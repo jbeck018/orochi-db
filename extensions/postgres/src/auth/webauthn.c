@@ -1545,7 +1545,9 @@ static char *uuid_to_string(pg_uuid_t uuid)
 }
 
 /*
- * parse_uuid - Parse UUID from string (placeholder - not used currently)
+ * parse_uuid - Parse UUID string into binary format
+ *
+ * Available for credential UUID parsing. Complement to uuid_to_string().
  */
 static bool parse_uuid(const char *str, pg_uuid_t *uuid)
 {

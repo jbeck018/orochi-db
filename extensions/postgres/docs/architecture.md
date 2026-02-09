@@ -169,12 +169,17 @@ SELECT → Skip List Check → Chunk Elimination → Decompress Needed Columns
 
 ## Background Workers
 
-Four background workers handle maintenance:
+Core background workers handle maintenance:
 
 1. **Tiering Worker**: Moves data between storage tiers
 2. **Compression Worker**: Compresses cold chunks
 3. **Stats Collector**: Gathers cluster statistics
 4. **Rebalancer**: Rebalances shards across nodes
+
+When built with `RAFT_INTEGRATION=1`, two additional workers are registered:
+
+5. **Raft Health Check Worker** (`raft_health_worker.c`): Pings cluster nodes every 30s (configurable via `orochi.health_check_interval`), updates `orochi.orochi_node_health` table, marks nodes unhealthy after configurable failure threshold
+6. **Raft Log Compaction Worker** (`raft_compaction_worker.c`): Runs every 60s (configurable via `orochi.raft_compaction_interval`), triggers snapshot + log compaction when entries exceed `orochi.raft_log_max_entries` (default 10,000)
 
 ## Catalog Schema
 
@@ -190,6 +195,12 @@ orochi.orochi_tiering_policies -- Data lifecycle policies
 orochi.orochi_vector_indexes  -- Vector index metadata
 orochi.orochi_continuous_aggregates -- Materialized aggregate views
 orochi.orochi_invalidation_log -- Aggregate invalidation tracking
+orochi.orochi_node_health      -- Node health status (Raft mode)
+orochi.orochi_pipeline_queue   -- Table-based pipeline queue (non-Kafka fallback)
+orochi.orochi_pipeline_queue_cursors -- Pipeline consumer offsets
+orochi.orochi_cdc_events       -- CDC events (non-Kafka fallback)
+orochi.orochi_webhook_queue    -- CDC webhook delivery queue
+orochi.orochi_auth_webhook_queue -- Auth webhook delivery queue
 ```
 
 ## Extension Points
@@ -246,10 +257,17 @@ PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config make
 PG_CONFIG=/usr/lib/postgresql/16/bin/pg_config make
 ```
 
+## Optional Library Fallbacks
+
+Orochi DB gracefully handles missing optional libraries at compile time:
+
+- **Without librdkafka**: Pipeline and CDC operations fall back to PostgreSQL table-based queues (`orochi.orochi_pipeline_queue`, `orochi.orochi_cdc_events`). Data is stored in tables rather than streamed via Kafka.
+- **Without libcurl**: S3 tiered storage functions return warnings. Auth webhook delivery queues events to `orochi.orochi_auth_webhook_queue` for external processing.
+- **Without RAFT_INTEGRATION**: Single-node stubs in `raft_stubs.c` provide no-op consensus. All distributed functions return success (single-node mode).
+
 ## Future Directions
 
-- CDC (Change Data Capture) support
 - Iceberg/Delta Lake format compatibility
 - GPU acceleration for vector operations
-- Kubernetes operator for deployment
 - Read replicas with async replication
+- External webhook queue processor for non-curl deployments

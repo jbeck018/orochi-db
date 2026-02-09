@@ -69,6 +69,8 @@ spec:
           env:
             - name: PGDOG_CONFIG
               value: "/etc/pgdog/pgdog.toml"
+            - name: PGDOG_USERS_CONFIG
+              value: "/etc/pgdog/secrets/users.toml"
             - name: RUST_LOG
               value: "pgdog=info,warn"
           volumeMounts:
@@ -118,25 +120,27 @@ spec:
               name: jwt-postgres
               protocol: TCP
           env:
-            - name: UPSTREAM_HOST
+            - name: JWT_GATEWAY_BACKEND_HOST
               value: "127.0.0.1"
-            - name: UPSTREAM_PORT
+            - name: JWT_GATEWAY_BACKEND_PORT
               value: "6432"
-            - name: LISTEN_PORT
-              value: "5433"
-            - name: JWT_PUBLIC_KEY_PATH
-              value: "/etc/pgdog/secrets/jwt-public-key.pem"
-            - name: JWT_ISSUER
+            - name: JWT_GATEWAY_BACKEND_USERNAME
+              value: "orochi_app"
+            - name: JWT_GATEWAY_LISTEN_ADDR
+              value: ":5433"
+            - name: JWT_GATEWAY_HMAC_SECRET_PATH
+              value: "/etc/pgdog/secrets/jwt-hmac-secret"
+            - name: JWT_GATEWAY_ISSUER
               valueFrom:
                 secretKeyRef:
                   name: pgdog-secrets
                   key: JWT_ISSUER
-            - name: JWT_AUDIENCE
+            - name: JWT_GATEWAY_AUDIENCE
               valueFrom:
                 secretKeyRef:
                   name: pgdog-secrets
                   key: JWT_AUDIENCE
-            - name: LOG_LEVEL
+            - name: JWT_GATEWAY_LOG_LEVEL
               value: "info"
           volumeMounts:
             - name: secrets

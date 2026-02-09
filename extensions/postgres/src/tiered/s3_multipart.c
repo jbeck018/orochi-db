@@ -22,13 +22,15 @@
 #include "utils/builtins.h"
 #include "utils/memutils.h"
 
+#include "tiered_storage.h"
+
+#ifdef HAVE_LIBCURL
+
 #include <curl/curl.h>
 #include <openssl/hmac.h>
 #include <openssl/sha.h>
 #include <string.h>
 #include <time.h>
-
-#include "tiered_storage.h"
 
 /* External functions from tiered_storage.c */
 extern char *generate_aws_signature_v4(S3Client *client, const char *method, const char *uri,
@@ -487,23 +489,6 @@ char *s3_multipart_upload_part_ex(S3Client *client, const char *key, const char 
 }
 
 /*
- * Legacy wrapper for backward compatibility
- * Returns true on success, false on failure
- * NOTE: This does not track ETags and will fail at completion.
- * Use s3_multipart_upload_part_ex() for proper multipart uploads.
- */
-bool s3_multipart_upload_part(S3Client *client, const char *key, const char *upload_id,
-                              int part_number, const char *data, int64 size)
-{
-    char *etag = s3_multipart_upload_part_ex(client, key, upload_id, part_number, data, size);
-    if (etag != NULL) {
-        pfree(etag);
-        return true;
-    }
-    return false;
-}
-
-/*
  * Complete multipart upload with parts array
  * POST /{bucket}/{key}?uploadId={id}
  * Finalizes the upload by combining all parts
@@ -663,21 +648,6 @@ bool s3_multipart_upload_complete_with_parts(S3Client *client, const char *key,
     pfree(payload_hash);
 
     return success;
-}
-
-/*
- * Legacy wrapper - DO NOT USE FOR PRODUCTION
- * This version sends empty XML without ETags and will fail on real S3.
- * Kept for backward compatibility with existing code.
- */
-bool s3_multipart_upload_complete(S3Client *client, const char *key, const char *upload_id)
-{
-    elog(WARNING, "s3_multipart_upload_complete() called without parts - "
-                  "this will fail on S3. Use "
-                  "s3_multipart_upload_complete_with_parts() instead.");
-
-    /* Return false since this cannot work without ETags */
-    return false;
 }
 
 /*
@@ -906,3 +876,51 @@ S3UploadResult *orochi_upload_chunk_to_s3(S3Client *client, const char *key, con
         return result;
     }
 }
+
+#else /* !HAVE_LIBCURL */
+
+/*
+ * Stub implementations when libcurl is not available.
+ * All S3 multipart operations require libcurl to function.
+ */
+
+char *
+s3_multipart_upload_start(S3Client *client, const char *key)
+{
+    elog(WARNING, "Orochi: S3 multipart upload requires libcurl");
+    return NULL;
+}
+
+char *
+s3_multipart_upload_part_ex(S3Client *client, const char *key, const char *upload_id,
+                            int part_number, const char *data, int64 size)
+{
+    elog(WARNING, "Orochi: S3 multipart upload requires libcurl");
+    return NULL;
+}
+
+bool
+s3_multipart_upload_complete_with_parts(S3Client *client, const char *key, const char *upload_id,
+                                        S3MultipartPart *parts, int num_parts)
+{
+    elog(WARNING, "Orochi: S3 multipart upload requires libcurl");
+    return false;
+}
+
+void
+s3_multipart_upload_abort(S3Client *client, const char *key, const char *upload_id)
+{
+    elog(WARNING, "Orochi: S3 multipart upload requires libcurl");
+}
+
+S3UploadResult *
+orochi_upload_chunk_to_s3(S3Client *client, const char *key, const char *data, int64 size)
+{
+    S3UploadResult *result = palloc0(sizeof(S3UploadResult));
+    result->success = false;
+    result->error_message = pstrdup("S3 multipart upload requires libcurl");
+    elog(WARNING, "Orochi: S3 multipart upload requires libcurl");
+    return result;
+}
+
+#endif /* HAVE_LIBCURL */

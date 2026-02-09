@@ -1320,43 +1320,78 @@ EndpointStatus endpoint_parse_status(const char *str)
 }
 
 /*
- * endpoint_hash_password - Hash password with bcrypt
+ * endpoint_hash_password - Hash password with bcrypt via PostgreSQL crypt()
  */
 char *endpoint_hash_password(const char *password)
 {
-    /* In production, use proper bcrypt implementation */
-    /* For now, we use SHA256 as placeholder */
-    uint8 hash[SHA256_DIGEST_LENGTH];
-    char *hash_str;
-    SHA256_CTX ctx;
+    StringInfoData query;
+    int ret;
+    char *hashed = NULL;
+    Oid argtypes[1] = { TEXTOID };
+    Datum argvals[1];
 
-    SHA256_Init(&ctx);
-    SHA256_Update(&ctx, password, strlen(password));
-    SHA256_Final(hash, &ctx);
+    if (password == NULL || strlen(password) == 0)
+        return NULL;
 
-    hash_str = palloc(SHA256_DIGEST_LENGTH * 2 + 1);
-    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++)
-        snprintf(hash_str + i * 2, 3, "%02x", hash[i]);
+    if (SPI_connect() != SPI_OK_CONNECT) {
+        elog(WARNING, "endpoint_hash_password: failed to connect to SPI");
+        return NULL;
+    }
 
-    return hash_str;
+    initStringInfo(&query);
+    appendStringInfoString(&query, "SELECT crypt($1, gen_salt('bf', 10))");
+
+    argvals[0] = CStringGetTextDatum(password);
+
+    ret = SPI_execute_with_args(query.data, 1, argtypes, argvals, NULL, true, 1);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0) {
+        char *result = SPI_getvalue(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1);
+        if (result)
+            hashed = pstrdup(result);
+    }
+
+    pfree(query.data);
+    SPI_finish();
+
+    return hashed;
 }
 
 /*
- * endpoint_verify_password - Verify password against hash
+ * endpoint_verify_password - Verify password against bcrypt hash
  */
 bool endpoint_verify_password(const char *password, const char *hash)
 {
-    char *computed_hash;
-    bool result;
+    StringInfoData query;
+    int ret;
+    bool verified = false;
+    Oid argtypes[2] = { TEXTOID, TEXTOID };
+    Datum argvals[2];
 
     if (password == NULL || hash == NULL)
         return false;
 
-    computed_hash = endpoint_hash_password(password);
-    result = (strcmp(computed_hash, hash) == 0);
-    pfree(computed_hash);
+    if (SPI_connect() != SPI_OK_CONNECT)
+        return false;
 
-    return result;
+    initStringInfo(&query);
+    appendStringInfoString(&query, "SELECT crypt($1, $2) = $2");
+
+    argvals[0] = CStringGetTextDatum(password);
+    argvals[1] = CStringGetTextDatum(hash);
+
+    ret = SPI_execute_with_args(query.data, 2, argtypes, argvals, NULL, true, 1);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0) {
+        bool isnull;
+        verified = DatumGetBool(
+            SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull));
+    }
+
+    pfree(query.data);
+    SPI_finish();
+
+    return verified;
 }
 
 /* ============================================================

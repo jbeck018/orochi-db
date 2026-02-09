@@ -604,7 +604,70 @@ void orochi_auth_update_session_states(void)
  */
 void orochi_auth_enforce_session_limits(void)
 {
-    /* TODO: Implement per-user session counting and limit enforcement */
+    int i;
+    int max_per_user = orochi_auth_max_sessions_per_user;
+
+    if (OrochiAuthSharedState == NULL || max_per_user <= 0)
+        return;
+
+    LWLockAcquire(OrochiAuthSharedState->session_cache_lock, LW_EXCLUSIVE);
+
+    /*
+     * For each active user, count sessions and revoke oldest ones
+     * if the count exceeds the per-user limit.
+     *
+     * Simple O(n^2) approach is fine given the bounded cache size
+     * (OROCHI_AUTH_MAX_CACHED_SESSIONS is typically small).
+     */
+    for (i = 0; i < OrochiAuthSharedState->session_cache_count; i++) {
+        OrochiSession *session = &OrochiAuthSharedState->session_cache[i];
+        int count;
+        int j;
+        TimestampTz oldest_time;
+        int oldest_idx;
+
+        if (session->state != OROCHI_SESSION_ACTIVE)
+            continue;
+
+        /* Count active sessions for this user */
+        count = 0;
+        for (j = 0; j < OrochiAuthSharedState->session_cache_count; j++) {
+            OrochiSession *other = &OrochiAuthSharedState->session_cache[j];
+            if (other->state == OROCHI_SESSION_ACTIVE &&
+                strcmp(other->user_id, session->user_id) == 0)
+                count++;
+        }
+
+        /* If within limit, nothing to do for this user */
+        if (count <= max_per_user)
+            continue;
+
+        /* Revoke oldest sessions until within limit */
+        while (count > max_per_user) {
+            oldest_time = DT_NOEND;
+            oldest_idx = -1;
+
+            for (j = 0; j < OrochiAuthSharedState->session_cache_count; j++) {
+                OrochiSession *other = &OrochiAuthSharedState->session_cache[j];
+                if (other->state == OROCHI_SESSION_ACTIVE &&
+                    strcmp(other->user_id, session->user_id) == 0 &&
+                    other->last_activity < oldest_time) {
+                    oldest_time = other->last_activity;
+                    oldest_idx = j;
+                }
+            }
+
+            if (oldest_idx >= 0) {
+                OrochiAuthSharedState->session_cache[oldest_idx].state = OROCHI_SESSION_REVOKED;
+                elog(LOG, "Orochi Auth: revoked oldest session %s for user %s (limit %d exceeded)",
+                     OrochiAuthSharedState->session_cache[oldest_idx].session_id,
+                     session->user_id, max_per_user);
+            }
+            count--;
+        }
+    }
+
+    LWLockRelease(OrochiAuthSharedState->session_cache_lock);
 }
 
 /* ============================================================
@@ -728,8 +791,40 @@ void orochi_auth_check_key_rotation(void)
         OrochiSigningKey *entry = &OrochiAuthSharedState->signing_keys[i];
 
         if (entry->is_active && entry->is_current && entry->created_at < rotation_threshold) {
-            elog(LOG, "Orochi Auth: signing key %s needs rotation", entry->key_id);
-            /* TODO: Trigger key rotation via pg_notify or database update */
+            elog(LOG, "Orochi Auth: signing key %s needs rotation (age exceeds %d days)",
+                 entry->key_id, orochi_auth_key_rotation_days);
+
+            /* Mark the old key as no longer current */
+            entry->is_current = false;
+            entry->rotated_at = now;
+
+            /* Notify listeners that key rotation is needed */
+            {
+                StringInfoData notify_payload;
+
+                LWLockRelease(OrochiAuthSharedState->signing_key_lock);
+
+                initStringInfo(&notify_payload);
+                appendStringInfo(&notify_payload,
+                                 "{\"event\":\"key_rotation\",\"key_id\":\"%s\"}",
+                                 entry->key_id);
+
+                if (SPI_connect() == SPI_OK_CONNECT) {
+                    StringInfoData notify_query;
+                    initStringInfo(&notify_query);
+                    appendStringInfo(&notify_query,
+                                     "SELECT pg_notify('orochi_auth_events', %s)",
+                                     quote_literal_cstr(notify_payload.data));
+                    SPI_execute(notify_query.data, false, 0);
+                    pfree(notify_query.data);
+                    SPI_finish();
+                }
+
+                pfree(notify_payload.data);
+
+                /* Re-acquire lock and continue scan */
+                LWLockAcquire(OrochiAuthSharedState->signing_key_lock, LW_SHARED);
+            }
         }
     }
 
@@ -742,10 +837,83 @@ void orochi_auth_check_key_rotation(void)
  */
 void orochi_auth_refresh_signing_key_cache(void)
 {
-    /* TODO: Query database for signing keys and update cache */
-    if (OrochiAuthSharedState != NULL) {
-        OrochiAuthSharedState->last_key_rotation = GetCurrentTimestamp();
+    int ret;
+    int i;
+
+    if (OrochiAuthSharedState == NULL)
+        return;
+
+    /* Query the auth.signing_keys table for active keys */
+    if (SPI_connect() != SPI_OK_CONNECT) {
+        elog(WARNING, "Orochi Auth: failed to connect to SPI for key refresh");
+        return;
     }
+
+    ret = SPI_execute(
+        "SELECT key_id, tenant_id, algorithm, public_key, private_key_encrypted, "
+        "       created_at, expires_at, rotated_at, is_current, is_active, version "
+        "FROM auth.signing_keys "
+        "WHERE is_active = true "
+        "ORDER BY created_at DESC",
+        true, OROCHI_AUTH_MAX_SIGNING_KEYS);
+
+    if (ret == SPI_OK_SELECT && SPI_processed > 0) {
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+
+        LWLockAcquire(OrochiAuthSharedState->signing_key_lock, LW_EXCLUSIVE);
+
+        OrochiAuthSharedState->signing_key_count = 0;
+
+        for (i = 0; i < (int)SPI_processed && i < OROCHI_AUTH_MAX_SIGNING_KEYS; i++) {
+            HeapTuple tuple = SPI_tuptable->vals[i];
+            OrochiSigningKey *entry = &OrochiAuthSharedState->signing_keys[i];
+            bool isnull;
+            char *val;
+
+            memset(entry, 0, sizeof(OrochiSigningKey));
+
+            val = SPI_getvalue(tuple, tupdesc, 1);
+            if (val)
+                strlcpy(entry->key_id, val, sizeof(entry->key_id));
+
+            val = SPI_getvalue(tuple, tupdesc, 2);
+            if (val)
+                strlcpy(entry->tenant_id, val, sizeof(entry->tenant_id));
+
+            entry->algorithm = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 3, &isnull));
+
+            val = SPI_getvalue(tuple, tupdesc, 4);
+            if (val)
+                strlcpy(entry->public_key, val, sizeof(entry->public_key));
+
+            val = SPI_getvalue(tuple, tupdesc, 5);
+            if (val)
+                strlcpy(entry->private_key_encrypted, val, sizeof(entry->private_key_encrypted));
+
+            entry->created_at = DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 6, &isnull));
+            if (isnull)
+                entry->created_at = GetCurrentTimestamp();
+
+            entry->expires_at = DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 7, &isnull));
+
+            entry->rotated_at = DatumGetTimestampTz(SPI_getbinval(tuple, tupdesc, 8, &isnull));
+
+            entry->is_current = DatumGetBool(SPI_getbinval(tuple, tupdesc, 9, &isnull));
+            entry->is_active = DatumGetBool(SPI_getbinval(tuple, tupdesc, 10, &isnull));
+            entry->version = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 11, &isnull));
+
+            OrochiAuthSharedState->signing_key_count++;
+        }
+
+        OrochiAuthSharedState->last_key_rotation = GetCurrentTimestamp();
+
+        LWLockRelease(OrochiAuthSharedState->signing_key_lock);
+
+        elog(LOG, "Orochi Auth: refreshed %d signing keys from database",
+             OrochiAuthSharedState->signing_key_count);
+    }
+
+    SPI_finish();
 }
 
 /* ============================================================

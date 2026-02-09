@@ -36,6 +36,7 @@
 #include "utils/timestamp.h"
 
 #include "auth.h"
+#include "jwt.h"
 
 /* ============================================================
  * Static Variables
@@ -923,7 +924,10 @@ PG_FUNCTION_INFO_V1(orochi_auth_jwt);
 Datum orochi_auth_jwt(PG_FUNCTION_ARGS)
 {
     const char *jwt_token;
-    text *result;
+    OrochiJwt *jwt;
+    char *payload_json;
+    Size payload_len;
+    Datum jsonb_datum;
 
     jwt_token = GetConfigOption("orochi.auth_token", true, false);
 
@@ -931,11 +935,43 @@ Datum orochi_auth_jwt(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
 
     /*
-     * TODO: Parse JWT and return claims as JSONB.
-     * For now, return empty JSON object.
+     * Parse the JWT to extract the payload claims.
+     * We only need to parse (not verify) since the token was already
+     * validated during authentication.
      */
-    result = cstring_to_text("{}");
-    PG_RETURN_TEXT_P(result);
+    jwt = orochi_jwt_parse(jwt_token);
+    if (jwt == NULL)
+        PG_RETURN_NULL();
+
+    /* If raw_payload JSONB is available, return it directly */
+    if (jwt->claims != NULL && jwt->claims->raw_payload != NULL) {
+        Jsonb *payload = jwt->claims->raw_payload;
+        PG_RETURN_JSONB_P(payload);
+    }
+
+    /*
+     * Fallback: base64url-decode the payload segment and cast to JSONB.
+     * This handles cases where raw_payload wasn't populated.
+     */
+    if (jwt->payload_b64 != NULL) {
+        payload_json = orochi_base64url_decode(jwt->payload_b64, &payload_len);
+        if (payload_json != NULL && payload_len > 0) {
+            /* Null-terminate the decoded payload */
+            char *payload_str = palloc(payload_len + 1);
+            memcpy(payload_str, payload_json, payload_len);
+            payload_str[payload_len] = '\0';
+
+            jsonb_datum = DirectFunctionCall1(jsonb_in,
+                                              CStringGetDatum(payload_str));
+            pfree(payload_str);
+            pfree(payload_json);
+            PG_RETURN_DATUM(jsonb_datum);
+        }
+        if (payload_json)
+            pfree(payload_json);
+    }
+
+    PG_RETURN_NULL();
 }
 
 PG_FUNCTION_INFO_V1(orochi_auth_verify_token);

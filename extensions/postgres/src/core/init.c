@@ -67,6 +67,12 @@ int orochi_warm_threshold_days = 7;
 int orochi_cold_threshold_days = 30;
 int orochi_cache_size_mb = 256;
 
+/* Health check and compaction GUCs (used by raft workers) */
+int orochi_health_check_interval = 30;
+int orochi_health_check_failure_threshold = 3;
+int orochi_raft_compaction_interval = 60;
+int orochi_raft_log_max_entries = 10000;
+
 /* Shared memory size */
 static Size orochi_shmem_size = 0;
 
@@ -269,6 +275,28 @@ static void orochi_define_gucs(void)
     /* Cache configuration */
     DefineCustomIntVariable("orochi.cache_size_mb", "Size of columnar cache in megabytes", NULL,
                             &orochi_cache_size_mb, 256, 16, 16384, PGC_SIGHUP, 0, NULL, NULL, NULL);
+
+    /* Health check configuration */
+    DefineCustomIntVariable("orochi.health_check_interval",
+                            "Interval between health checks in seconds", NULL,
+                            &orochi_health_check_interval, 30, 5, 3600, PGC_SIGHUP, GUC_UNIT_S,
+                            NULL, NULL, NULL);
+
+    DefineCustomIntVariable("orochi.health_check_failure_threshold",
+                            "Number of consecutive failures before marking a node inactive", NULL,
+                            &orochi_health_check_failure_threshold, 3, 1, 100, PGC_SIGHUP, 0, NULL,
+                            NULL, NULL);
+
+    /* Raft log compaction configuration */
+    DefineCustomIntVariable("orochi.raft_compaction_interval",
+                            "Interval between compaction checks in seconds", NULL,
+                            &orochi_raft_compaction_interval, 60, 10, 3600, PGC_SIGHUP, GUC_UNIT_S,
+                            NULL, NULL, NULL);
+
+    DefineCustomIntVariable("orochi.raft_log_max_entries",
+                            "Maximum Raft log entries before triggering compaction", NULL,
+                            &orochi_raft_log_max_entries, 10000, 100, 10000000, PGC_SIGHUP, 0,
+                            NULL, NULL, NULL);
 }
 
 /*
@@ -415,6 +443,36 @@ static void orochi_register_background_workers(void)
     worker.bgw_notify_pid = 0;
 
     RegisterBackgroundWorker(&worker);
+
+#ifdef RAFT_INTEGRATION
+    /* Health check worker - monitors node health */
+    memset(&worker, 0, sizeof(BackgroundWorker));
+    snprintf(worker.bgw_name, BGW_MAXLEN, "orochi health check worker");
+    snprintf(worker.bgw_type, BGW_MAXLEN, "orochi health check");
+    worker.bgw_flags = BGWORKER_SHMEM_ACCESS | BGWORKER_BACKEND_DATABASE_CONNECTION;
+    worker.bgw_start_time = BgWorkerStart_RecoveryFinished;
+    worker.bgw_restart_time = 60; /* Restart after 60 seconds on crash */
+    snprintf(worker.bgw_library_name, BGW_MAXLEN, "orochi");
+    snprintf(worker.bgw_function_name, BGW_MAXLEN, "orochi_health_worker_main");
+    worker.bgw_main_arg = (Datum)0;
+    worker.bgw_notify_pid = 0;
+
+    RegisterBackgroundWorker(&worker);
+
+    /* Raft log compaction worker - compacts log to prevent unbounded growth */
+    memset(&worker, 0, sizeof(BackgroundWorker));
+    snprintf(worker.bgw_name, BGW_MAXLEN, "orochi raft compaction worker");
+    snprintf(worker.bgw_type, BGW_MAXLEN, "orochi raft compaction");
+    worker.bgw_flags = BGWORKER_SHMEM_ACCESS | BGWORKER_BACKEND_DATABASE_CONNECTION;
+    worker.bgw_start_time = BgWorkerStart_RecoveryFinished;
+    worker.bgw_restart_time = 60; /* Restart after 60 seconds on crash */
+    snprintf(worker.bgw_library_name, BGW_MAXLEN, "orochi");
+    snprintf(worker.bgw_function_name, BGW_MAXLEN, "orochi_compaction_worker_main");
+    worker.bgw_main_arg = (Datum)0;
+    worker.bgw_notify_pid = 0;
+
+    RegisterBackgroundWorker(&worker);
+#endif /* RAFT_INTEGRATION */
 
     elog(LOG, "Orochi background workers registered");
 }

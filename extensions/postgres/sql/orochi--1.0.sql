@@ -341,15 +341,18 @@ CREATE FUNCTION orochi._add_compression_policy(
     LANGUAGE C STRICT;
 
 CREATE FUNCTION remove_compression_policy(hypertable regclass)
-RETURNS void AS $$
+RETURNS integer AS $$
+DECLARE
+    policy_id integer;
 BEGIN
-    PERFORM orochi._remove_compression_policy(hypertable);
-    RAISE NOTICE 'Removed compression policy from %', hypertable;
+    SELECT orochi._remove_compression_policy(hypertable) INTO policy_id;
+    RAISE NOTICE 'Removed compression policy % from %', policy_id, hypertable;
+    RETURN policy_id;
 END;
 $$ LANGUAGE plpgsql;
 
 CREATE FUNCTION orochi._remove_compression_policy(hypertable_oid oid)
-RETURNS void
+RETURNS integer
     AS 'MODULE_PATHNAME', 'orochi_remove_compression_policy_sql'
     LANGUAGE C STRICT;
 
@@ -378,14 +381,18 @@ CREATE FUNCTION orochi._add_retention_policy(
     LANGUAGE C STRICT;
 
 CREATE FUNCTION remove_retention_policy(relation regclass)
-RETURNS void AS $$
+RETURNS integer AS $$
+DECLARE
+    policy_id integer;
 BEGIN
-    PERFORM orochi._remove_retention_policy(relation);
+    SELECT orochi._remove_retention_policy(relation) INTO policy_id;
+    RAISE NOTICE 'Removed retention policy % from %', policy_id, relation;
+    RETURN policy_id;
 END;
 $$ LANGUAGE plpgsql;
 
 CREATE FUNCTION orochi._remove_retention_policy(hypertable_oid oid)
-RETURNS void
+RETURNS integer
     AS 'MODULE_PATHNAME', 'orochi_remove_retention_policy_sql'
     LANGUAGE C STRICT;
 
@@ -1086,6 +1093,49 @@ RETURNS boolean
     AS 'MODULE_PATHNAME', 'orochi_raft_create_snapshot_sql'
     LANGUAGE C STRICT;
 
+-- Raft cluster management functions
+
+CREATE FUNCTION orochi._raft_step_down()
+RETURNS boolean
+    AS 'MODULE_PATHNAME', 'orochi_raft_step_down'
+    LANGUAGE C STRICT;
+
+CREATE FUNCTION orochi._raft_transfer_leadership(target_node_id integer)
+RETURNS boolean
+    AS 'MODULE_PATHNAME', 'orochi_raft_transfer_leadership'
+    LANGUAGE C STRICT;
+
+CREATE FUNCTION orochi._raft_add_node(node_id integer, hostname text, port integer)
+RETURNS boolean
+    AS 'MODULE_PATHNAME', 'orochi_raft_add_node'
+    LANGUAGE C STRICT;
+
+CREATE FUNCTION orochi._raft_remove_node(node_id integer)
+RETURNS boolean
+    AS 'MODULE_PATHNAME', 'orochi_raft_remove_node'
+    LANGUAGE C STRICT;
+
+-- User-facing wrappers
+CREATE FUNCTION raft_step_down()
+RETURNS boolean AS $$
+    SELECT orochi._raft_step_down();
+$$ LANGUAGE sql;
+
+CREATE FUNCTION raft_transfer_leadership(target_node_id integer)
+RETURNS boolean AS $$
+    SELECT orochi._raft_transfer_leadership(target_node_id);
+$$ LANGUAGE sql;
+
+CREATE FUNCTION raft_add_node(node_id integer, hostname text, port integer)
+RETURNS boolean AS $$
+    SELECT orochi._raft_add_node(node_id, hostname, port);
+$$ LANGUAGE sql;
+
+CREATE FUNCTION raft_remove_node(node_id integer)
+RETURNS boolean AS $$
+    SELECT orochi._raft_remove_node(node_id);
+$$ LANGUAGE sql;
+
 -- Note: raft_cluster view is created dynamically after orochi_nodes table exists
 
 -- ============================================================
@@ -1514,6 +1564,30 @@ CREATE TABLE IF NOT EXISTS orochi.orochi_auth_audit_log_default
     PARTITION OF orochi.orochi_auth_audit_log DEFAULT;
 
 -- ============================================================
+-- Authentication Webhook Queue Table
+-- ============================================================
+
+/*
+ * Webhook delivery queue - used when libcurl is not available.
+ * An external process can poll this table for pending deliveries
+ * and deliver webhooks via HTTP, then update status accordingly.
+ */
+CREATE TABLE IF NOT EXISTS orochi.orochi_auth_webhook_queue (
+    delivery_id BIGSERIAL PRIMARY KEY,
+    endpoint_id BIGINT NOT NULL,
+    event_id TEXT,
+    event_type TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    signature TEXT,
+    status TEXT DEFAULT 'pending',
+    created_at TIMESTAMPTZ DEFAULT now(),
+    processed_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_webhook_queue_status
+    ON orochi.orochi_auth_webhook_queue (status) WHERE status = 'pending';
+
+-- ============================================================
 -- Authentication Audit Log Functions
 -- ============================================================
 
@@ -1747,3 +1821,60 @@ $$ LANGUAGE plpgsql;
  * - orochi.auth_audit_failures: Failed authentication attempts
  * - orochi.auth_audit_suspicious: Suspicious activity alerts
  */
+
+-- ============================================================
+-- Pipeline and CDC Table-Based Queue Tables
+-- ============================================================
+
+/*
+ * These tables serve as fallback message queues when external
+ * dependencies (librdkafka, libcurl) are not available. They
+ * allow pipelines and CDC subscriptions to function using
+ * PostgreSQL tables as the transport layer.
+ */
+
+-- Pipeline message queue (fallback for Kafka source)
+CREATE TABLE IF NOT EXISTS orochi.orochi_pipeline_queue (
+    message_id BIGSERIAL PRIMARY KEY,
+    pipeline_id INTEGER NOT NULL,
+    topic TEXT NOT NULL,
+    partition_id INTEGER DEFAULT 0,
+    payload BYTEA NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Pipeline queue cursor tracking (fallback for Kafka consumer offsets)
+CREATE TABLE IF NOT EXISTS orochi.orochi_pipeline_queue_cursors (
+    pipeline_id INTEGER NOT NULL,
+    topic TEXT NOT NULL,
+    partition_id INTEGER DEFAULT 0,
+    committed_offset BIGINT DEFAULT 0,
+    current_offset BIGINT DEFAULT 0,
+    PRIMARY KEY (pipeline_id, topic, partition_id)
+);
+
+-- CDC event storage (fallback for Kafka sink)
+CREATE TABLE IF NOT EXISTS orochi.orochi_cdc_events (
+    event_id BIGSERIAL PRIMARY KEY,
+    subscription_id INTEGER,
+    topic TEXT NOT NULL,
+    message_key TEXT,
+    payload BYTEA,
+    payload_size INTEGER,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Webhook delivery queue (fallback for libcurl webhook sink)
+CREATE TABLE IF NOT EXISTS orochi.orochi_webhook_queue (
+    delivery_id BIGSERIAL PRIMARY KEY,
+    subscription_id INTEGER,
+    url TEXT NOT NULL,
+    method TEXT DEFAULT 'POST',
+    content_type TEXT DEFAULT 'application/json',
+    headers JSONB,
+    payload BYTEA,
+    payload_size INTEGER,
+    status TEXT DEFAULT 'pending',
+    created_at TIMESTAMPTZ DEFAULT now(),
+    processed_at TIMESTAMPTZ
+);

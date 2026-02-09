@@ -1026,6 +1026,21 @@ static bool transaction_tracker_verify_commit(const char *gid, RaftNode *node)
 PG_FUNCTION_INFO_V1(orochi_raft_status);
 PG_FUNCTION_INFO_V1(orochi_raft_leader);
 PG_FUNCTION_INFO_V1(orochi_raft_cluster_info);
+PG_FUNCTION_INFO_V1(orochi_raft_step_down);
+PG_FUNCTION_INFO_V1(orochi_raft_transfer_leadership);
+PG_FUNCTION_INFO_V1(orochi_raft_add_node);
+PG_FUNCTION_INFO_V1(orochi_raft_remove_node);
+PG_FUNCTION_INFO_V1(orochi_raft_is_leader_sql);
+PG_FUNCTION_INFO_V1(orochi_raft_get_leader_sql);
+PG_FUNCTION_INFO_V1(orochi_raft_status_sql);
+PG_FUNCTION_INFO_V1(orochi_raft_read_index_sql);
+PG_FUNCTION_INFO_V1(orochi_raft_leader_read_index_sql);
+PG_FUNCTION_INFO_V1(orochi_raft_can_read_stale_sql);
+PG_FUNCTION_INFO_V1(orochi_raft_follower_read_sql);
+PG_FUNCTION_INFO_V1(orochi_raft_create_snapshot_sql);
+PG_FUNCTION_INFO_V1(orochi_raft_install_snapshot_sql);
+PG_FUNCTION_INFO_V1(orochi_raft_request_vote_sql);
+PG_FUNCTION_INFO_V1(orochi_raft_append_entries_sql);
 
 /*
  * orochi_raft_status
@@ -1107,6 +1122,619 @@ Datum orochi_raft_cluster_info(PG_FUNCTION_ARGS)
 
         LWLockRelease(raft_shared_state->lock);
     }
+
+    tuple = heap_form_tuple(tupdesc, values, nulls);
+
+    PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
+}
+
+/* ============================================================
+ * Additional SQL Functions
+ * ============================================================ */
+
+/*
+ * orochi_raft_step_down
+ *    SQL function to request the current leader to step down.
+ *
+ * Signals the Raft background worker to transition from leader to follower
+ * by setting the state in shared memory. The background worker will pick
+ * up this change on its next tick.
+ *
+ * Returns true if the step-down was initiated, false otherwise.
+ */
+Datum orochi_raft_step_down(PG_FUNCTION_ARGS)
+{
+    bool initiated = false;
+
+    if (raft_shared_state == NULL)
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 errmsg("Raft shared state is not initialized")));
+
+    LWLockAcquire(raft_shared_state->lock, LW_EXCLUSIVE);
+
+    if (raft_shared_state->current_state == RAFT_STATE_LEADER) {
+        /*
+         * Signal step-down by setting the state to follower in shared memory.
+         * The background worker will detect the mismatch between its local
+         * state and shared state on the next tick.
+         */
+        raft_shared_state->current_state = RAFT_STATE_FOLLOWER;
+        raft_shared_state->current_leader_id = -1;
+        initiated = true;
+
+        elog(LOG, "Raft step-down initiated via SQL for node %d",
+             raft_shared_state->my_node_id);
+    } else {
+        elog(NOTICE, "Node %d is not the leader (state: %s), cannot step down",
+             raft_shared_state->my_node_id,
+             raft_state_name(raft_shared_state->current_state));
+    }
+
+    LWLockRelease(raft_shared_state->lock);
+
+    PG_RETURN_BOOL(initiated);
+}
+
+/*
+ * orochi_raft_transfer_leadership
+ *    SQL function to transfer leadership to a specific node.
+ *
+ * Sets the target node ID in shared memory for the background worker
+ * to initiate leadership transfer. The actual transfer happens when
+ * the background worker processes this request.
+ *
+ * Arguments: target_node_id (int4)
+ * Returns: bool (true if transfer was initiated)
+ */
+Datum orochi_raft_transfer_leadership(PG_FUNCTION_ARGS)
+{
+    int32 target_node_id = PG_GETARG_INT32(0);
+    bool initiated = false;
+
+    if (raft_shared_state == NULL)
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 errmsg("Raft shared state is not initialized")));
+
+    LWLockAcquire(raft_shared_state->lock, LW_EXCLUSIVE);
+
+    if (raft_shared_state->current_state == RAFT_STATE_LEADER) {
+        if (target_node_id == raft_shared_state->my_node_id) {
+            elog(NOTICE, "Cannot transfer leadership to self");
+        } else {
+            /*
+             * Signal leadership transfer by stepping down and setting
+             * the new leader hint in shared memory. The background worker
+             * will detect the state change and trigger a new election
+             * where the target node should win.
+             */
+            raft_shared_state->current_state = RAFT_STATE_FOLLOWER;
+            raft_shared_state->current_leader_id = target_node_id;
+            initiated = true;
+
+            elog(LOG, "Raft leadership transfer to node %d initiated via SQL",
+                 target_node_id);
+        }
+    } else {
+        elog(NOTICE, "Node %d is not the leader, cannot transfer leadership",
+             raft_shared_state->my_node_id);
+    }
+
+    LWLockRelease(raft_shared_state->lock);
+
+    PG_RETURN_BOOL(initiated);
+}
+
+/*
+ * orochi_raft_add_node
+ *    SQL function to add a peer node to the Raft cluster.
+ *
+ * This requires the Raft background worker to be running on this backend,
+ * as it needs to modify the local Raft node's cluster configuration.
+ *
+ * Arguments: node_id (int4), hostname (text), port (int4)
+ * Returns: bool (true if node was added)
+ */
+Datum orochi_raft_add_node(PG_FUNCTION_ARGS)
+{
+    int32 node_id = PG_GETARG_INT32(0);
+    text *hostname_text = PG_GETARG_TEXT_PP(1);
+    int32 port = PG_GETARG_INT32(2);
+    char *hostname;
+
+    if (local_raft_node == NULL)
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 errmsg("Raft node is not available"),
+                 errdetail("This operation must be performed on the Raft "
+                           "background worker node.")));
+
+    hostname = text_to_cstring(hostname_text);
+
+    raft_add_peer(local_raft_node, node_id, hostname, port);
+    raft_update_shared_state(local_raft_node);
+
+    pfree(hostname);
+
+    elog(LOG, "Raft peer node %d added via SQL at port %d", node_id, port);
+
+    PG_RETURN_BOOL(true);
+}
+
+/*
+ * orochi_raft_remove_node
+ *    SQL function to remove a peer node from the Raft cluster.
+ *
+ * This requires the Raft background worker to be running on this backend,
+ * as it needs to modify the local Raft node's cluster configuration.
+ *
+ * Arguments: node_id (int4)
+ * Returns: bool (true if node was removed)
+ */
+Datum orochi_raft_remove_node(PG_FUNCTION_ARGS)
+{
+    int32 node_id = PG_GETARG_INT32(0);
+
+    if (local_raft_node == NULL)
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 errmsg("Raft node is not available"),
+                 errdetail("This operation must be performed on the Raft "
+                           "background worker node.")));
+
+    raft_remove_peer(local_raft_node, node_id);
+    raft_update_shared_state(local_raft_node);
+
+    elog(LOG, "Raft peer node %d removed via SQL", node_id);
+
+    PG_RETURN_BOOL(true);
+}
+
+/*
+ * orochi_raft_is_leader_sql
+ *    SQL function to check if this node is the current Raft leader.
+ *
+ * Reads from shared state, so it can be called from any backend.
+ *
+ * Returns: bool
+ */
+Datum orochi_raft_is_leader_sql(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_BOOL(orochi_raft_is_leader());
+}
+
+/*
+ * orochi_raft_get_leader_sql
+ *    SQL function to get the current Raft leader node ID.
+ *
+ * Reads from shared state, so it can be called from any backend.
+ *
+ * Returns: int4 (leader node ID, -1 if unknown)
+ */
+Datum orochi_raft_get_leader_sql(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(orochi_raft_get_leader());
+}
+
+/*
+ * orochi_raft_status_sql
+ *    SQL function returning a composite record with detailed Raft status.
+ *
+ * Returns: record (node_id int, state text, term bigint, leader_id int,
+ *                   cluster_size int)
+ */
+Datum orochi_raft_status_sql(PG_FUNCTION_ARGS)
+{
+    TupleDesc tupdesc;
+    Datum values[5];
+    bool nulls[5];
+    HeapTuple tuple;
+
+    if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("function returning record called in context that "
+                        "cannot accept type record")));
+
+    memset(nulls, 0, sizeof(nulls));
+
+    if (raft_shared_state == NULL) {
+        memset(nulls, true, sizeof(nulls));
+    } else {
+        LWLockAcquire(raft_shared_state->lock, LW_SHARED);
+
+        values[0] = Int32GetDatum(raft_shared_state->my_node_id);
+        values[1] = CStringGetTextDatum(
+            raft_state_name(raft_shared_state->current_state));
+        values[2] = Int64GetDatum(raft_shared_state->current_term);
+        values[3] = Int32GetDatum(raft_shared_state->current_leader_id);
+        values[4] = Int32GetDatum(raft_shared_state->cluster_size);
+
+        LWLockRelease(raft_shared_state->lock);
+    }
+
+    tuple = heap_form_tuple(tupdesc, values, nulls);
+
+    PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
+}
+
+/*
+ * orochi_raft_read_index_sql
+ *    SQL function to request a read index for linearizable reads.
+ *
+ * If the Raft background worker is available, delegates to raft_read_index().
+ * Otherwise, falls back to returning the last committed index from shared
+ * state, which provides eventual consistency.
+ *
+ * Arguments: timeout_ms (int4, optional, default 5000)
+ * Returns: int8 (read index, 0 on failure)
+ */
+Datum orochi_raft_read_index_sql(PG_FUNCTION_ARGS)
+{
+    int timeout_ms = PG_NARGS() > 0 && !PG_ARGISNULL(0) ? PG_GETARG_INT32(0) : 5000;
+    uint64 read_index = 0;
+
+    if (local_raft_node != NULL) {
+        /* We are in the background worker - use the full protocol */
+        read_index = raft_read_index(local_raft_node, timeout_ms);
+    } else if (raft_shared_state != NULL) {
+        /*
+         * Regular backend - return the last committed index from shared
+         * state as a best-effort read index. This provides bounded
+         * staleness but not strict linearizability.
+         */
+        LWLockAcquire(raft_shared_state->lock, LW_SHARED);
+        read_index = raft_shared_state->last_committed_index;
+        LWLockRelease(raft_shared_state->lock);
+    }
+
+    PG_RETURN_INT64((int64) read_index);
+}
+
+/*
+ * orochi_raft_leader_read_index_sql
+ *    SQL function for leader-only linearizable read index.
+ *
+ * This is the server-side handler for the leader read index protocol.
+ * Followers call this on the leader to obtain a linearizable read index.
+ * Only returns a valid index when called on the leader node.
+ *
+ * Returns: int8 (read index, 0 if not leader or on failure)
+ */
+Datum orochi_raft_leader_read_index_sql(PG_FUNCTION_ARGS)
+{
+    uint64 read_index = 0;
+
+    if (local_raft_node != NULL) {
+        if (!local_raft_node->is_leader) {
+            elog(DEBUG1, "leader_read_index called on non-leader node %d",
+                 local_raft_node->node_id);
+            PG_RETURN_INT64(0);
+        }
+        read_index = raft_read_index(local_raft_node, 5000);
+    } else if (raft_shared_state != NULL) {
+        /*
+         * Regular backend - check if we are leader and return
+         * the committed index.
+         */
+        LWLockAcquire(raft_shared_state->lock, LW_SHARED);
+        if (raft_shared_state->current_state == RAFT_STATE_LEADER)
+            read_index = raft_shared_state->last_committed_index;
+        LWLockRelease(raft_shared_state->lock);
+    }
+
+    PG_RETURN_INT64((int64) read_index);
+}
+
+/*
+ * orochi_raft_can_read_stale_sql
+ *    SQL function to check if this node can serve a stale read.
+ *
+ * Uses the local raft node if available, otherwise approximates based
+ * on shared state. For a follower, checks whether the node has applied
+ * entries up to at least the given read index.
+ *
+ * Arguments: read_index (int8)
+ * Returns: bool
+ */
+Datum orochi_raft_can_read_stale_sql(PG_FUNCTION_ARGS)
+{
+    int64 read_index = PG_GETARG_INT64(0);
+
+    if (local_raft_node != NULL) {
+        PG_RETURN_BOOL(raft_can_serve_read(local_raft_node, (uint64) read_index));
+    } else if (raft_shared_state != NULL) {
+        /*
+         * Without the local raft node, approximate by comparing
+         * the read_index to the last committed index in shared state.
+         */
+        bool can_read;
+
+        LWLockAcquire(raft_shared_state->lock, LW_SHARED);
+        can_read = (raft_shared_state->last_committed_index >= (uint64) read_index);
+        LWLockRelease(raft_shared_state->lock);
+
+        PG_RETURN_BOOL(can_read);
+    }
+
+    /* No shared state - cannot serve any reads */
+    PG_RETURN_BOOL(false);
+}
+
+/*
+ * orochi_raft_follower_read_sql
+ *    SQL function to check if a bounded-stale follower read is allowed.
+ *
+ * Checks whether the follower has heard from the leader recently enough
+ * to serve reads within the specified staleness bound.
+ *
+ * Arguments: max_staleness_ms (int4)
+ * Returns: bool
+ */
+Datum orochi_raft_follower_read_sql(PG_FUNCTION_ARGS)
+{
+    int32 max_staleness_ms = PG_GETARG_INT32(0);
+
+    if (local_raft_node != NULL) {
+        PG_RETURN_BOOL(raft_follower_read(local_raft_node, max_staleness_ms));
+    } else if (raft_shared_state != NULL) {
+        /*
+         * Without the local raft node, we cannot accurately determine
+         * heartbeat recency. If we are the leader, reads are always fresh.
+         * Otherwise, be conservative and deny the read.
+         */
+        bool is_leader;
+
+        LWLockAcquire(raft_shared_state->lock, LW_SHARED);
+        is_leader = (raft_shared_state->current_state == RAFT_STATE_LEADER);
+        LWLockRelease(raft_shared_state->lock);
+
+        PG_RETURN_BOOL(is_leader);
+    }
+
+    PG_RETURN_BOOL(false);
+}
+
+/*
+ * orochi_raft_create_snapshot_sql
+ *    SQL function to trigger creation of a Raft log snapshot.
+ *
+ * Creates a snapshot at the current last-applied log index to allow
+ * log compaction. Requires the Raft background worker.
+ *
+ * Arguments: snapshot_data (bytea)
+ * Returns: bool (true if snapshot was created)
+ */
+Datum orochi_raft_create_snapshot_sql(PG_FUNCTION_ARGS)
+{
+    bytea *snapshot_data = PG_GETARG_BYTEA_PP(0);
+    char *data;
+    int32 data_size;
+    uint64 snapshot_index;
+
+    if (local_raft_node == NULL)
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 errmsg("Raft node is not available"),
+                 errdetail("This operation must be performed on the Raft "
+                           "background worker node.")));
+
+    data = VARDATA_ANY(snapshot_data);
+    data_size = VARSIZE_ANY_EXHDR(snapshot_data);
+    snapshot_index = local_raft_node->log->last_applied;
+
+    if (snapshot_index < local_raft_node->log->first_index) {
+        elog(NOTICE, "Nothing to snapshot (applied=%lu, first=%lu)",
+             snapshot_index, local_raft_node->log->first_index);
+        PG_RETURN_BOOL(false);
+    }
+
+    raft_log_create_snapshot(local_raft_node->log, snapshot_index,
+                             data, data_size);
+
+    elog(LOG, "Raft snapshot created at index %lu (%d bytes) via SQL",
+         snapshot_index, data_size);
+
+    PG_RETURN_BOOL(true);
+}
+
+/*
+ * orochi_raft_install_snapshot_sql
+ *    SQL function to handle an InstallSnapshot RPC from the leader.
+ *
+ * This is the server-side handler called via libpq by the leader node
+ * to install a snapshot on a lagging follower. Requires the Raft
+ * background worker.
+ *
+ * Arguments: term (int8), leader_id (int4), last_included_index (int8),
+ *            last_included_term (int8), offset (int4), data (bytea),
+ *            data_size (int4), done (bool)
+ * Returns: record (term int8, bytes_received int4, success bool)
+ */
+Datum orochi_raft_install_snapshot_sql(PG_FUNCTION_ARGS)
+{
+    TupleDesc tupdesc;
+    Datum values[3];
+    bool nulls[3];
+    HeapTuple tuple;
+    InstallSnapshotRequest request;
+    InstallSnapshotResponse response;
+
+    if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("function returning record called in context that "
+                        "cannot accept type record")));
+
+    if (local_raft_node == NULL)
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 errmsg("Raft node is not available"),
+                 errdetail("This operation must be performed on the Raft "
+                           "background worker node.")));
+
+    /* Parse arguments into InstallSnapshotRequest */
+    request.term = (uint64) PG_GETARG_INT64(0);
+    request.leader_id = PG_GETARG_INT32(1);
+    request.last_included_index = (uint64) PG_GETARG_INT64(2);
+    request.last_included_term = (uint64) PG_GETARG_INT64(3);
+    request.offset = PG_GETARG_INT32(4);
+
+    if (!PG_ARGISNULL(5)) {
+        bytea *data_bytea = PG_GETARG_BYTEA_PP(5);
+        request.data = VARDATA_ANY(data_bytea);
+        request.data_size = VARSIZE_ANY_EXHDR(data_bytea);
+    } else {
+        request.data = NULL;
+        request.data_size = 0;
+    }
+
+    /* data_size argument is informational; we use the actual bytea length */
+    request.done = PG_GETARG_BOOL(7);
+
+    /* Delegate to the Raft protocol handler */
+    response = raft_install_snapshot(local_raft_node, &request);
+
+    /* Build result tuple */
+    memset(nulls, 0, sizeof(nulls));
+    values[0] = Int64GetDatum((int64) response.term);
+    values[1] = Int32GetDatum(response.bytes_received);
+    values[2] = BoolGetDatum(response.success);
+
+    tuple = heap_form_tuple(tupdesc, values, nulls);
+
+    PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
+}
+
+/*
+ * orochi_raft_request_vote_sql
+ *    SQL function to handle a RequestVote RPC from a candidate.
+ *
+ * This is the server-side handler called via libpq by candidate nodes
+ * during elections. Requires the Raft background worker.
+ *
+ * Arguments: term (int8), candidate_id (int4), last_log_index (int8),
+ *            last_log_term (int8)
+ * Returns: record (term int8, vote_granted bool)
+ */
+Datum orochi_raft_request_vote_sql(PG_FUNCTION_ARGS)
+{
+    TupleDesc tupdesc;
+    Datum values[2];
+    bool nulls[2];
+    HeapTuple tuple;
+    RequestVoteRequest request;
+    RequestVoteResponse response;
+
+    if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("function returning record called in context that "
+                        "cannot accept type record")));
+
+    if (local_raft_node == NULL)
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 errmsg("Raft node is not available"),
+                 errdetail("This operation must be performed on the Raft "
+                           "background worker node.")));
+
+    /* Parse arguments into RequestVoteRequest */
+    request.term = (uint64) PG_GETARG_INT64(0);
+    request.candidate_id = PG_GETARG_INT32(1);
+    request.last_log_index = (uint64) PG_GETARG_INT64(2);
+    request.last_log_term = (uint64) PG_GETARG_INT64(3);
+
+    /* Delegate to the Raft protocol handler */
+    response = raft_request_vote(local_raft_node, &request);
+
+    /* Update shared state after handling the vote */
+    raft_update_shared_state(local_raft_node);
+
+    /* Build result tuple */
+    memset(nulls, 0, sizeof(nulls));
+    values[0] = Int64GetDatum((int64) response.term);
+    values[1] = BoolGetDatum(response.vote_granted);
+
+    tuple = heap_form_tuple(tupdesc, values, nulls);
+
+    PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
+}
+
+/*
+ * orochi_raft_append_entries_sql
+ *    SQL function to handle an AppendEntries RPC from the leader.
+ *
+ * This is the server-side handler called via libpq by the leader node
+ * for log replication and heartbeats. Requires the Raft background worker.
+ *
+ * Arguments: term (int8), leader_id (int4), prev_log_index (int8),
+ *            prev_log_term (int8), entries (jsonb, nullable),
+ *            leader_commit (int8)
+ * Returns: record (term int8, success bool, match_index int8)
+ */
+Datum orochi_raft_append_entries_sql(PG_FUNCTION_ARGS)
+{
+    TupleDesc tupdesc;
+    Datum values[3];
+    bool nulls[3];
+    HeapTuple tuple;
+    AppendEntriesRequest request;
+    AppendEntriesResponse response;
+
+    if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("function returning record called in context that "
+                        "cannot accept type record")));
+
+    if (local_raft_node == NULL)
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 errmsg("Raft node is not available"),
+                 errdetail("This operation must be performed on the Raft "
+                           "background worker node.")));
+
+    /* Parse arguments into AppendEntriesRequest */
+    request.term = (uint64) PG_GETARG_INT64(0);
+    request.leader_id = PG_GETARG_INT32(1);
+    request.prev_log_index = (uint64) PG_GETARG_INT64(2);
+    request.prev_log_term = (uint64) PG_GETARG_INT64(3);
+    request.leader_commit = (uint64) PG_GETARG_INT64(5);
+
+    /*
+     * Parse entries from JSONB if provided.
+     * For heartbeats, the entries argument is NULL.
+     */
+    if (!PG_ARGISNULL(4)) {
+        /*
+         * TODO: Full JSONB entry parsing would require jsonb_utils.
+         * For now, we handle the common case of heartbeat (NULL entries)
+         * and leave entry deserialization as a follow-up. The binary
+         * serialization path in raft_send_append_entries covers the
+         * production RPC path.
+         */
+        elog(WARNING, "JSONB entry deserialization not yet implemented "
+                      "in append_entries SQL handler; treating as heartbeat");
+        request.entries = NULL;
+        request.entries_count = 0;
+    } else {
+        request.entries = NULL;
+        request.entries_count = 0;
+    }
+
+    /* Delegate to the Raft protocol handler */
+    response = raft_append_entries(local_raft_node, &request);
+
+    /* Update shared state after handling append entries */
+    raft_update_shared_state(local_raft_node);
+
+    /* Build result tuple */
+    memset(nulls, 0, sizeof(nulls));
+    values[0] = Int64GetDatum((int64) response.term);
+    values[1] = BoolGetDatum(response.success);
+    values[2] = Int64GetDatum((int64) response.match_index);
 
     tuple = heap_form_tuple(tupdesc, values, nulls);
 

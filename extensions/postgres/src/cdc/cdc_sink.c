@@ -18,6 +18,7 @@
 /* postgres.h must be included first */
 #include "postgres.h"
 
+#include "executor/spi.h"
 #include "fmgr.h"
 #include "storage/fd.h"
 #include "utils/builtins.h"
@@ -258,6 +259,9 @@ bool cdc_sink_flush(void *sink_context, CDCSinkType sink_type)
         KafkaSinkContext *ctx = (KafkaSinkContext *)sink_context;
         if (ctx->producer)
             rd_kafka_flush(ctx->producer, 5000); /* 5 second timeout */
+#else
+        /* Table writes are already durable, just log */
+        elog(DEBUG1, "Orochi CDC: table-based sink flush (no-op, writes already durable)");
 #endif
         return true;
     }
@@ -437,8 +441,44 @@ void *cdc_kafka_sink_init(CDCKafkaSinkConfig *config)
              config->topic);
     }
 #else
-    elog(WARNING, "Kafka support not compiled in (HAVE_LIBRDKAFKA not defined)");
-    ctx->is_initialized = true; /* For stub testing */
+    /* Table-based events fallback when librdkafka is not available */
+    {
+        int spi_ret;
+
+        spi_ret = SPI_connect();
+        if (spi_ret != SPI_OK_CONNECT)
+        {
+            elog(ERROR, "Orochi CDC: failed to connect to SPI for table-based events init");
+            MemoryContextSwitchTo(oldcontext);
+            return NULL;
+        }
+
+        PG_TRY();
+        {
+            SPI_execute(
+                "CREATE TABLE IF NOT EXISTS orochi.orochi_cdc_events ("
+                "  event_id BIGSERIAL PRIMARY KEY,"
+                "  subscription_id INTEGER,"
+                "  topic TEXT NOT NULL,"
+                "  message_key TEXT,"
+                "  payload BYTEA,"
+                "  payload_size INTEGER,"
+                "  created_at TIMESTAMPTZ DEFAULT now()"
+                ")", false, 0);
+
+            SPI_finish();
+
+            ctx->is_initialized = true;
+
+            elog(LOG, "Orochi CDC: using table-based events (no Kafka)");
+        }
+        PG_CATCH();
+        {
+            SPI_finish();
+            PG_RE_THROW();
+        }
+        PG_END_TRY();
+    }
 #endif
 
     MemoryContextSwitchTo(oldcontext);
@@ -481,11 +521,75 @@ bool cdc_kafka_sink_send(void *producer, const char *topic, const char *key, int
         return true;
     }
 #else
-    ctx->messages_sent++;
-    ctx->bytes_sent += value_size;
-    ctx->last_send_time = GetCurrentTimestamp();
-    elog(DEBUG1, "CDC Kafka sink stub: sent %d bytes to topic %s", value_size, topic);
-    return true;
+    /* Table-based events fallback: insert event into orochi_cdc_events */
+    {
+        int spi_ret;
+        bool success = false;
+
+        spi_ret = SPI_connect();
+        if (spi_ret != SPI_OK_CONNECT)
+        {
+            elog(WARNING, "Orochi CDC: failed to connect to SPI for table-based event send");
+            return false;
+        }
+
+        PG_TRY();
+        {
+            Oid argtypes[4] = { TEXTOID, TEXTOID, BYTEAOID, INT4OID };
+            Datum argvals[4];
+            char nulls[4] = { ' ', ' ', ' ', ' ' };
+            bytea *payload_bytea;
+
+            /* Build topic datum */
+            argvals[0] = CStringGetTextDatum(topic ? topic : ctx->config->topic);
+
+            /* Build key datum (may be NULL) */
+            if (key != NULL && key_size > 0)
+            {
+                char *key_copy = palloc(key_size + 1);
+                memcpy(key_copy, key, key_size);
+                key_copy[key_size] = '\0';
+                argvals[1] = CStringGetTextDatum(key_copy);
+            }
+            else
+            {
+                argvals[1] = (Datum)0;
+                nulls[1] = 'n';
+            }
+
+            /* Build payload datum */
+            payload_bytea = (bytea *)palloc(VARHDRSZ + value_size);
+            SET_VARSIZE(payload_bytea, VARHDRSZ + value_size);
+            memcpy(VARDATA(payload_bytea), value, value_size);
+            argvals[2] = PointerGetDatum(payload_bytea);
+
+            /* payload_size */
+            argvals[3] = Int32GetDatum(value_size);
+
+            SPI_execute_with_args(
+                "INSERT INTO orochi.orochi_cdc_events "
+                "(topic, message_key, payload, payload_size) "
+                "VALUES ($1, $2, $3, $4)",
+                4, argtypes, argvals, nulls, false, 0);
+
+            SPI_finish();
+
+            ctx->messages_sent++;
+            ctx->bytes_sent += value_size;
+            ctx->last_send_time = GetCurrentTimestamp();
+            success = true;
+        }
+        PG_CATCH();
+        {
+            SPI_finish();
+            ctx->messages_failed++;
+            ctx->consecutive_errors++;
+            PG_RE_THROW();
+        }
+        PG_END_TRY();
+
+        return success;
+    }
 #endif
 }
 
@@ -630,8 +734,48 @@ void *cdc_webhook_sink_init(CDCWebhookSinkConfig *config)
         elog(LOG, "CDC Webhook sink initialized: url=%s", config->url);
     }
 #else
-    elog(WARNING, "CURL support not compiled in (HAVE_LIBCURL not defined)");
-    ctx->is_initialized = true; /* For stub testing */
+    /* Table-based webhook queue fallback when libcurl is not available */
+    {
+        int spi_ret;
+
+        spi_ret = SPI_connect();
+        if (spi_ret != SPI_OK_CONNECT)
+        {
+            elog(ERROR, "Orochi CDC: failed to connect to SPI for webhook queue init");
+            MemoryContextSwitchTo(oldcontext);
+            return NULL;
+        }
+
+        PG_TRY();
+        {
+            SPI_execute(
+                "CREATE TABLE IF NOT EXISTS orochi.orochi_webhook_queue ("
+                "  delivery_id BIGSERIAL PRIMARY KEY,"
+                "  subscription_id INTEGER,"
+                "  url TEXT NOT NULL,"
+                "  method TEXT DEFAULT 'POST',"
+                "  content_type TEXT DEFAULT 'application/json',"
+                "  headers JSONB,"
+                "  payload BYTEA,"
+                "  payload_size INTEGER,"
+                "  status TEXT DEFAULT 'pending',"
+                "  created_at TIMESTAMPTZ DEFAULT now(),"
+                "  processed_at TIMESTAMPTZ"
+                ")", false, 0);
+
+            SPI_finish();
+
+            ctx->is_initialized = true;
+
+            elog(LOG, "Orochi CDC: using table-based webhook queue (no libcurl)");
+        }
+        PG_CATCH();
+        {
+            SPI_finish();
+            PG_RE_THROW();
+        }
+        PG_END_TRY();
+    }
 #endif
 
     MemoryContextSwitchTo(oldcontext);
@@ -730,11 +874,69 @@ static bool cdc_webhook_sink_send_internal(WebhookSinkContext *ctx, const char *
     ctx->consecutive_errors++;
     return false;
 #else
-    ctx->requests_sent++;
-    ctx->bytes_sent += size;
-    ctx->last_send_time = GetCurrentTimestamp();
-    elog(DEBUG1, "CDC Webhook sink stub: sent %d bytes", size);
-    return true;
+    /* Table-based webhook queue fallback: enqueue webhook delivery */
+    {
+        int spi_ret;
+        bool success = false;
+
+        spi_ret = SPI_connect();
+        if (spi_ret != SPI_OK_CONNECT)
+        {
+            elog(WARNING, "Orochi CDC: failed to connect to SPI for webhook queue send");
+            return false;
+        }
+
+        PG_TRY();
+        {
+            Oid argtypes[5] = { TEXTOID, TEXTOID, TEXTOID, BYTEAOID, INT4OID };
+            Datum argvals[5];
+            bytea *payload_bytea;
+
+            /* URL */
+            argvals[0] = CStringGetTextDatum(ctx->config->url);
+
+            /* Method */
+            argvals[1] = CStringGetTextDatum(
+                ctx->config->method ? ctx->config->method : "POST");
+
+            /* Content-Type */
+            argvals[2] = CStringGetTextDatum(
+                ctx->config->content_type ? ctx->config->content_type : "application/json");
+
+            /* Payload */
+            payload_bytea = (bytea *)palloc(VARHDRSZ + size);
+            SET_VARSIZE(payload_bytea, VARHDRSZ + size);
+            memcpy(VARDATA(payload_bytea), data, size);
+            argvals[3] = PointerGetDatum(payload_bytea);
+
+            /* payload_size */
+            argvals[4] = Int32GetDatum(size);
+
+            SPI_execute_with_args(
+                "INSERT INTO orochi.orochi_webhook_queue "
+                "(url, method, content_type, payload, payload_size) "
+                "VALUES ($1, $2, $3, $4, $5)",
+                5, argtypes, argvals, NULL, false, 0);
+
+            SPI_finish();
+
+            ctx->requests_sent++;
+            ctx->bytes_sent += size;
+            ctx->last_send_time = GetCurrentTimestamp();
+            ctx->consecutive_errors = 0;
+            success = true;
+        }
+        PG_CATCH();
+        {
+            SPI_finish();
+            ctx->requests_failed++;
+            ctx->consecutive_errors++;
+            PG_RE_THROW();
+        }
+        PG_END_TRY();
+
+        return success;
+    }
 #endif
 }
 

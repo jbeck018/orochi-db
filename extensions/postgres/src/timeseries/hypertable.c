@@ -781,7 +781,7 @@ static int store_policy(Oid hypertable_oid, int policy_type, Interval *trigger_i
     return policy_id;
 }
 
-void orochi_add_retention_policy(Oid hypertable_oid, Interval *drop_after)
+int orochi_add_retention_policy(Oid hypertable_oid, Interval *drop_after)
 {
     int policy_id;
 
@@ -793,9 +793,11 @@ void orochi_add_retention_policy(Oid hypertable_oid, Interval *drop_after)
     policy_id = store_policy(hypertable_oid, 1, drop_after);
 
     elog(NOTICE, "Added retention policy %d for hypertable %u", policy_id, hypertable_oid);
+
+    return policy_id;
 }
 
-void orochi_add_compression_policy(Oid hypertable_oid, Interval *compress_after)
+int orochi_add_compression_policy(Oid hypertable_oid, Interval *compress_after)
 {
     int policy_id;
 
@@ -807,6 +809,8 @@ void orochi_add_compression_policy(Oid hypertable_oid, Interval *compress_after)
     policy_id = store_policy(hypertable_oid, 0, compress_after);
 
     elog(NOTICE, "Added compression policy %d for hypertable %u", policy_id, hypertable_oid);
+
+    return policy_id;
 }
 
 void orochi_enable_compression(Oid hypertable_oid, const char *segment_by, const char *order_by)
@@ -1566,10 +1570,10 @@ Datum orochi_add_compression_policy_sql(PG_FUNCTION_ARGS)
 {
     Oid hypertable_oid = PG_GETARG_OID(0);
     Interval *compress_after = PG_GETARG_INTERVAL_P(1);
+    int policy_id;
 
-    orochi_add_compression_policy(hypertable_oid, compress_after);
-    /* Return a dummy policy ID for now */
-    PG_RETURN_INT32(1);
+    policy_id = orochi_add_compression_policy(hypertable_oid, compress_after);
+    PG_RETURN_INT32(policy_id);
 }
 
 Datum orochi_remove_compression_policy_sql(PG_FUNCTION_ARGS)
@@ -1577,7 +1581,7 @@ Datum orochi_remove_compression_policy_sql(PG_FUNCTION_ARGS)
     Oid hypertable_oid = PG_GETARG_OID(0);
     StringInfoData query;
     int ret;
-    bool removed = false;
+    int policy_id = 0;
 
     /* Remove compression policy (policy_type = 0) from catalog */
     SPI_connect();
@@ -1585,32 +1589,37 @@ Datum orochi_remove_compression_policy_sql(PG_FUNCTION_ARGS)
     initStringInfo(&query);
     appendStringInfo(&query,
                      "DELETE FROM orochi.orochi_policies "
-                     "WHERE hypertable_oid = %u AND policy_type = 0",
+                     "WHERE hypertable_oid = %u AND policy_type = 0 "
+                     "RETURNING policy_id",
                      hypertable_oid);
 
     ret = SPI_execute(query.data, false, 0);
-    if (ret == SPI_OK_DELETE && SPI_processed > 0)
-        removed = true;
+    if (ret == SPI_OK_DELETE_RETURNING && SPI_processed > 0) {
+        bool isnull;
+        policy_id =
+            DatumGetInt32(SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull));
+    }
 
     pfree(query.data);
     SPI_finish();
 
-    if (removed)
-        elog(NOTICE, "Removed compression policy from hypertable %u", hypertable_oid);
+    if (policy_id > 0)
+        elog(NOTICE, "Removed compression policy %d from hypertable %u", policy_id,
+             hypertable_oid);
     else
         elog(NOTICE, "No compression policy found for hypertable %u", hypertable_oid);
 
-    PG_RETURN_VOID();
+    PG_RETURN_INT32(policy_id);
 }
 
 Datum orochi_add_retention_policy_sql(PG_FUNCTION_ARGS)
 {
     Oid hypertable_oid = PG_GETARG_OID(0);
     Interval *drop_after = PG_GETARG_INTERVAL_P(1);
+    int policy_id;
 
-    orochi_add_retention_policy(hypertable_oid, drop_after);
-    /* Return a dummy policy ID for now */
-    PG_RETURN_INT32(1);
+    policy_id = orochi_add_retention_policy(hypertable_oid, drop_after);
+    PG_RETURN_INT32(policy_id);
 }
 
 Datum orochi_remove_retention_policy_sql(PG_FUNCTION_ARGS)
@@ -1618,7 +1627,7 @@ Datum orochi_remove_retention_policy_sql(PG_FUNCTION_ARGS)
     Oid hypertable_oid = PG_GETARG_OID(0);
     StringInfoData query;
     int ret;
-    bool removed = false;
+    int policy_id = 0;
 
     /* Remove retention policy (policy_type = 1) from catalog */
     SPI_connect();
@@ -1626,22 +1635,26 @@ Datum orochi_remove_retention_policy_sql(PG_FUNCTION_ARGS)
     initStringInfo(&query);
     appendStringInfo(&query,
                      "DELETE FROM orochi.orochi_policies "
-                     "WHERE hypertable_oid = %u AND policy_type = 1",
+                     "WHERE hypertable_oid = %u AND policy_type = 1 "
+                     "RETURNING policy_id",
                      hypertable_oid);
 
     ret = SPI_execute(query.data, false, 0);
-    if (ret == SPI_OK_DELETE && SPI_processed > 0)
-        removed = true;
+    if (ret == SPI_OK_DELETE_RETURNING && SPI_processed > 0) {
+        bool isnull;
+        policy_id =
+            DatumGetInt32(SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull));
+    }
 
     pfree(query.data);
     SPI_finish();
 
-    if (removed)
-        elog(NOTICE, "Removed retention policy from hypertable %u", hypertable_oid);
+    if (policy_id > 0)
+        elog(NOTICE, "Removed retention policy %d from hypertable %u", policy_id, hypertable_oid);
     else
         elog(NOTICE, "No retention policy found for hypertable %u", hypertable_oid);
 
-    PG_RETURN_VOID();
+    PG_RETURN_INT32(policy_id);
 }
 
 Datum orochi_run_maintenance_sql(PG_FUNCTION_ARGS)

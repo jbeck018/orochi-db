@@ -7,7 +7,8 @@
 # ==============================================================================
 # Stage 1: Build PgDog from source
 # ==============================================================================
-FROM rust:1.75-bookworm AS builder
+# PgDog upstream uses nightly Rust features (edition 2024, is_multiple_of)
+FROM rust:latest AS builder
 
 # Build arguments
 ARG PGDOG_VERSION=latest
@@ -18,9 +19,13 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     pkg-config \
     cmake \
+    clang \
     libclang-dev \
+    mold \
+    protobuf-compiler \
     git \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && rustup component add rustfmt
 
 # Clone PgDog repository
 WORKDIR /build
@@ -32,6 +37,8 @@ RUN if [ "${PGDOG_VERSION}" = "latest" ]; then \
 
 # Build PgDog with release optimizations
 WORKDIR /build/pgdog
+# Remove upstream .cargo/config.toml that forces clang+mold linker
+RUN rm -f .cargo/config.toml
 RUN cargo build --release
 
 # Verify the binary was built
