@@ -19,6 +19,7 @@
 
 #include "postgres.h"
 #include "fmgr.h"
+#include "storage/lwlock.h"
 #include "utils/jsonb.h"
 #include "utils/timestamp.h"
 #include "utils/uuid.h"
@@ -44,6 +45,9 @@
 /* Session configuration */
 #define OROCHI_AUTH_DEFAULT_JWT_EXP   3600   /* 1 hour */
 #define OROCHI_AUTH_REFRESH_TOKEN_EXP 604800 /* 7 days */
+
+/* GUC variable for JWT expiration (defined in gotrue.c) */
+extern int orochi_auth_jwt_exp;
 #define OROCHI_AUTH_MAGIC_LINK_EXP    3600   /* 1 hour */
 #define OROCHI_AUTH_OTP_EXP           600    /* 10 minutes */
 
