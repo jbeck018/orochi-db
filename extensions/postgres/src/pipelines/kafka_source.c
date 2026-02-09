@@ -617,7 +617,7 @@ bool kafka_source_seek(void *consumer_ptr, int64 offset)
 
 #ifdef HAVE_LIBRDKAFKA
     {
-        rd_kafka_resp_err_t err;
+        rd_kafka_error_t *error;
         rd_kafka_topic_partition_list_t *offsets;
 
         offsets = rd_kafka_topic_partition_list_new(1);
@@ -625,14 +625,16 @@ bool kafka_source_seek(void *consumer_ptr, int64 offset)
                                           consumer->current_partition);
         offsets->elems[0].offset = offset;
 
-        err = rd_kafka_seek_partitions(consumer->rk, offsets, 5000);
+        error = rd_kafka_seek_partitions(consumer->rk, offsets, 5000);
 
         rd_kafka_topic_partition_list_destroy(offsets);
 
-        if (err != RD_KAFKA_RESP_ERR_NO_ERROR) {
+        if (error) {
             snprintf(consumer->last_error, sizeof(consumer->last_error),
-                     "Failed to seek to offset %ld: %s", offset, rd_kafka_err2str(err));
+                     "Failed to seek to offset %ld: %s", offset,
+                     rd_kafka_error_string(error));
             elog(WARNING, "%s", consumer->last_error);
+            rd_kafka_error_destroy(error);
             return false;
         }
 
@@ -730,7 +732,7 @@ void kafka_source_close(void *consumer_ptr)
  *
  * Returns number of messages successfully processed.
  */
-int kafka_process_batch(Pipeline *pipeline, KafkaConsumer *consumer, int batch_size)
+static int kafka_process_batch(Pipeline *pipeline, KafkaConsumer *consumer, int batch_size)
 {
     char **messages;
     int num_messages;
@@ -821,7 +823,6 @@ List *parse_json_records(const char *data, int64 size)
 {
     List *records = NIL;
     text *json_text;
-    Datum json_datum;
 
     if (data == NULL || size <= 0)
         return NIL;
@@ -863,7 +864,7 @@ List *parse_json_records(const char *data, int64 size)
 
         ret = SPI_execute_with_args(query.data, 1, argtypes, argvals, NULL, true, 0);
         if (ret == SPI_OK_SELECT && SPI_processed > 0) {
-            int i;
+            uint64 i;
             for (i = 0; i < SPI_processed; i++) {
                 char *record_str = SPI_getvalue(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 1);
                 if (record_str)
@@ -889,12 +890,15 @@ List *parse_json_records(const char *data, int64 size)
                     line_len++;
 
                 if (line_len > 0) {
-                    char *line = palloc(line_len + 1);
+                    char *line;
+                    char *trimmed;
+
+                    line = palloc(line_len + 1);
                     memcpy(line, line_start, line_len);
                     line[line_len] = '\0';
 
                     /* Trim and check if valid JSON */
-                    char *trimmed = line;
+                    trimmed = line;
                     while (*trimmed == ' ' || *trimmed == '\t')
                         trimmed++;
 
@@ -984,6 +988,7 @@ List *parse_csv_records(const char *data, int64 size, char delimiter, bool has_h
                         }
 
                         /* Check if numeric */
+                        {
                         bool is_numeric = true;
                         const char *tp = token;
                         while (*tp) {
@@ -998,6 +1003,7 @@ List *parse_csv_records(const char *data, int64 size, char delimiter, bool has_h
                             appendStringInfo(&json, "%s", token);
                         else
                             appendStringInfo(&json, "\"%s\"", token);
+                        }
 
                         token = strtok_r(NULL, delim_str, &saveptr);
                         col_idx++;
@@ -1068,6 +1074,7 @@ List *parse_line_protocol(const char *data, int64 size)
                     *space1 = '\0';
 
                     /* Split measurement and tags */
+                    {
                     char *comma = strchr(line, ',');
                     if (comma) {
                         *comma = '\0';
@@ -1075,6 +1082,7 @@ List *parse_line_protocol(const char *data, int64 size)
                         tags_str = comma + 1;
                     } else {
                         measurement = line;
+                    }
                     }
 
                     /* Split fields and timestamp */
@@ -1122,6 +1130,7 @@ List *parse_line_protocol(const char *data, int64 size)
                             *eq = '\0';
 
                             /* Check value type */
+                            {
                             int val_len = strlen(value);
                             if (val_len > 0) {
                                 if (value[val_len - 1] == 'i') {
@@ -1142,6 +1151,7 @@ List *parse_line_protocol(const char *data, int64 size)
                                     /* Float */
                                     appendStringInfo(&json, ", \"%s\": %s", field_token, value);
                                 }
+                            }
                             }
                         }
                         field_token = strtok_r(NULL, ",", &field_saveptr);
