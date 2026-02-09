@@ -19,6 +19,7 @@
 #include "postgres.h"
 
 #include "access/xact.h"
+#include "common/base64.h"
 #include "executor/spi.h"
 #include "fmgr.h"
 #include "funcapi.h"
@@ -27,6 +28,7 @@
 #include "storage/lwlock.h"
 #include "storage/shmem.h"
 #include "utils/builtins.h"
+#include "utils/guc.h"
 #include "utils/jsonb.h"
 #include "utils/memutils.h"
 #include "utils/timestamp.h"
