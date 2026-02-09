@@ -34,6 +34,7 @@
 #include "storage/shmem.h"
 #include "utils/builtins.h"
 #include "utils/date.h"
+#include "utils/guc.h"
 #include "utils/memutils.h"
 #include "utils/timestamp.h"
 
@@ -1535,7 +1536,7 @@ void orochi_auth_archive_audit_partitions(void)
 void orochi_auth_token_cleanup_worker_main(Datum main_arg)
 {
     /* Set up signal handlers */
-    pqsignal(SIGTERM, die);
+    pqsignal(SIGTERM, SignalHandlerForShutdownRequest);
     pqsignal(SIGHUP, SignalHandlerForConfigReload);
 
     /* Unblock signals */
@@ -1581,7 +1582,7 @@ void orochi_auth_token_cleanup_worker_main(Datum main_arg)
  */
 void orochi_auth_session_worker_main(Datum main_arg)
 {
-    pqsignal(SIGTERM, die);
+    pqsignal(SIGTERM, SignalHandlerForShutdownRequest);
     pqsignal(SIGHUP, SignalHandlerForConfigReload);
 
     BackgroundWorkerUnblockSignals();
@@ -1627,7 +1628,7 @@ void orochi_auth_session_worker_main(Datum main_arg)
  */
 void orochi_auth_key_rotation_worker_main(Datum main_arg)
 {
-    pqsignal(SIGTERM, die);
+    pqsignal(SIGTERM, SignalHandlerForShutdownRequest);
     pqsignal(SIGHUP, SignalHandlerForConfigReload);
 
     BackgroundWorkerUnblockSignals();

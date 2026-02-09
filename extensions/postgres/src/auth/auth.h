@@ -22,6 +22,7 @@
 #include "fmgr.h"
 #include "libpq/libpq-be.h"
 #include "storage/lwlock.h"
+#include "utils/guc.h"
 #include "utils/timestamp.h"
 
 #include "jwt.h"
