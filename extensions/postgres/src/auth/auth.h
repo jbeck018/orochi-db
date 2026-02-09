@@ -20,7 +20,6 @@
 
 #include "postgres.h"
 #include "fmgr.h"
-#include "libpq/auth.h"
 #include "libpq/libpq-be.h"
 #include "storage/lwlock.h"
 #include "utils/timestamp.h"

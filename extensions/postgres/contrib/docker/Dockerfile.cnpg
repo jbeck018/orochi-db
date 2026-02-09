@@ -24,6 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcurl4-openssl-dev \
     libssl-dev \
     librdkafka-dev \
+    libkrb5-dev \
     git \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
