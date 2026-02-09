@@ -20,8 +20,11 @@
 #include "postgres.h"
 
 #include "access/xact.h"
+#if PG_VERSION_NUM < 180000
 #include "common/sha2.h"
+#endif
 #include "fmgr.h"
+#include "funcapi.h"
 #include "miscadmin.h"
 #include "postmaster/bgworker.h"
 #include "storage/ipc.h"
@@ -273,6 +276,33 @@ void orochi_auth_fini(void)
  */
 void orochi_auth_hash_token(const char *token, char *hash_out)
 {
+#if PG_VERSION_NUM >= 180000
+    /* PG 18+ removed pg_sha256_ctx; use OpenSSL EVP API directly */
+    EVP_MD_CTX *mdctx;
+    unsigned char digest[EVP_MAX_MD_SIZE];
+    unsigned int digest_len;
+    int i;
+
+    mdctx = EVP_MD_CTX_new();
+    if (mdctx == NULL)
+        elog(ERROR, "failed to create EVP_MD_CTX for SHA-256");
+
+    if (EVP_DigestInit_ex(mdctx, EVP_sha256(), NULL) != 1 ||
+        EVP_DigestUpdate(mdctx, token, strlen(token)) != 1 ||
+        EVP_DigestFinal_ex(mdctx, digest, &digest_len) != 1)
+    {
+        EVP_MD_CTX_free(mdctx);
+        elog(ERROR, "SHA-256 hash computation failed");
+    }
+
+    EVP_MD_CTX_free(mdctx);
+
+    /* Convert to hex string */
+    for (i = 0; i < (int)digest_len; i++) {
+        sprintf(hash_out + (i * 2), "%02x", digest[i]);
+    }
+    hash_out[OROCHI_AUTH_TOKEN_HASH_SIZE] = '\0';
+#else
     pg_sha256_ctx ctx;
     uint8 digest[PG_SHA256_DIGEST_LENGTH];
     int i;
@@ -286,6 +316,7 @@ void orochi_auth_hash_token(const char *token, char *hash_out)
         sprintf(hash_out + (i * 2), "%02x", digest[i]);
     }
     hash_out[OROCHI_AUTH_TOKEN_HASH_SIZE] = '\0';
+#endif
 }
 
 /*

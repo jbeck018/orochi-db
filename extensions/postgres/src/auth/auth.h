@@ -24,6 +24,8 @@
 #include "storage/lwlock.h"
 #include "utils/timestamp.h"
 
+#include "jwt.h"
+
 /* ============================================================
  * Authentication Constants
  * ============================================================ */
@@ -178,19 +180,21 @@ typedef enum OrochiAuditEvent {
 
 /* ============================================================
  * JWT Algorithm Types
+ *
+ * The canonical enum is defined in jwt.h (included above).
+ * These aliases map the OROCHI_JWT_ALG_* names used in auth
+ * code to the jwt.h enum values.
  * ============================================================ */
 
-typedef enum OrochiJwtAlgorithm {
-    OROCHI_JWT_ALG_HS256 = 0, /* HMAC SHA-256 */
-    OROCHI_JWT_ALG_HS384,     /* HMAC SHA-384 */
-    OROCHI_JWT_ALG_HS512,     /* HMAC SHA-512 */
-    OROCHI_JWT_ALG_RS256,     /* RSA SHA-256 */
-    OROCHI_JWT_ALG_RS384,     /* RSA SHA-384 */
-    OROCHI_JWT_ALG_RS512,     /* RSA SHA-512 */
-    OROCHI_JWT_ALG_ES256,     /* ECDSA P-256 SHA-256 */
-    OROCHI_JWT_ALG_ES384,     /* ECDSA P-384 SHA-384 */
-    OROCHI_JWT_ALG_ES512      /* ECDSA P-521 SHA-512 */
-} OrochiJwtAlgorithm;
+#define OROCHI_JWT_ALG_HS256 OROCHI_JWT_HS256
+#define OROCHI_JWT_ALG_HS384 OROCHI_JWT_HS384
+#define OROCHI_JWT_ALG_HS512 OROCHI_JWT_HS512
+#define OROCHI_JWT_ALG_RS256 OROCHI_JWT_RS256
+#define OROCHI_JWT_ALG_RS384 OROCHI_JWT_RS384
+#define OROCHI_JWT_ALG_RS512 OROCHI_JWT_RS512
+#define OROCHI_JWT_ALG_ES256 OROCHI_JWT_ES256
+#define OROCHI_JWT_ALG_ES384 OROCHI_JWT_ES384
+#define OROCHI_JWT_ALG_ES512 OROCHI_JWT_ES512
 
 /* ============================================================
  * Core Authentication Context Structure
@@ -315,7 +319,9 @@ typedef struct OrochiTokenValidation {
     char user_id[OROCHI_AUTH_USER_ID_SIZE + 1];
     char tenant_id[OROCHI_AUTH_TENANT_ID_SIZE + 1];
     char session_id[OROCHI_AUTH_SESSION_ID_SIZE + 1];
+    OrochiTokenType token_type;
     int64 scopes;
+    TimestampTz issued_at;
     TimestampTz expires_at;
     bool is_expired;
     bool is_revoked;
