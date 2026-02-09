@@ -147,7 +147,7 @@ static volatile sig_atomic_t webhook_got_sighup = false;
 static char *compute_hmac_signature(const char *payload, const char *secret, TimestampTz timestamp);
 static bool deliver_webhook(AuthWebhookEndpoint *endpoint, AuthWebhookPayload *payload,
                             AuthWebhookDelivery *delivery);
-static size_t curl_write_callback(void *contents, size_t size, size_t nmemb, void *userp);
+static size_t webhook_curl_write_cb(void *contents, size_t size, size_t nmemb, void *userp);
 static void log_delivery_attempt(AuthWebhookDelivery *delivery);
 static const char *webhook_event_type_name(AuthWebhookEventType type);
 static AuthWebhookEventType parse_webhook_event_type(const char *name);
@@ -434,10 +434,10 @@ char *orochi_auth_serialize_webhook_payload(AuthWebhookPayload *payload)
  * ============================================================ */
 
 /*
- * curl_write_callback
+ * webhook_curl_write_cb
  *    Callback for CURL to write response data
  */
-static size_t curl_write_callback(void *contents, size_t size, size_t nmemb, void *userp)
+static size_t webhook_curl_write_cb(void *contents, size_t size, size_t nmemb, void *userp)
 {
     size_t realsize = size * nmemb;
     CurlWriteData *data = (CurlWriteData *)userp;
@@ -522,7 +522,7 @@ static bool deliver_webhook(AuthWebhookEndpoint *endpoint, AuthWebhookPayload *p
     curl_easy_setopt(curl, CURLOPT_POST, 1L);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload_json);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, webhook_curl_write_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_data);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, endpoint->timeout_ms);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 5000);
