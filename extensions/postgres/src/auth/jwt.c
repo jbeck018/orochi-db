@@ -28,11 +28,13 @@
 
 #include "jwt.h"
 
+#include <openssl/bn.h>
 #include <openssl/crypto.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
 #include <openssl/pem.h>
+#include <openssl/rsa.h>
 #include <string.h>
 #include <time.h>
 
