@@ -289,8 +289,7 @@ void orochi_auth_hash_token(const char *token, char *hash_out)
 
     if (EVP_DigestInit_ex(mdctx, EVP_sha256(), NULL) != 1 ||
         EVP_DigestUpdate(mdctx, token, strlen(token)) != 1 ||
-        EVP_DigestFinal_ex(mdctx, digest, &digest_len) != 1)
-    {
+        EVP_DigestFinal_ex(mdctx, digest, &digest_len) != 1) {
         EVP_MD_CTX_free(mdctx);
         elog(ERROR, "SHA-256 hash computation failed");
     }

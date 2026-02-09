@@ -48,8 +48,8 @@
 
 /* GUC variable for JWT expiration (defined in gotrue.c) */
 extern int orochi_auth_jwt_exp;
-#define OROCHI_AUTH_MAGIC_LINK_EXP    3600   /* 1 hour */
-#define OROCHI_AUTH_OTP_EXP           600    /* 10 minutes */
+#define OROCHI_AUTH_MAGIC_LINK_EXP 3600 /* 1 hour */
+#define OROCHI_AUTH_OTP_EXP        600  /* 10 minutes */
 
 /* Rate limiting */
 #define OROCHI_AUTH_RATE_LIMIT_EMAIL   30  /* Per hour */

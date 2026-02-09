@@ -27,6 +27,7 @@
 #include "storage/lwlock.h"
 #include "storage/shmem.h"
 #include "utils/builtins.h"
+#include "utils/array.h"
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
 #include "utils/timestamp.h"
