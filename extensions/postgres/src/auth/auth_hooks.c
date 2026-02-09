@@ -23,6 +23,7 @@
 #include "catalog/namespace.h"
 #include "executor/spi.h"
 #include "fmgr.h"
+#include "funcapi.h"
 #include "lib/stringinfo.h"
 #include "libpq/auth.h"
 #include "libpq/libpq-be.h"

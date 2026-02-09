@@ -41,7 +41,7 @@
  * ============================================================ */
 
 /* Memory context for branch access operations */
-static MemoryContext BranchAccessContext = NULL;
+static MemoryContext BranchAccessCtx = NULL;
 
 /* Permission cache using hash table */
 static HTAB *BranchPermissionCache = NULL;
@@ -75,16 +75,16 @@ void branch_access_init(void)
 {
     HASHCTL hash_ctl;
 
-    if (BranchAccessContext == NULL) {
-        BranchAccessContext =
-            AllocSetContextCreate(TopMemoryContext, "BranchAccessContext", ALLOCSET_DEFAULT_SIZES);
+    if (BranchAccessCtx == NULL) {
+        BranchAccessCtx =
+            AllocSetContextCreate(TopMemoryContext, "BranchAccessCtx", ALLOCSET_DEFAULT_SIZES);
     }
 
     /* Initialize permission cache */
     memset(&hash_ctl, 0, sizeof(hash_ctl));
     hash_ctl.keysize = sizeof(char) * 128;
     hash_ctl.entrysize = sizeof(BranchPermissionCacheEntry);
-    hash_ctl.hcxt = BranchAccessContext;
+    hash_ctl.hcxt = BranchAccessCtx;
 
     BranchPermissionCache = hash_create("BranchPermissionCache", BRANCH_PERM_CACHE_SIZE, &hash_ctl,
                                         HASH_ELEM | HASH_CONTEXT);
@@ -127,7 +127,7 @@ BranchPermissionLevel branch_get_effective_permission(pg_uuid_t user_id, pg_uuid
     bool found;
     int ret;
 
-    old_context = MemoryContextSwitchTo(BranchAccessContext);
+    old_context = MemoryContextSwitchTo(BranchAccessCtx);
 
     /* Build cache key */
     initStringInfo(&cache_key);
@@ -367,7 +367,7 @@ BranchAccessContext *branch_create_access_context(pg_uuid_t user_id, pg_uuid_t b
     BranchAccessContext *ctx;
     OrochiBranchInfo *branch;
 
-    old_context = MemoryContextSwitchTo(BranchAccessContext);
+    old_context = MemoryContextSwitchTo(BranchAccessCtx);
 
     ctx = palloc0(sizeof(BranchAccessContext));
     memcpy(&ctx->user_id, &user_id, sizeof(pg_uuid_t));
@@ -587,7 +587,7 @@ OrochiBranchInfo *branch_get_info(pg_uuid_t branch_id)
     StringInfoData query;
     int ret;
 
-    old_context = MemoryContextSwitchTo(BranchAccessContext);
+    old_context = MemoryContextSwitchTo(BranchAccessCtx);
 
     initStringInfo(&query);
     appendStringInfo(&query,
@@ -703,7 +703,7 @@ OrochiBranchInfo *branch_get_by_slug(pg_uuid_t cluster_id, const char *slug)
     if (slug == NULL)
         return NULL;
 
-    old_context = MemoryContextSwitchTo(BranchAccessContext);
+    old_context = MemoryContextSwitchTo(BranchAccessCtx);
 
     initStringInfo(&query);
     appendStringInfo(&query,
