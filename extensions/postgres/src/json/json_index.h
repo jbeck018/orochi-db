@@ -16,10 +16,10 @@
 #ifndef OROCHI_JSON_INDEX_H
 #define OROCHI_JSON_INDEX_H
 
+#include "postgres.h"
 #include "access/gin.h"
 #include "fmgr.h"
 #include "nodes/pg_list.h"
-#include "postgres.h"
 #include "utils/jsonb.h"
 
 #include "../orochi.h"

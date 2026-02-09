@@ -21,8 +21,8 @@
 #ifndef OROCHI_DDL_TASK_H
 #define OROCHI_DDL_TASK_H
 
-#include "fmgr.h"
 #include "postgres.h"
+#include "fmgr.h"
 #include "utils/timestamp.h"
 
 /* ============================================================

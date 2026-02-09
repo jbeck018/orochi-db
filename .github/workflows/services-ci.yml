@@ -90,9 +90,9 @@ jobs:
         working-directory: ${{ matrix.component }}
         run: go vet ./...
 
-      - name: Install golangci-lint
+      - name: Run golangci-lint
         if: steps.check.outputs.exists == 'true'
-        uses: golangci/golangci-lint-action@v4
+        uses: golangci/golangci-lint-action@v6
         with:
           version: latest
           working-directory: ${{ matrix.component }}

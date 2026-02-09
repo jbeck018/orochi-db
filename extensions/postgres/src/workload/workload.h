@@ -17,8 +17,8 @@
 #ifndef OROCHI_WORKLOAD_H
 #define OROCHI_WORKLOAD_H
 
-#include "fmgr.h"
 #include "postgres.h"
+#include "fmgr.h"
 #include "storage/lwlock.h"
 #include "storage/shmem.h"
 #include "utils/timestamp.h"

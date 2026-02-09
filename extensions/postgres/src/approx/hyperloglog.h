@@ -22,8 +22,8 @@
 #ifndef OROCHI_HYPERLOGLOG_H
 #define OROCHI_HYPERLOGLOG_H
 
-#include "fmgr.h"
 #include "postgres.h"
+#include "fmgr.h"
 
 /* ============================================================
  * Constants

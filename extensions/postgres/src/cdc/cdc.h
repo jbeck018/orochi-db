@@ -20,8 +20,8 @@
 #define OROCHI_CDC_H
 
 #include "access/xlogdefs.h"
-#include "fmgr.h"
 #include "postgres.h"
+#include "fmgr.h"
 #include "replication/reorderbuffer.h"
 #include "storage/lwlock.h"
 #include "utils/timestamp.h"

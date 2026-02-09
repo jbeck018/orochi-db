@@ -11,8 +11,8 @@
 #ifndef OROCHI_PIPELINE_H
 #define OROCHI_PIPELINE_H
 
-#include "fmgr.h"
 #include "postgres.h"
+#include "fmgr.h"
 #include "utils/timestamp.h"
 
 /* ============================================================

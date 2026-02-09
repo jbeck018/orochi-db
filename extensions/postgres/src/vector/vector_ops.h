@@ -18,8 +18,8 @@
 #define OROCHI_VECTOR_OPS_H
 
 #include "../orochi.h"
-#include "fmgr.h"
 #include "postgres.h"
+#include "fmgr.h"
 
 /* ============================================================
  * Vector Type Constants

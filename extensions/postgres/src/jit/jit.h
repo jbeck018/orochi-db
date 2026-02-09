@@ -20,9 +20,9 @@
 #ifndef OROCHI_JIT_H
 #define OROCHI_JIT_H
 
+#include "postgres.h"
 #include "fmgr.h"
 #include "nodes/primnodes.h"
-#include "postgres.h"
 
 #include "../executor/vectorized.h"
 

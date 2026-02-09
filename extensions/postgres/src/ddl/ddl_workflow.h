@@ -23,8 +23,8 @@
 #ifndef OROCHI_DDL_WORKFLOW_H
 #define OROCHI_DDL_WORKFLOW_H
 
-#include "fmgr.h"
 #include "postgres.h"
+#include "fmgr.h"
 #include "utils/timestamp.h"
 
 /* ============================================================

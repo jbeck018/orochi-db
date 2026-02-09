@@ -15,8 +15,8 @@
 #ifndef OROCHI_RAFT_INTEGRATION_H
 #define OROCHI_RAFT_INTEGRATION_H
 
-#include "fmgr.h"
 #include "postgres.h"
+#include "fmgr.h"
 #include "storage/lwlock.h"
 
 #include "raft.h"

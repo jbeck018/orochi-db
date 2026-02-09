@@ -22,8 +22,8 @@
 #ifndef OROCHI_DDL_DYNAMIC_H
 #define OROCHI_DDL_DYNAMIC_H
 
-#include "fmgr.h"
 #include "postgres.h"
+#include "fmgr.h"
 #include "utils/timestamp.h"
 
 /* ============================================================

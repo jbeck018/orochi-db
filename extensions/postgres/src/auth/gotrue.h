@@ -17,8 +17,8 @@
 #ifndef OROCHI_GOTRUE_H
 #define OROCHI_GOTRUE_H
 
-#include "fmgr.h"
 #include "postgres.h"
+#include "fmgr.h"
 #include "utils/jsonb.h"
 #include "utils/timestamp.h"
 #include "utils/uuid.h"

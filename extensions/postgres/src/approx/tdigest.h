@@ -22,8 +22,8 @@
 #ifndef OROCHI_TDIGEST_H
 #define OROCHI_TDIGEST_H
 
-#include "fmgr.h"
 #include "postgres.h"
+#include "fmgr.h"
 
 /* ============================================================
  * Constants

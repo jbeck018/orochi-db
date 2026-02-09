@@ -16,11 +16,11 @@
 #ifndef OROCHI_JSON_QUERY_H
 #define OROCHI_JSON_QUERY_H
 
+#include "postgres.h"
 #include "fmgr.h"
 #include "nodes/execnodes.h"
 #include "nodes/pathnodes.h"
 #include "nodes/pg_list.h"
-#include "postgres.h"
 #include "utils/jsonb.h"
 
 #include "../orochi.h"

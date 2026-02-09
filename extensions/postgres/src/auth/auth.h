@@ -18,10 +18,10 @@
 #ifndef OROCHI_AUTH_H
 #define OROCHI_AUTH_H
 
+#include "postgres.h"
 #include "fmgr.h"
 #include "libpq/auth.h"
 #include "libpq/libpq-be.h"
-#include "postgres.h"
 #include "storage/lwlock.h"
 #include "utils/timestamp.h"
 

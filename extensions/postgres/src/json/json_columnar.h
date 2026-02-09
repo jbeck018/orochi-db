@@ -16,9 +16,9 @@
 #ifndef OROCHI_JSON_COLUMNAR_H
 #define OROCHI_JSON_COLUMNAR_H
 
+#include "postgres.h"
 #include "fmgr.h"
 #include "nodes/pg_list.h"
-#include "postgres.h"
 #include "utils/jsonb.h"
 
 #include "../orochi.h"
