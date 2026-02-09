@@ -132,6 +132,33 @@ S3Client *s3_source_init(S3SourceConfig *config)
  * S3 File Discovery
  * ============================================================ */
 
+/* Response buffer for CURL write callbacks */
+typedef struct {
+    char *data;
+    size_t size;
+    size_t capacity;
+} S3ResponseBuffer;
+
+static size_t s3_write_callback(void *contents, size_t size, size_t nmemb, void *userp)
+{
+    size_t realsize = size * nmemb;
+    S3ResponseBuffer *buf = (S3ResponseBuffer *)userp;
+
+    if (buf->size + realsize + 1 > buf->capacity) {
+        size_t new_capacity = buf->capacity * 2;
+        if (new_capacity < buf->size + realsize + 1)
+            new_capacity = buf->size + realsize + 1 + 4096;
+        buf->data = repalloc(buf->data, new_capacity);
+        buf->capacity = new_capacity;
+    }
+
+    memcpy(&(buf->data[buf->size]), contents, realsize);
+    buf->size += realsize;
+    buf->data[buf->size] = 0;
+
+    return realsize;
+}
+
 /*
  * s3_source_list_new_files
  *    List files in S3 bucket that haven't been processed
@@ -155,14 +182,7 @@ List *s3_source_list_new_files(S3Client *client, const char *prefix, const char 
     struct tm *tm_info;
     long http_code;
 
-    /* Response buffer */
-    typedef struct {
-        char *data;
-        size_t size;
-        size_t capacity;
-    } ResponseBuffer;
-
-    ResponseBuffer response;
+    S3ResponseBuffer response;
 
     if (client == NULL)
         return NIL;
@@ -215,31 +235,10 @@ List *s3_source_list_new_files(S3Client *client, const char *prefix, const char 
     snprintf(header_buf, sizeof(header_buf), "Authorization: %s", authorization);
     headers = curl_slist_append(headers, header_buf);
 
-    /* Write callback */
-    static size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp)
-    {
-        size_t realsize = size * nmemb;
-        ResponseBuffer *buf = (ResponseBuffer *)userp;
-
-        if (buf->size + realsize + 1 > buf->capacity) {
-            size_t new_capacity = buf->capacity * 2;
-            if (new_capacity < buf->size + realsize + 1)
-                new_capacity = buf->size + realsize + 1 + 4096;
-            buf->data = repalloc(buf->data, new_capacity);
-            buf->capacity = new_capacity;
-        }
-
-        memcpy(&(buf->data[buf->size]), contents, realsize);
-        buf->size += realsize;
-        buf->data[buf->size] = 0;
-
-        return realsize;
-    }
-
     /* Configure CURL */
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, s3_write_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, client->timeout_ms / 1000);
 

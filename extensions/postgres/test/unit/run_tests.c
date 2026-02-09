@@ -23,6 +23,9 @@
 /* Mock PostgreSQL types for standalone compilation */
 #include "mocks/postgres_mock.h"
 
+/* Single global test state - shared by all translation units */
+TestState __test_state = {0};
+
 /* ============================================================
  * Test Suite Declarations
  * ============================================================

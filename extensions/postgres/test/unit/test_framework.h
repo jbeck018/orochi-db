@@ -34,8 +34,8 @@
  * ============================================================ */
 
 /* Maximum tests and suites */
-#define MAX_TESTS       1024
-#define MAX_SUITES      64
+#define MAX_TESTS       256
+#define MAX_SUITES      32
 #define MAX_NAME_LEN    128
 
 /* Test result structure */
@@ -70,8 +70,8 @@ typedef struct TestState
     clock_t     test_start;
 } TestState;
 
-/* Global state instance */
-static TestState __test_state = {0};
+/* Global state instance - defined in run_tests.c, shared across all TUs */
+extern TestState __test_state;
 
 /* ============================================================
  * Test Framework Initialization and Summary
