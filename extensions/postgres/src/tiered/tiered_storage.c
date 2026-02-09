@@ -1229,26 +1229,24 @@ List *s3_list_objects(S3Client *client, const char *prefix)
  * S3 operations require libcurl to function.
  */
 
-char *
-generate_aws_signature_v4(S3Client *client, const char *method, const char *uri,
-                          const char *query_string, const char *payload, size_t payload_len,
-                          const char *date_stamp, const char *amz_date, char **out_authorization)
+char *generate_aws_signature_v4(S3Client *client, const char *method, const char *uri,
+                                const char *query_string, const char *payload, size_t payload_len,
+                                const char *date_stamp, const char *amz_date,
+                                char **out_authorization)
 {
     elog(WARNING, "Orochi: AWS signature generation requires libcurl");
     *out_authorization = pstrdup("");
     return pstrdup("");
 }
 
-bool
-s3_client_test_connection(S3Client *client)
+bool s3_client_test_connection(S3Client *client)
 {
     elog(WARNING, "Orochi: S3 connection test requires libcurl");
     return false;
 }
 
-S3UploadResult *
-s3_upload(S3Client *client, const char *key, const char *data, int64 size,
-          const char *content_type)
+S3UploadResult *s3_upload(S3Client *client, const char *key, const char *data, int64 size,
+                          const char *content_type)
 {
     S3UploadResult *result = palloc0(sizeof(S3UploadResult));
     result->success = false;
@@ -1257,8 +1255,7 @@ s3_upload(S3Client *client, const char *key, const char *data, int64 size,
     return result;
 }
 
-S3DownloadResult *
-s3_download(S3Client *client, const char *key)
+S3DownloadResult *s3_download(S3Client *client, const char *key)
 {
     S3DownloadResult *result = palloc0(sizeof(S3DownloadResult));
     result->success = false;
@@ -1267,36 +1264,31 @@ s3_download(S3Client *client, const char *key)
     return result;
 }
 
-bool
-s3_delete(S3Client *client, const char *key)
+bool s3_delete(S3Client *client, const char *key)
 {
     elog(WARNING, "Orochi: S3 delete requires libcurl");
     return false;
 }
 
-bool
-s3_object_exists(S3Client *client, const char *key)
+bool s3_object_exists(S3Client *client, const char *key)
 {
     elog(WARNING, "Orochi: S3 object check requires libcurl");
     return false;
 }
 
-S3Object *
-s3_head_object(S3Client *client, const char *key)
+S3Object *s3_head_object(S3Client *client, const char *key)
 {
     elog(WARNING, "Orochi: S3 head object requires libcurl");
     return NULL;
 }
 
-List *
-s3_list_objects(S3Client *client, const char *prefix)
+List *s3_list_objects(S3Client *client, const char *prefix)
 {
     elog(WARNING, "Orochi: S3 list objects requires libcurl");
     return NIL;
 }
 
-S3Client *
-s3_client_create(OrochiS3Config *config)
+S3Client *s3_client_create(OrochiS3Config *config)
 {
     S3Client *client;
 
@@ -1316,8 +1308,7 @@ s3_client_create(OrochiS3Config *config)
     return client;
 }
 
-void
-s3_client_destroy(S3Client *client)
+void s3_client_destroy(S3Client *client)
 {
     if (client == NULL)
         return;
@@ -2106,8 +2097,8 @@ static bool orochi_restore_chunk_from_s3(int64 chunk_id, S3Client *client, const
                  * which copies column definitions, constraints, and defaults.
                  */
                 char *parent_relname = get_rel_name(chunk_info->hypertable_oid);
-                char *parent_nspname = get_namespace_name(
-                    get_rel_namespace(chunk_info->hypertable_oid));
+                char *parent_nspname =
+                    get_namespace_name(get_rel_namespace(chunk_info->hypertable_oid));
 
                 initStringInfo(&create_table_query);
                 if (parent_relname != NULL && parent_nspname != NULL) {
@@ -2115,13 +2106,14 @@ static bool orochi_restore_chunk_from_s3(int64 chunk_id, S3Client *client, const
                                      "CREATE UNLOGGED TABLE %s "
                                      "(LIKE %s.%s INCLUDING DEFAULTS INCLUDING CONSTRAINTS) "
                                      "WITH (autovacuum_enabled = false)",
-                                     chunk_table_name,
-                                     quote_identifier(parent_nspname),
+                                     chunk_table_name, quote_identifier(parent_nspname),
                                      quote_identifier(parent_relname));
                 } else {
                     /* Fallback: minimal time-series schema */
-                    elog(WARNING, "Could not resolve parent hypertable for chunk %ld, "
-                                 "using default schema", chunk_id);
+                    elog(WARNING,
+                         "Could not resolve parent hypertable for chunk %ld, "
+                         "using default schema",
+                         chunk_id);
                     appendStringInfo(&create_table_query,
                                      "CREATE UNLOGGED TABLE %s ("
                                      "    time timestamptz NOT NULL,"
@@ -2131,8 +2123,7 @@ static bool orochi_restore_chunk_from_s3(int64 chunk_id, S3Client *client, const
                 }
             } else {
                 /* No catalog entry - use fallback schema */
-                elog(WARNING, "No catalog entry for chunk %ld, using default schema",
-                     chunk_id);
+                elog(WARNING, "No catalog entry for chunk %ld, using default schema", chunk_id);
                 initStringInfo(&create_table_query);
                 appendStringInfo(&create_table_query,
                                  "CREATE UNLOGGED TABLE %s ("
@@ -2170,8 +2161,7 @@ static bool orochi_restore_chunk_from_s3(int64 chunk_id, S3Client *client, const
 
             /* Use PG data directory for temp files */
             snprintf(temp_file_path, sizeof(temp_file_path),
-                     "%s/pgsql_tmp/orochi_chunk_%ld_restore_%d.bin",
-                     DataDir, chunk_id, MyProcPid);
+                     "%s/pgsql_tmp/orochi_chunk_%ld_restore_%d.bin", DataDir, chunk_id, MyProcPid);
 
             temp_file = AllocateFile(temp_file_path, "wb");
             if (temp_file == NULL) {

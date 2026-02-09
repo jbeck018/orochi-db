@@ -1147,9 +1147,8 @@ Datum orochi_raft_step_down(PG_FUNCTION_ARGS)
     bool initiated = false;
 
     if (raft_shared_state == NULL)
-        ereport(ERROR,
-                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                 errmsg("Raft shared state is not initialized")));
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                        errmsg("Raft shared state is not initialized")));
 
     LWLockAcquire(raft_shared_state->lock, LW_EXCLUSIVE);
 
@@ -1163,12 +1162,10 @@ Datum orochi_raft_step_down(PG_FUNCTION_ARGS)
         raft_shared_state->current_leader_id = -1;
         initiated = true;
 
-        elog(LOG, "Raft step-down initiated via SQL for node %d",
-             raft_shared_state->my_node_id);
+        elog(LOG, "Raft step-down initiated via SQL for node %d", raft_shared_state->my_node_id);
     } else {
         elog(NOTICE, "Node %d is not the leader (state: %s), cannot step down",
-             raft_shared_state->my_node_id,
-             raft_state_name(raft_shared_state->current_state));
+             raft_shared_state->my_node_id, raft_state_name(raft_shared_state->current_state));
     }
 
     LWLockRelease(raft_shared_state->lock);
@@ -1193,9 +1190,8 @@ Datum orochi_raft_transfer_leadership(PG_FUNCTION_ARGS)
     bool initiated = false;
 
     if (raft_shared_state == NULL)
-        ereport(ERROR,
-                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                 errmsg("Raft shared state is not initialized")));
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                        errmsg("Raft shared state is not initialized")));
 
     LWLockAcquire(raft_shared_state->lock, LW_EXCLUSIVE);
 
@@ -1213,8 +1209,7 @@ Datum orochi_raft_transfer_leadership(PG_FUNCTION_ARGS)
             raft_shared_state->current_leader_id = target_node_id;
             initiated = true;
 
-            elog(LOG, "Raft leadership transfer to node %d initiated via SQL",
-                 target_node_id);
+            elog(LOG, "Raft leadership transfer to node %d initiated via SQL", target_node_id);
         }
     } else {
         elog(NOTICE, "Node %d is not the leader, cannot transfer leadership",
@@ -1244,11 +1239,10 @@ Datum orochi_raft_add_node(PG_FUNCTION_ARGS)
     char *hostname;
 
     if (local_raft_node == NULL)
-        ereport(ERROR,
-                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                 errmsg("Raft node is not available"),
-                 errdetail("This operation must be performed on the Raft "
-                           "background worker node.")));
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                        errmsg("Raft node is not available"),
+                        errdetail("This operation must be performed on the Raft "
+                                  "background worker node.")));
 
     hostname = text_to_cstring(hostname_text);
 
@@ -1277,11 +1271,10 @@ Datum orochi_raft_remove_node(PG_FUNCTION_ARGS)
     int32 node_id = PG_GETARG_INT32(0);
 
     if (local_raft_node == NULL)
-        ereport(ERROR,
-                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                 errmsg("Raft node is not available"),
-                 errdetail("This operation must be performed on the Raft "
-                           "background worker node.")));
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                        errmsg("Raft node is not available"),
+                        errdetail("This operation must be performed on the Raft "
+                                  "background worker node.")));
 
     raft_remove_peer(local_raft_node, node_id);
     raft_update_shared_state(local_raft_node);
@@ -1332,10 +1325,9 @@ Datum orochi_raft_status_sql(PG_FUNCTION_ARGS)
     HeapTuple tuple;
 
     if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
-        ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                 errmsg("function returning record called in context that "
-                        "cannot accept type record")));
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("function returning record called in context that "
+                               "cannot accept type record")));
 
     memset(nulls, 0, sizeof(nulls));
 
@@ -1345,8 +1337,7 @@ Datum orochi_raft_status_sql(PG_FUNCTION_ARGS)
         LWLockAcquire(raft_shared_state->lock, LW_SHARED);
 
         values[0] = Int32GetDatum(raft_shared_state->my_node_id);
-        values[1] = CStringGetTextDatum(
-            raft_state_name(raft_shared_state->current_state));
+        values[1] = CStringGetTextDatum(raft_state_name(raft_shared_state->current_state));
         values[2] = Int64GetDatum(raft_shared_state->current_term);
         values[3] = Int32GetDatum(raft_shared_state->current_leader_id);
         values[4] = Int32GetDatum(raft_shared_state->cluster_size);
@@ -1389,7 +1380,7 @@ Datum orochi_raft_read_index_sql(PG_FUNCTION_ARGS)
         LWLockRelease(raft_shared_state->lock);
     }
 
-    PG_RETURN_INT64((int64) read_index);
+    PG_RETURN_INT64((int64)read_index);
 }
 
 /*
@@ -1424,7 +1415,7 @@ Datum orochi_raft_leader_read_index_sql(PG_FUNCTION_ARGS)
         LWLockRelease(raft_shared_state->lock);
     }
 
-    PG_RETURN_INT64((int64) read_index);
+    PG_RETURN_INT64((int64)read_index);
 }
 
 /*
@@ -1443,7 +1434,7 @@ Datum orochi_raft_can_read_stale_sql(PG_FUNCTION_ARGS)
     int64 read_index = PG_GETARG_INT64(0);
 
     if (local_raft_node != NULL) {
-        PG_RETURN_BOOL(raft_can_serve_read(local_raft_node, (uint64) read_index));
+        PG_RETURN_BOOL(raft_can_serve_read(local_raft_node, (uint64)read_index));
     } else if (raft_shared_state != NULL) {
         /*
          * Without the local raft node, approximate by comparing
@@ -1452,7 +1443,7 @@ Datum orochi_raft_can_read_stale_sql(PG_FUNCTION_ARGS)
         bool can_read;
 
         LWLockAcquire(raft_shared_state->lock, LW_SHARED);
-        can_read = (raft_shared_state->last_committed_index >= (uint64) read_index);
+        can_read = (raft_shared_state->last_committed_index >= (uint64)read_index);
         LWLockRelease(raft_shared_state->lock);
 
         PG_RETURN_BOOL(can_read);
@@ -1514,27 +1505,24 @@ Datum orochi_raft_create_snapshot_sql(PG_FUNCTION_ARGS)
     uint64 snapshot_index;
 
     if (local_raft_node == NULL)
-        ereport(ERROR,
-                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                 errmsg("Raft node is not available"),
-                 errdetail("This operation must be performed on the Raft "
-                           "background worker node.")));
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                        errmsg("Raft node is not available"),
+                        errdetail("This operation must be performed on the Raft "
+                                  "background worker node.")));
 
     data = VARDATA_ANY(snapshot_data);
     data_size = VARSIZE_ANY_EXHDR(snapshot_data);
     snapshot_index = local_raft_node->log->last_applied;
 
     if (snapshot_index < local_raft_node->log->first_index) {
-        elog(NOTICE, "Nothing to snapshot (applied=%lu, first=%lu)",
-             snapshot_index, local_raft_node->log->first_index);
+        elog(NOTICE, "Nothing to snapshot (applied=%lu, first=%lu)", snapshot_index,
+             local_raft_node->log->first_index);
         PG_RETURN_BOOL(false);
     }
 
-    raft_log_create_snapshot(local_raft_node->log, snapshot_index,
-                             data, data_size);
+    raft_log_create_snapshot(local_raft_node->log, snapshot_index, data, data_size);
 
-    elog(LOG, "Raft snapshot created at index %lu (%d bytes) via SQL",
-         snapshot_index, data_size);
+    elog(LOG, "Raft snapshot created at index %lu (%d bytes) via SQL", snapshot_index, data_size);
 
     PG_RETURN_BOOL(true);
 }
@@ -1562,23 +1550,21 @@ Datum orochi_raft_install_snapshot_sql(PG_FUNCTION_ARGS)
     InstallSnapshotResponse response;
 
     if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
-        ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                 errmsg("function returning record called in context that "
-                        "cannot accept type record")));
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("function returning record called in context that "
+                               "cannot accept type record")));
 
     if (local_raft_node == NULL)
-        ereport(ERROR,
-                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                 errmsg("Raft node is not available"),
-                 errdetail("This operation must be performed on the Raft "
-                           "background worker node.")));
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                        errmsg("Raft node is not available"),
+                        errdetail("This operation must be performed on the Raft "
+                                  "background worker node.")));
 
     /* Parse arguments into InstallSnapshotRequest */
-    request.term = (uint64) PG_GETARG_INT64(0);
+    request.term = (uint64)PG_GETARG_INT64(0);
     request.leader_id = PG_GETARG_INT32(1);
-    request.last_included_index = (uint64) PG_GETARG_INT64(2);
-    request.last_included_term = (uint64) PG_GETARG_INT64(3);
+    request.last_included_index = (uint64)PG_GETARG_INT64(2);
+    request.last_included_term = (uint64)PG_GETARG_INT64(3);
     request.offset = PG_GETARG_INT32(4);
 
     if (!PG_ARGISNULL(5)) {
@@ -1598,7 +1584,7 @@ Datum orochi_raft_install_snapshot_sql(PG_FUNCTION_ARGS)
 
     /* Build result tuple */
     memset(nulls, 0, sizeof(nulls));
-    values[0] = Int64GetDatum((int64) response.term);
+    values[0] = Int64GetDatum((int64)response.term);
     values[1] = Int32GetDatum(response.bytes_received);
     values[2] = BoolGetDatum(response.success);
 
@@ -1628,23 +1614,21 @@ Datum orochi_raft_request_vote_sql(PG_FUNCTION_ARGS)
     RequestVoteResponse response;
 
     if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
-        ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                 errmsg("function returning record called in context that "
-                        "cannot accept type record")));
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("function returning record called in context that "
+                               "cannot accept type record")));
 
     if (local_raft_node == NULL)
-        ereport(ERROR,
-                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                 errmsg("Raft node is not available"),
-                 errdetail("This operation must be performed on the Raft "
-                           "background worker node.")));
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                        errmsg("Raft node is not available"),
+                        errdetail("This operation must be performed on the Raft "
+                                  "background worker node.")));
 
     /* Parse arguments into RequestVoteRequest */
-    request.term = (uint64) PG_GETARG_INT64(0);
+    request.term = (uint64)PG_GETARG_INT64(0);
     request.candidate_id = PG_GETARG_INT32(1);
-    request.last_log_index = (uint64) PG_GETARG_INT64(2);
-    request.last_log_term = (uint64) PG_GETARG_INT64(3);
+    request.last_log_index = (uint64)PG_GETARG_INT64(2);
+    request.last_log_term = (uint64)PG_GETARG_INT64(3);
 
     /* Delegate to the Raft protocol handler */
     response = raft_request_vote(local_raft_node, &request);
@@ -1654,7 +1638,7 @@ Datum orochi_raft_request_vote_sql(PG_FUNCTION_ARGS)
 
     /* Build result tuple */
     memset(nulls, 0, sizeof(nulls));
-    values[0] = Int64GetDatum((int64) response.term);
+    values[0] = Int64GetDatum((int64)response.term);
     values[1] = BoolGetDatum(response.vote_granted);
 
     tuple = heap_form_tuple(tupdesc, values, nulls);
@@ -1684,24 +1668,22 @@ Datum orochi_raft_append_entries_sql(PG_FUNCTION_ARGS)
     AppendEntriesResponse response;
 
     if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
-        ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                 errmsg("function returning record called in context that "
-                        "cannot accept type record")));
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("function returning record called in context that "
+                               "cannot accept type record")));
 
     if (local_raft_node == NULL)
-        ereport(ERROR,
-                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                 errmsg("Raft node is not available"),
-                 errdetail("This operation must be performed on the Raft "
-                           "background worker node.")));
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                        errmsg("Raft node is not available"),
+                        errdetail("This operation must be performed on the Raft "
+                                  "background worker node.")));
 
     /* Parse arguments into AppendEntriesRequest */
-    request.term = (uint64) PG_GETARG_INT64(0);
+    request.term = (uint64)PG_GETARG_INT64(0);
     request.leader_id = PG_GETARG_INT32(1);
-    request.prev_log_index = (uint64) PG_GETARG_INT64(2);
-    request.prev_log_term = (uint64) PG_GETARG_INT64(3);
-    request.leader_commit = (uint64) PG_GETARG_INT64(5);
+    request.prev_log_index = (uint64)PG_GETARG_INT64(2);
+    request.prev_log_term = (uint64)PG_GETARG_INT64(3);
+    request.leader_commit = (uint64)PG_GETARG_INT64(5);
 
     /*
      * Parse entries from JSONB if provided.
@@ -1732,9 +1714,9 @@ Datum orochi_raft_append_entries_sql(PG_FUNCTION_ARGS)
 
     /* Build result tuple */
     memset(nulls, 0, sizeof(nulls));
-    values[0] = Int64GetDatum((int64) response.term);
+    values[0] = Int64GetDatum((int64)response.term);
     values[1] = BoolGetDatum(response.success);
-    values[2] = Int64GetDatum((int64) response.match_index);
+    values[2] = Int64GetDatum((int64)response.match_index);
 
     tuple = heap_form_tuple(tupdesc, values, nulls);
 

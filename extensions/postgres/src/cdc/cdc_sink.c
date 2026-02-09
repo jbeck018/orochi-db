@@ -446,8 +446,7 @@ void *cdc_kafka_sink_init(CDCKafkaSinkConfig *config)
         int spi_ret;
 
         spi_ret = SPI_connect();
-        if (spi_ret != SPI_OK_CONNECT)
-        {
+        if (spi_ret != SPI_OK_CONNECT) {
             elog(ERROR, "Orochi CDC: failed to connect to SPI for table-based events init");
             MemoryContextSwitchTo(oldcontext);
             return NULL;
@@ -455,16 +454,16 @@ void *cdc_kafka_sink_init(CDCKafkaSinkConfig *config)
 
         PG_TRY();
         {
-            SPI_execute(
-                "CREATE TABLE IF NOT EXISTS orochi.orochi_cdc_events ("
-                "  event_id BIGSERIAL PRIMARY KEY,"
-                "  subscription_id INTEGER,"
-                "  topic TEXT NOT NULL,"
-                "  message_key TEXT,"
-                "  payload BYTEA,"
-                "  payload_size INTEGER,"
-                "  created_at TIMESTAMPTZ DEFAULT now()"
-                ")", false, 0);
+            SPI_execute("CREATE TABLE IF NOT EXISTS orochi.orochi_cdc_events ("
+                        "  event_id BIGSERIAL PRIMARY KEY,"
+                        "  subscription_id INTEGER,"
+                        "  topic TEXT NOT NULL,"
+                        "  message_key TEXT,"
+                        "  payload BYTEA,"
+                        "  payload_size INTEGER,"
+                        "  created_at TIMESTAMPTZ DEFAULT now()"
+                        ")",
+                        false, 0);
 
             SPI_finish();
 
@@ -527,8 +526,7 @@ bool cdc_kafka_sink_send(void *producer, const char *topic, const char *key, int
         bool success = false;
 
         spi_ret = SPI_connect();
-        if (spi_ret != SPI_OK_CONNECT)
-        {
+        if (spi_ret != SPI_OK_CONNECT) {
             elog(WARNING, "Orochi CDC: failed to connect to SPI for table-based event send");
             return false;
         }
@@ -544,15 +542,12 @@ bool cdc_kafka_sink_send(void *producer, const char *topic, const char *key, int
             argvals[0] = CStringGetTextDatum(topic ? topic : ctx->config->topic);
 
             /* Build key datum (may be NULL) */
-            if (key != NULL && key_size > 0)
-            {
+            if (key != NULL && key_size > 0) {
                 char *key_copy = palloc(key_size + 1);
                 memcpy(key_copy, key, key_size);
                 key_copy[key_size] = '\0';
                 argvals[1] = CStringGetTextDatum(key_copy);
-            }
-            else
-            {
+            } else {
                 argvals[1] = (Datum)0;
                 nulls[1] = 'n';
             }
@@ -566,11 +561,10 @@ bool cdc_kafka_sink_send(void *producer, const char *topic, const char *key, int
             /* payload_size */
             argvals[3] = Int32GetDatum(value_size);
 
-            SPI_execute_with_args(
-                "INSERT INTO orochi.orochi_cdc_events "
-                "(topic, message_key, payload, payload_size) "
-                "VALUES ($1, $2, $3, $4)",
-                4, argtypes, argvals, nulls, false, 0);
+            SPI_execute_with_args("INSERT INTO orochi.orochi_cdc_events "
+                                  "(topic, message_key, payload, payload_size) "
+                                  "VALUES ($1, $2, $3, $4)",
+                                  4, argtypes, argvals, nulls, false, 0);
 
             SPI_finish();
 
@@ -739,8 +733,7 @@ void *cdc_webhook_sink_init(CDCWebhookSinkConfig *config)
         int spi_ret;
 
         spi_ret = SPI_connect();
-        if (spi_ret != SPI_OK_CONNECT)
-        {
+        if (spi_ret != SPI_OK_CONNECT) {
             elog(ERROR, "Orochi CDC: failed to connect to SPI for webhook queue init");
             MemoryContextSwitchTo(oldcontext);
             return NULL;
@@ -748,20 +741,20 @@ void *cdc_webhook_sink_init(CDCWebhookSinkConfig *config)
 
         PG_TRY();
         {
-            SPI_execute(
-                "CREATE TABLE IF NOT EXISTS orochi.orochi_webhook_queue ("
-                "  delivery_id BIGSERIAL PRIMARY KEY,"
-                "  subscription_id INTEGER,"
-                "  url TEXT NOT NULL,"
-                "  method TEXT DEFAULT 'POST',"
-                "  content_type TEXT DEFAULT 'application/json',"
-                "  headers JSONB,"
-                "  payload BYTEA,"
-                "  payload_size INTEGER,"
-                "  status TEXT DEFAULT 'pending',"
-                "  created_at TIMESTAMPTZ DEFAULT now(),"
-                "  processed_at TIMESTAMPTZ"
-                ")", false, 0);
+            SPI_execute("CREATE TABLE IF NOT EXISTS orochi.orochi_webhook_queue ("
+                        "  delivery_id BIGSERIAL PRIMARY KEY,"
+                        "  subscription_id INTEGER,"
+                        "  url TEXT NOT NULL,"
+                        "  method TEXT DEFAULT 'POST',"
+                        "  content_type TEXT DEFAULT 'application/json',"
+                        "  headers JSONB,"
+                        "  payload BYTEA,"
+                        "  payload_size INTEGER,"
+                        "  status TEXT DEFAULT 'pending',"
+                        "  created_at TIMESTAMPTZ DEFAULT now(),"
+                        "  processed_at TIMESTAMPTZ"
+                        ")",
+                        false, 0);
 
             SPI_finish();
 
@@ -880,8 +873,7 @@ static bool cdc_webhook_sink_send_internal(WebhookSinkContext *ctx, const char *
         bool success = false;
 
         spi_ret = SPI_connect();
-        if (spi_ret != SPI_OK_CONNECT)
-        {
+        if (spi_ret != SPI_OK_CONNECT) {
             elog(WARNING, "Orochi CDC: failed to connect to SPI for webhook queue send");
             return false;
         }
@@ -896,12 +888,11 @@ static bool cdc_webhook_sink_send_internal(WebhookSinkContext *ctx, const char *
             argvals[0] = CStringGetTextDatum(ctx->config->url);
 
             /* Method */
-            argvals[1] = CStringGetTextDatum(
-                ctx->config->method ? ctx->config->method : "POST");
+            argvals[1] = CStringGetTextDatum(ctx->config->method ? ctx->config->method : "POST");
 
             /* Content-Type */
-            argvals[2] = CStringGetTextDatum(
-                ctx->config->content_type ? ctx->config->content_type : "application/json");
+            argvals[2] = CStringGetTextDatum(ctx->config->content_type ? ctx->config->content_type
+                                                                       : "application/json");
 
             /* Payload */
             payload_bytea = (bytea *)palloc(VARHDRSZ + size);
@@ -912,11 +903,10 @@ static bool cdc_webhook_sink_send_internal(WebhookSinkContext *ctx, const char *
             /* payload_size */
             argvals[4] = Int32GetDatum(size);
 
-            SPI_execute_with_args(
-                "INSERT INTO orochi.orochi_webhook_queue "
-                "(url, method, content_type, payload, payload_size) "
-                "VALUES ($1, $2, $3, $4, $5)",
-                5, argtypes, argvals, NULL, false, 0);
+            SPI_execute_with_args("INSERT INTO orochi.orochi_webhook_queue "
+                                  "(url, method, content_type, payload, payload_size) "
+                                  "VALUES ($1, $2, $3, $4, $5)",
+                                  5, argtypes, argvals, NULL, false, 0);
 
             SPI_finish();
 

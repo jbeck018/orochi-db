@@ -961,8 +961,7 @@ Datum orochi_auth_jwt(PG_FUNCTION_ARGS)
             memcpy(payload_str, payload_json, payload_len);
             payload_str[payload_len] = '\0';
 
-            jsonb_datum = DirectFunctionCall1(jsonb_in,
-                                              CStringGetDatum(payload_str));
+            jsonb_datum = DirectFunctionCall1(jsonb_in, CStringGetDatum(payload_str));
             pfree(payload_str);
             pfree(payload_json);
             PG_RETURN_DATUM(jsonb_datum);

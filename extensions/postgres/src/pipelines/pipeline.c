@@ -1297,21 +1297,18 @@ PipelineFormat pipeline_parse_format(const char *name)
  *    Insert records one at a time using SPI parameterized queries.
  *    Used as fallback when batch insert is not requested.
  */
-static int64
-pipeline_insert_batch_spi(Pipeline *pipeline, List *records, const char *relname)
+static int64 pipeline_insert_batch_spi(Pipeline *pipeline, List *records, const char *relname)
 {
     ListCell *lc;
     int64 inserted = 0;
-    Oid argtypes[1] = {JSONBOID};
+    Oid argtypes[1] = { JSONBOID };
     StringInfoData query;
 
     initStringInfo(&query);
-    appendStringInfo(&query,
-                     "INSERT INTO %s SELECT * FROM jsonb_populate_record(NULL::%s, $1)",
+    appendStringInfo(&query, "INSERT INTO %s SELECT * FROM jsonb_populate_record(NULL::%s, $1)",
                      quote_identifier(relname), quote_identifier(relname));
 
-    foreach (lc, records)
-    {
+    foreach (lc, records) {
         char *record_json = (char *)lfirst(lc);
         Datum argvals[1];
         Jsonb *jb;
@@ -1322,12 +1319,10 @@ pipeline_insert_batch_spi(Pipeline *pipeline, List *records, const char *relname
 
         PG_TRY();
         {
-            jb = DatumGetJsonbP(
-                DirectFunctionCall1(jsonb_in, CStringGetDatum(record_json)));
+            jb = DatumGetJsonbP(DirectFunctionCall1(jsonb_in, CStringGetDatum(record_json)));
             argvals[0] = JsonbPGetDatum(jb);
 
-            ret = SPI_execute_with_args(query.data, 1, argtypes, argvals, NULL,
-                                        false, 0);
+            ret = SPI_execute_with_args(query.data, 1, argtypes, argvals, NULL, false, 0);
             if (ret == SPI_OK_INSERT)
                 inserted++;
             else
@@ -1350,8 +1345,7 @@ pipeline_insert_batch_spi(Pipeline *pipeline, List *records, const char *relname
  *    Insert records in batches using multi-VALUES INSERT for better performance.
  *    Falls back to row-by-row for any batch that fails.
  */
-static int64
-pipeline_insert_batch_copy(Pipeline *pipeline, List *records, const char *relname)
+static int64 pipeline_insert_batch_copy(Pipeline *pipeline, List *records, const char *relname)
 {
     int64 inserted = 0;
     int batch_count = 0;
@@ -1361,8 +1355,7 @@ pipeline_insert_batch_copy(Pipeline *pipeline, List *records, const char *relnam
 
     initStringInfo(&batch_query);
 
-    foreach (lc, records)
-    {
+    foreach (lc, records) {
         char *record_json = (char *)lfirst(lc);
 
         if (record_json == NULL || record_json[0] == '\0')
@@ -1371,8 +1364,7 @@ pipeline_insert_batch_copy(Pipeline *pipeline, List *records, const char *relnam
         current_batch = lappend(current_batch, record_json);
         batch_count++;
 
-        if (batch_count >= PIPELINE_BATCH_SIZE || lnext(records, lc) == NULL)
-        {
+        if (batch_count >= PIPELINE_BATCH_SIZE || lnext(records, lc) == NULL) {
             ListCell *blc;
             int ret;
             bool batch_ok = true;
@@ -1381,23 +1373,20 @@ pipeline_insert_batch_copy(Pipeline *pipeline, List *records, const char *relnam
              *   SELECT * FROM jsonb_populate_record(NULL::tbl, v.j)
              *   FROM (VALUES (cast1), (cast2), ...) AS v(j) */
             resetStringInfo(&batch_query);
-            appendStringInfo(
-                &batch_query,
-                "INSERT INTO %s SELECT * FROM jsonb_populate_record(NULL::%s, v.j) "
-                "FROM (VALUES ",
-                quote_identifier(relname), quote_identifier(relname));
+            appendStringInfo(&batch_query,
+                             "INSERT INTO %s SELECT * FROM jsonb_populate_record(NULL::%s, v.j) "
+                             "FROM (VALUES ",
+                             quote_identifier(relname), quote_identifier(relname));
 
             {
                 bool first = true;
-                foreach (blc, current_batch)
-                {
+                foreach (blc, current_batch) {
                     char *json = (char *)lfirst(blc);
                     if (!first)
                         appendStringInfoString(&batch_query, ", ");
                     first = false;
                     appendStringInfoChar(&batch_query, '(');
-                    appendStringInfoString(&batch_query,
-                                           quote_literal_cstr(json));
+                    appendStringInfoString(&batch_query, quote_literal_cstr(json));
                     appendStringInfoString(&batch_query, "::jsonb)");
                 }
             }
@@ -1419,12 +1408,10 @@ pipeline_insert_batch_copy(Pipeline *pipeline, List *records, const char *relnam
             PG_END_TRY();
 
             /* If batch failed, fall back to row-by-row for this batch */
-            if (!batch_ok)
-            {
+            if (!batch_ok) {
                 elog(DEBUG1, "pipeline_insert_batch_copy: batch failed, "
                              "falling back to row-by-row");
-                inserted += pipeline_insert_batch_spi(pipeline, current_batch,
-                                                      relname);
+                inserted += pipeline_insert_batch_spi(pipeline, current_batch, relname);
             }
 
             list_free(current_batch);
@@ -1444,8 +1431,7 @@ pipeline_insert_batch_copy(Pipeline *pipeline, List *records, const char *relnam
  *    When use_copy is true, uses batched multi-VALUES inserts for performance.
  *    Returns the number of rows successfully inserted.
  */
-int64
-pipeline_insert_batch(Pipeline *pipeline, List *records, bool use_copy)
+int64 pipeline_insert_batch(Pipeline *pipeline, List *records, bool use_copy)
 {
     int64 inserted;
     char *relname;
@@ -1453,15 +1439,13 @@ pipeline_insert_batch(Pipeline *pipeline, List *records, bool use_copy)
     if (pipeline == NULL || records == NIL)
         return 0;
 
-    if (SPI_connect() != SPI_OK_CONNECT)
-    {
+    if (SPI_connect() != SPI_OK_CONNECT) {
         elog(WARNING, "pipeline_insert_batch: failed to connect to SPI");
         return 0;
     }
 
     relname = get_rel_name(pipeline->target_table_oid);
-    if (relname == NULL)
-    {
+    if (relname == NULL) {
         elog(WARNING, "pipeline_insert_batch: target table not found");
         SPI_finish();
         return 0;

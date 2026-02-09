@@ -1604,8 +1604,7 @@ Datum orochi_remove_compression_policy_sql(PG_FUNCTION_ARGS)
     SPI_finish();
 
     if (policy_id > 0)
-        elog(NOTICE, "Removed compression policy %d from hypertable %u", policy_id,
-             hypertable_oid);
+        elog(NOTICE, "Removed compression policy %d from hypertable %u", policy_id, hypertable_oid);
     else
         elog(NOTICE, "No compression policy found for hypertable %u", hypertable_oid);
 

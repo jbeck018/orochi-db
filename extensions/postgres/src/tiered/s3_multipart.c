@@ -884,37 +884,34 @@ S3UploadResult *orochi_upload_chunk_to_s3(S3Client *client, const char *key, con
  * All S3 multipart operations require libcurl to function.
  */
 
-char *
-s3_multipart_upload_start(S3Client *client, const char *key)
+char *s3_multipart_upload_start(S3Client *client, const char *key)
 {
     elog(WARNING, "Orochi: S3 multipart upload requires libcurl");
     return NULL;
 }
 
-char *
-s3_multipart_upload_part_ex(S3Client *client, const char *key, const char *upload_id,
-                            int part_number, const char *data, int64 size)
+char *s3_multipart_upload_part_ex(S3Client *client, const char *key, const char *upload_id,
+                                  int part_number, const char *data, int64 size)
 {
     elog(WARNING, "Orochi: S3 multipart upload requires libcurl");
     return NULL;
 }
 
-bool
-s3_multipart_upload_complete_with_parts(S3Client *client, const char *key, const char *upload_id,
-                                        S3MultipartPart *parts, int num_parts)
+bool s3_multipart_upload_complete_with_parts(S3Client *client, const char *key,
+                                             const char *upload_id, S3MultipartPart *parts,
+                                             int num_parts)
 {
     elog(WARNING, "Orochi: S3 multipart upload requires libcurl");
     return false;
 }
 
-void
-s3_multipart_upload_abort(S3Client *client, const char *key, const char *upload_id)
+void s3_multipart_upload_abort(S3Client *client, const char *key, const char *upload_id)
 {
     elog(WARNING, "Orochi: S3 multipart upload requires libcurl");
 }
 
-S3UploadResult *
-orochi_upload_chunk_to_s3(S3Client *client, const char *key, const char *data, int64 size)
+S3UploadResult *orochi_upload_chunk_to_s3(S3Client *client, const char *key, const char *data,
+                                          int64 size)
 {
     S3UploadResult *result = palloc0(sizeof(S3UploadResult));
     result->success = false;

@@ -660,8 +660,8 @@ void orochi_auth_enforce_session_limits(void)
             if (oldest_idx >= 0) {
                 OrochiAuthSharedState->session_cache[oldest_idx].state = OROCHI_SESSION_REVOKED;
                 elog(LOG, "Orochi Auth: revoked oldest session %s for user %s (limit %d exceeded)",
-                     OrochiAuthSharedState->session_cache[oldest_idx].session_id,
-                     session->user_id, max_per_user);
+                     OrochiAuthSharedState->session_cache[oldest_idx].session_id, session->user_id,
+                     max_per_user);
             }
             count--;
         }
@@ -805,15 +805,13 @@ void orochi_auth_check_key_rotation(void)
                 LWLockRelease(OrochiAuthSharedState->signing_key_lock);
 
                 initStringInfo(&notify_payload);
-                appendStringInfo(&notify_payload,
-                                 "{\"event\":\"key_rotation\",\"key_id\":\"%s\"}",
+                appendStringInfo(&notify_payload, "{\"event\":\"key_rotation\",\"key_id\":\"%s\"}",
                                  entry->key_id);
 
                 if (SPI_connect() == SPI_OK_CONNECT) {
                     StringInfoData notify_query;
                     initStringInfo(&notify_query);
-                    appendStringInfo(&notify_query,
-                                     "SELECT pg_notify('orochi_auth_events', %s)",
+                    appendStringInfo(&notify_query, "SELECT pg_notify('orochi_auth_events', %s)",
                                      quote_literal_cstr(notify_payload.data));
                     SPI_execute(notify_query.data, false, 0);
                     pfree(notify_query.data);
@@ -849,13 +847,12 @@ void orochi_auth_refresh_signing_key_cache(void)
         return;
     }
 
-    ret = SPI_execute(
-        "SELECT key_id, tenant_id, algorithm, public_key, private_key_encrypted, "
-        "       created_at, expires_at, rotated_at, is_current, is_active, version "
-        "FROM auth.signing_keys "
-        "WHERE is_active = true "
-        "ORDER BY created_at DESC",
-        true, OROCHI_AUTH_MAX_SIGNING_KEYS);
+    ret = SPI_execute("SELECT key_id, tenant_id, algorithm, public_key, private_key_encrypted, "
+                      "       created_at, expires_at, rotated_at, is_current, is_active, version "
+                      "FROM auth.signing_keys "
+                      "WHERE is_active = true "
+                      "ORDER BY created_at DESC",
+                      true, OROCHI_AUTH_MAX_SIGNING_KEYS);
 
     if (ret == SPI_OK_SELECT && SPI_processed > 0) {
         TupleDesc tupdesc = SPI_tuptable->tupdesc;

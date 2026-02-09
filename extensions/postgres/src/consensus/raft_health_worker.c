@@ -54,8 +54,7 @@ static void update_node_health(int node_id, bool is_healthy, int latency_ms);
  * Signal Handlers
  * ============================================================ */
 
-static void
-health_sighup_handler(SIGNAL_ARGS)
+static void health_sighup_handler(SIGNAL_ARGS)
 {
     int save_errno = errno;
 
@@ -64,8 +63,7 @@ health_sighup_handler(SIGNAL_ARGS)
     errno = save_errno;
 }
 
-static void
-health_sigterm_handler(SIGNAL_ARGS)
+static void health_sigterm_handler(SIGNAL_ARGS)
 {
     int save_errno = errno;
 
@@ -84,8 +82,7 @@ health_sigterm_handler(SIGNAL_ARGS)
  *    Returns true if the node is healthy, false otherwise.
  *    Sets latency_ms to the round-trip time in milliseconds.
  */
-static bool
-check_node_health(const char *connstr, int *latency_ms)
+static bool check_node_health(const char *connstr, int *latency_ms)
 {
     PGconn *conn;
     PGresult *res;
@@ -99,19 +96,15 @@ check_node_health(const char *connstr, int *latency_ms)
     start_time = GetCurrentTimestamp();
 
     conn = PQconnectdb(connstr);
-    if (PQstatus(conn) != CONNECTION_OK)
-    {
-        elog(DEBUG1, "Health check: connection failed to %s: %s",
-             connstr, PQerrorMessage(conn));
+    if (PQstatus(conn) != CONNECTION_OK) {
+        elog(DEBUG1, "Health check: connection failed to %s: %s", connstr, PQerrorMessage(conn));
         PQfinish(conn);
         return false;
     }
 
     res = PQexec(conn, "SELECT 1");
-    if (PQresultStatus(res) != PGRES_TUPLES_OK)
-    {
-        elog(DEBUG1, "Health check: query failed on %s: %s",
-             connstr, PQerrorMessage(conn));
+    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+        elog(DEBUG1, "Health check: query failed on %s: %s", connstr, PQerrorMessage(conn));
         PQclear(res);
         PQfinish(conn);
         return false;
@@ -132,8 +125,7 @@ check_node_health(const char *connstr, int *latency_ms)
  *    Update the orochi.orochi_node_health table via SPI with
  *    the health check results for a given node.
  */
-static void
-update_node_health(int node_id, bool is_healthy, int latency_ms)
+static void update_node_health(int node_id, bool is_healthy, int latency_ms)
 {
     int ret;
     StringInfoData query;
@@ -157,9 +149,7 @@ update_node_health(int node_id, bool is_healthy, int latency_ms)
                      "latency_ms = EXCLUDED.latency_ms, "
                      "consecutive_failures = CASE WHEN EXCLUDED.is_healthy THEN 0 "
                      "ELSE orochi.orochi_node_health.consecutive_failures + 1 END",
-                     node_id,
-                     is_healthy ? "true" : "false",
-                     latency_ms,
+                     node_id, is_healthy ? "true" : "false", latency_ms,
                      is_healthy ? "true" : "false");
 
     ret = SPI_execute(query.data, false, 0);
@@ -172,8 +162,7 @@ update_node_health(int node_id, bool is_healthy, int latency_ms)
      * Check if this node has exceeded the failure threshold.
      * If so, log a warning and mark the node as inactive in the catalog.
      */
-    if (!is_healthy)
-    {
+    if (!is_healthy) {
         StringInfoData check_query;
         int threshold = orochi_health_check_failure_threshold;
 
@@ -184,17 +173,14 @@ update_node_health(int node_id, bool is_healthy, int latency_ms)
                          node_id);
 
         ret = SPI_execute(check_query.data, true, 1);
-        if (ret == SPI_OK_SELECT && SPI_processed > 0)
-        {
+        if (ret == SPI_OK_SELECT && SPI_processed > 0) {
             bool isnull;
             int failures;
 
-            failures = DatumGetInt32(SPI_getbinval(SPI_tuptable->vals[0],
-                                                    SPI_tuptable->tupdesc,
-                                                    1, &isnull));
+            failures = DatumGetInt32(
+                SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull));
 
-            if (!isnull && failures >= threshold)
-            {
+            if (!isnull && failures >= threshold) {
                 elog(WARNING,
                      "Health worker: node %d has been unreachable for %d consecutive checks "
                      "(threshold: %d), marking as inactive",
@@ -211,9 +197,7 @@ update_node_health(int node_id, bool is_healthy, int latency_ms)
 
                 ret = SPI_execute(update_query.data, false, 0);
                 if (ret != SPI_OK_UPDATE)
-                    elog(WARNING,
-                         "Health worker: failed to mark node %d as inactive",
-                         node_id);
+                    elog(WARNING, "Health worker: failed to mark node %d as inactive", node_id);
 
                 pfree(update_query.data);
             }
@@ -233,8 +217,7 @@ update_node_health(int node_id, bool is_healthy, int latency_ms)
  *    Periodically checks all registered nodes and updates their
  *    health status in the catalog.
  */
-void
-orochi_health_worker_main(Datum main_arg)
+void orochi_health_worker_main(Datum main_arg)
 {
     /* Set up signal handlers */
     pqsignal(SIGHUP, health_sighup_handler);
@@ -249,22 +232,18 @@ orochi_health_worker_main(Datum main_arg)
          orochi_health_check_interval);
 
     /* Main event loop */
-    while (!got_sigterm)
-    {
+    while (!got_sigterm) {
         int rc;
         int interval_ms = orochi_health_check_interval * 1000;
 
         /* Wait for timeout or signal */
-        rc = WaitLatch(MyLatch,
-                       WL_LATCH_SET | WL_TIMEOUT | WL_EXIT_ON_PM_DEATH,
-                       interval_ms,
+        rc = WaitLatch(MyLatch, WL_LATCH_SET | WL_TIMEOUT | WL_EXIT_ON_PM_DEATH, interval_ms,
                        PG_WAIT_EXTENSION);
 
         ResetLatch(MyLatch);
 
         /* Handle SIGHUP - reload config */
-        if (got_sighup)
-        {
+        if (got_sighup) {
             got_sighup = false;
             ProcessConfigFile(PGC_SIGHUP);
             elog(LOG, "Health check worker reloaded configuration");
@@ -284,16 +263,12 @@ orochi_health_worker_main(Datum main_arg)
             int ret;
             uint64 i;
 
-            ret = SPI_execute(
-                "SELECT node_id, hostname, port FROM orochi.orochi_nodes",
-                true, 0);
+            ret = SPI_execute("SELECT node_id, hostname, port FROM orochi.orochi_nodes", true, 0);
 
-            if (ret == SPI_OK_SELECT && SPI_processed > 0)
-            {
+            if (ret == SPI_OK_SELECT && SPI_processed > 0) {
                 TupleDesc tupdesc = SPI_tuptable->tupdesc;
 
-                for (i = 0; i < SPI_processed; i++)
-                {
+                for (i = 0; i < SPI_processed; i++) {
                     HeapTuple tuple = SPI_tuptable->vals[i];
                     bool isnull;
                     int node_id;
@@ -303,8 +278,7 @@ orochi_health_worker_main(Datum main_arg)
                     bool is_healthy;
                     int latency_ms = 0;
 
-                    node_id = DatumGetInt32(
-                        SPI_getbinval(tuple, tupdesc, 1, &isnull));
+                    node_id = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 1, &isnull));
                     if (isnull)
                         continue;
 
@@ -312,8 +286,7 @@ orochi_health_worker_main(Datum main_arg)
                     if (hostname == NULL)
                         continue;
 
-                    port = DatumGetInt32(
-                        SPI_getbinval(tuple, tupdesc, 3, &isnull));
+                    port = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 3, &isnull));
                     if (isnull)
                         port = 5432;
 
@@ -327,11 +300,8 @@ orochi_health_worker_main(Datum main_arg)
                     /* Check this node's health */
                     is_healthy = check_node_health(connstr.data, &latency_ms);
 
-                    elog(DEBUG1,
-                         "Health check: node %d (%s:%d) - %s (latency: %d ms)",
-                         node_id, hostname, port,
-                         is_healthy ? "healthy" : "unreachable",
-                         latency_ms);
+                    elog(DEBUG1, "Health check: node %d (%s:%d) - %s (latency: %d ms)", node_id,
+                         hostname, port, is_healthy ? "healthy" : "unreachable", latency_ms);
 
                     /* Update the health record */
                     update_node_health(node_id, is_healthy, latency_ms);

@@ -277,10 +277,9 @@ static void orochi_define_gucs(void)
                             &orochi_cache_size_mb, 256, 16, 16384, PGC_SIGHUP, 0, NULL, NULL, NULL);
 
     /* Health check configuration */
-    DefineCustomIntVariable("orochi.health_check_interval",
-                            "Interval between health checks in seconds", NULL,
-                            &orochi_health_check_interval, 30, 5, 3600, PGC_SIGHUP, GUC_UNIT_S,
-                            NULL, NULL, NULL);
+    DefineCustomIntVariable(
+        "orochi.health_check_interval", "Interval between health checks in seconds", NULL,
+        &orochi_health_check_interval, 30, 5, 3600, PGC_SIGHUP, GUC_UNIT_S, NULL, NULL, NULL);
 
     DefineCustomIntVariable("orochi.health_check_failure_threshold",
                             "Number of consecutive failures before marking a node inactive", NULL,
@@ -288,15 +287,13 @@ static void orochi_define_gucs(void)
                             NULL, NULL);
 
     /* Raft log compaction configuration */
-    DefineCustomIntVariable("orochi.raft_compaction_interval",
-                            "Interval between compaction checks in seconds", NULL,
-                            &orochi_raft_compaction_interval, 60, 10, 3600, PGC_SIGHUP, GUC_UNIT_S,
-                            NULL, NULL, NULL);
+    DefineCustomIntVariable(
+        "orochi.raft_compaction_interval", "Interval between compaction checks in seconds", NULL,
+        &orochi_raft_compaction_interval, 60, 10, 3600, PGC_SIGHUP, GUC_UNIT_S, NULL, NULL, NULL);
 
-    DefineCustomIntVariable("orochi.raft_log_max_entries",
-                            "Maximum Raft log entries before triggering compaction", NULL,
-                            &orochi_raft_log_max_entries, 10000, 100, 10000000, PGC_SIGHUP, 0,
-                            NULL, NULL, NULL);
+    DefineCustomIntVariable(
+        "orochi.raft_log_max_entries", "Maximum Raft log entries before triggering compaction",
+        NULL, &orochi_raft_log_max_entries, 10000, 100, 10000000, PGC_SIGHUP, 0, NULL, NULL, NULL);
 }
 
 /*

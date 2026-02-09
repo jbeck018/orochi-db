@@ -50,8 +50,7 @@ static void perform_log_compaction(void);
  * Signal Handlers
  * ============================================================ */
 
-static void
-compaction_sighup_handler(SIGNAL_ARGS)
+static void compaction_sighup_handler(SIGNAL_ARGS)
 {
     int save_errno = errno;
 
@@ -60,8 +59,7 @@ compaction_sighup_handler(SIGNAL_ARGS)
     errno = save_errno;
 }
 
-static void
-compaction_sigterm_handler(SIGNAL_ARGS)
+static void compaction_sigterm_handler(SIGNAL_ARGS)
 {
     int save_errno = errno;
 
@@ -85,8 +83,7 @@ compaction_sigterm_handler(SIGNAL_ARGS)
  *       last applied index
  *    3. Compacting (truncating) log entries up to that index
  */
-static void
-perform_log_compaction(void)
+static void perform_log_compaction(void)
 {
     uint64 first_index = 0;
     uint64 last_index = 0;
@@ -96,16 +93,14 @@ perform_log_compaction(void)
     int32 capacity = 0;
     uint64 compact_up_to;
 
-    if (raft_shared_state == NULL)
-    {
+    if (raft_shared_state == NULL) {
         elog(DEBUG1, "Compaction worker: raft shared state not available");
         return;
     }
 
     /* Check if raft is initialized and running */
     LWLockAcquire(raft_shared_state->lock, LW_SHARED);
-    if (!raft_shared_state->is_initialized || !raft_shared_state->is_running)
-    {
+    if (!raft_shared_state->is_initialized || !raft_shared_state->is_running) {
         LWLockRelease(raft_shared_state->lock);
         elog(DEBUG1, "Compaction worker: raft not initialized or not running");
         return;
@@ -140,8 +135,7 @@ perform_log_compaction(void)
      * The actual entry count would require direct log access.
      * If the committed index is large enough, compaction is warranted.
      */
-    if (commit_index < (uint64)orochi_raft_log_max_entries)
-    {
+    if (commit_index < (uint64)orochi_raft_log_max_entries) {
         elog(DEBUG2,
              "Compaction worker: log size within threshold "
              "(commit_index=%lu, max=%d)",
@@ -162,8 +156,7 @@ perform_log_compaction(void)
         if (keep_entries < 100)
             keep_entries = 100;
 
-        if (commit_index <= keep_entries)
-        {
+        if (commit_index <= keep_entries) {
             elog(DEBUG2, "Compaction worker: not enough committed entries to compact");
             return;
         }
@@ -222,8 +215,7 @@ perform_log_compaction(void)
 
         LWLockRelease(raft_shared_state->lock);
 
-        if (worker_pid > 0)
-        {
+        if (worker_pid > 0) {
             /*
              * Wake up the raft worker so it can check for compaction.
              * The raft worker will call raft_should_snapshot() and
@@ -243,12 +235,9 @@ perform_log_compaction(void)
              *
              * The logging above serves as an audit trail.
              */
-        }
-        else
-        {
-            elog(WARNING,
-                 "Compaction worker: raft worker not running, "
-                 "cannot trigger compaction");
+        } else {
+            elog(WARNING, "Compaction worker: raft worker not running, "
+                          "cannot trigger compaction");
         }
     }
 
@@ -268,8 +257,7 @@ perform_log_compaction(void)
  *    Periodically checks log size and triggers compaction when
  *    the configured threshold is exceeded.
  */
-void
-orochi_compaction_worker_main(Datum main_arg)
+void orochi_compaction_worker_main(Datum main_arg)
 {
     /* Set up signal handlers */
     pqsignal(SIGHUP, compaction_sighup_handler);
@@ -286,29 +274,24 @@ orochi_compaction_worker_main(Datum main_arg)
          orochi_raft_compaction_interval, orochi_raft_log_max_entries);
 
     /* Main event loop */
-    while (!got_sigterm)
-    {
+    while (!got_sigterm) {
         int rc;
         int interval_ms = orochi_raft_compaction_interval * 1000;
 
         /* Wait for timeout or signal */
-        rc = WaitLatch(MyLatch,
-                       WL_LATCH_SET | WL_TIMEOUT | WL_EXIT_ON_PM_DEATH,
-                       interval_ms,
+        rc = WaitLatch(MyLatch, WL_LATCH_SET | WL_TIMEOUT | WL_EXIT_ON_PM_DEATH, interval_ms,
                        PG_WAIT_EXTENSION);
 
         ResetLatch(MyLatch);
 
         /* Handle SIGHUP - reload config */
-        if (got_sighup)
-        {
+        if (got_sighup) {
             got_sighup = false;
             ProcessConfigFile(PGC_SIGHUP);
             elog(LOG,
                  "Compaction worker reloaded configuration "
                  "(interval: %d s, max_entries: %d)",
-                 orochi_raft_compaction_interval,
-                 orochi_raft_log_max_entries);
+                 orochi_raft_compaction_interval, orochi_raft_log_max_entries);
         }
 
         if (got_sigterm)

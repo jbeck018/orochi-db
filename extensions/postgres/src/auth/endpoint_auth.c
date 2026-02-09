@@ -1384,8 +1384,8 @@ bool endpoint_verify_password(const char *password, const char *hash)
 
     if (ret == SPI_OK_SELECT && SPI_processed > 0) {
         bool isnull;
-        verified = DatumGetBool(
-            SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull));
+        verified =
+            DatumGetBool(SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull));
     }
 
     pfree(query.data);

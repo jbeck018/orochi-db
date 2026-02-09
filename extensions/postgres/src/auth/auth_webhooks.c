@@ -584,55 +584,47 @@ static bool deliver_webhook(AuthWebhookEndpoint *endpoint, AuthWebhookPayload *p
         /* Format the event UUID */
         snprintf(event_uuid_str, sizeof(event_uuid_str),
                  "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-                 payload->event_id.data[0], payload->event_id.data[1],
-                 payload->event_id.data[2], payload->event_id.data[3],
-                 payload->event_id.data[4], payload->event_id.data[5],
-                 payload->event_id.data[6], payload->event_id.data[7],
-                 payload->event_id.data[8], payload->event_id.data[9],
-                 payload->event_id.data[10], payload->event_id.data[11],
-                 payload->event_id.data[12], payload->event_id.data[13],
-                 payload->event_id.data[14], payload->event_id.data[15]);
+                 payload->event_id.data[0], payload->event_id.data[1], payload->event_id.data[2],
+                 payload->event_id.data[3], payload->event_id.data[4], payload->event_id.data[5],
+                 payload->event_id.data[6], payload->event_id.data[7], payload->event_id.data[8],
+                 payload->event_id.data[9], payload->event_id.data[10], payload->event_id.data[11],
+                 payload->event_id.data[12], payload->event_id.data[13], payload->event_id.data[14],
+                 payload->event_id.data[15]);
 
         event_type_name = webhook_event_type_name(payload->event_type);
 
         /* Compute HMAC-SHA256 signature if secret is available */
-        if (endpoint->secret && endpoint->secret[0] != '\0')
-        {
-            HMAC(EVP_sha256(),
-                 endpoint->secret, strlen(endpoint->secret),
-                 (unsigned char *)payload_json, strlen(payload_json),
-                 hmac_result, &hmac_len);
+        if (endpoint->secret && endpoint->secret[0] != '\0') {
+            HMAC(EVP_sha256(), endpoint->secret, strlen(endpoint->secret),
+                 (unsigned char *)payload_json, strlen(payload_json), hmac_result, &hmac_len);
 
             for (unsigned int i = 0; i < hmac_len; i++)
                 snprintf(signature_hex + (i * 2), 3, "%02x", hmac_result[i]);
             signature_hex[hmac_len * 2] = '\0';
-        }
-        else
-        {
+        } else {
             signature_hex[0] = '\0';
         }
 
         ret = SPI_connect();
-        if (ret != SPI_OK_CONNECT)
-        {
+        if (ret != SPI_OK_CONNECT) {
             elog(WARNING, "Orochi auth webhook: SPI_connect failed");
             pfree(payload_json);
             return false;
         }
 
         /* Create table if not exists */
-        SPI_execute(
-            "CREATE TABLE IF NOT EXISTS orochi.orochi_auth_webhook_queue ("
-            "  delivery_id BIGSERIAL PRIMARY KEY,"
-            "  endpoint_id BIGINT NOT NULL,"
-            "  event_id TEXT,"
-            "  event_type TEXT NOT NULL,"
-            "  payload TEXT NOT NULL,"
-            "  signature TEXT,"
-            "  status TEXT DEFAULT 'pending',"
-            "  created_at TIMESTAMPTZ DEFAULT now(),"
-            "  processed_at TIMESTAMPTZ"
-            ")", false, 0);
+        SPI_execute("CREATE TABLE IF NOT EXISTS orochi.orochi_auth_webhook_queue ("
+                    "  delivery_id BIGSERIAL PRIMARY KEY,"
+                    "  endpoint_id BIGINT NOT NULL,"
+                    "  event_id TEXT,"
+                    "  event_type TEXT NOT NULL,"
+                    "  payload TEXT NOT NULL,"
+                    "  signature TEXT,"
+                    "  status TEXT DEFAULT 'pending',"
+                    "  created_at TIMESTAMPTZ DEFAULT now(),"
+                    "  processed_at TIMESTAMPTZ"
+                    ")",
+                    false, 0);
 
         /* Escape strings for SQL safety */
         escaped_payload = quote_literal_cstr(payload_json);
@@ -640,14 +632,11 @@ static bool deliver_webhook(AuthWebhookEndpoint *endpoint, AuthWebhookPayload *p
 
         initStringInfo(&query);
         appendStringInfo(&query,
-            "INSERT INTO orochi.orochi_auth_webhook_queue "
-            "(endpoint_id, event_id, event_type, payload, signature) "
-            "VALUES (%ld, '%s', %s, %s, '%s')",
-            endpoint->endpoint_id,
-            event_uuid_str,
-            escaped_event_type,
-            escaped_payload,
-            signature_hex);
+                         "INSERT INTO orochi.orochi_auth_webhook_queue "
+                         "(endpoint_id, event_id, event_type, payload, signature) "
+                         "VALUES (%ld, '%s', %s, %s, '%s')",
+                         endpoint->endpoint_id, event_uuid_str, escaped_event_type, escaped_payload,
+                         signature_hex);
 
         PG_TRY();
         {
@@ -675,8 +664,7 @@ static bool deliver_webhook(AuthWebhookEndpoint *endpoint, AuthWebhookPayload *p
         SPI_finish();
 
         /* Populate delivery record */
-        if (delivery)
-        {
+        if (delivery) {
             delivery->success = true;
             delivery->attempted_at = GetCurrentTimestamp();
             delivery->http_status = 0;
@@ -687,7 +675,7 @@ static bool deliver_webhook(AuthWebhookEndpoint *endpoint, AuthWebhookPayload *p
         elog(LOG, "Orochi auth webhook: queued delivery for endpoint %ld event %s",
              endpoint->endpoint_id, event_type_name);
 
-        return true;  /* Queued successfully */
+        return true; /* Queued successfully */
     }
 #endif
 }
