@@ -94,7 +94,7 @@ jobs:
         if: steps.check.outputs.exists == 'true'
         uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          version: v2.8.0
           working-directory: ${{ matrix.component }}
           args: --timeout=5m
 

@@ -19,6 +19,7 @@
 
 #include "postgres.h"
 #include "fmgr.h"
+#include "nodes/pg_list.h"
 #include "storage/lwlock.h"
 #include "storage/shmem.h"
 #include "utils/timestamp.h"
