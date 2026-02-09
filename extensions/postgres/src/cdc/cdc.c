@@ -39,6 +39,7 @@
 #include "storage/proc.h"
 #include "storage/shmem.h"
 #include "utils/builtins.h"
+#include "utils/guc.h"
 #include "utils/json.h"
 #include "utils/jsonb.h"
 #include "utils/lsyscache.h"
