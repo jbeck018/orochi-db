@@ -870,7 +870,8 @@ Datum orochi_auth_link_email_sql(PG_FUNCTION_ARGS)
                          result->error_code ? result->error_code : "unknown",
                          result->error_message ? result->error_message : "Unknown error");
 
-        PG_RETURN_JSONB_P(DatumGetJsonbP(DirectFunctionCall1(jsonb_in, CStringGetDatum(error_json.data))));
+        PG_RETURN_JSONB_P(
+            DatumGetJsonbP(DirectFunctionCall1(jsonb_in, CStringGetDatum(error_json.data))));
     }
 }
 
@@ -895,7 +896,8 @@ Datum orochi_auth_link_phone_sql(PG_FUNCTION_ARGS)
                          result->error_code ? result->error_code : "unknown",
                          result->error_message ? result->error_message : "Unknown error");
 
-        PG_RETURN_JSONB_P(DatumGetJsonbP(DirectFunctionCall1(jsonb_in, CStringGetDatum(error_json.data))));
+        PG_RETURN_JSONB_P(
+            DatumGetJsonbP(DirectFunctionCall1(jsonb_in, CStringGetDatum(error_json.data))));
     }
 }
 
