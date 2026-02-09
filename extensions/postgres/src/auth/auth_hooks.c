@@ -36,6 +36,8 @@
 #include "utils/memutils.h"
 #include "utils/timestamp.h"
 
+#include <arpa/inet.h>
+
 #include "auth.h"
 #include "jwt.h"
 
