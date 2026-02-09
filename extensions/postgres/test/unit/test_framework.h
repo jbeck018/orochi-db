@@ -230,6 +230,9 @@ static inline void __record_test_result(const char *name, bool passed,
         if (failure_msg)
             printf("         %s\n", failure_msg);
     }
+
+    /* Flush stdout so crash output is accurate */
+    fflush(stdout);
 }
 
 /*

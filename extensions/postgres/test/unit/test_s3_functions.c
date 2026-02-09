@@ -198,7 +198,7 @@ static void test_etag_quote_removal(void)
 {
     TEST_BEGIN("etag_quote_removal")
         const char *etag_quoted = "\"abc123def456\"";
-        char *result = strdup(etag_quoted);
+        char *result = pstrdup(etag_quoted);
 
         /* Simulate quote removal logic */
         if (*result == '"') {
@@ -215,7 +215,7 @@ static void test_etag_quote_removal(void)
 
     TEST_BEGIN("etag_no_quotes")
         const char *etag_plain = "abc123def456";
-        char *result = strdup(etag_plain);
+        char *result = pstrdup(etag_plain);
 
         /* Quote removal should leave unquoted strings unchanged */
         if (*result == '"') {

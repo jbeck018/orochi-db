@@ -3,7 +3,7 @@
 
 # Compiler and flags
 CC = gcc
-CFLAGS = -std=c11 -Wall -Wextra -Wno-unused-parameter -g -O2
+CFLAGS = -std=gnu11 -Wall -Wextra -Wno-unused-parameter -Werror=implicit-function-declaration -g -O2
 
 # Include paths from pkg-config
 PKG_CFLAGS = $(shell pkg-config --cflags liblz4 libzstd openssl 2>/dev/null)

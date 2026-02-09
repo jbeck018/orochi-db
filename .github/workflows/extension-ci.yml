@@ -277,37 +277,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install build tools
+      - name: Install build tools and libraries
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential \
-            gcc
+            gcc \
+            pkg-config \
+            liblz4-dev \
+            libzstd-dev \
+            libssl-dev
 
-      - name: Cache unit test build
-        uses: actions/cache@v4
-        with:
-          path: |
-            extensions/postgres/test/unit/*.o
-            extensions/postgres/test/unit/run_tests
-          key: unit-tests-${{ runner.os }}-${{ hashFiles('extensions/postgres/test/unit/**/*.c', 'extensions/postgres/test/unit/**/*.h', 'extensions/postgres/test/unit/Makefile') }}
-          restore-keys: |
-            unit-tests-${{ runner.os }}-
-
-      - name: Build unit tests
+      - name: Build unit tests with AddressSanitizer
         working-directory: extensions/postgres/test/unit
         run: |
           make clean || true
-          make
+          make CFLAGS="-std=gnu11 -Wall -Wextra -Wno-unused-parameter -Werror=implicit-function-declaration -g -O1 -fsanitize=address -fno-omit-frame-pointer" LIBS="-lm -llz4 -lzstd -lssl -lcrypto -fsanitize=address"
 
       - name: Run unit tests
         working-directory: extensions/postgres/test/unit
-        run: ./run_tests
-
-      - name: Run unit tests (verbose on failure)
-        working-directory: extensions/postgres/test/unit
+        env:
+          ASAN_OPTIONS: detect_leaks=0:halt_on_error=1:print_legend=1
         run: ./run_tests --verbose
-        if: failure()
 
   # Regression tests (requires PostgreSQL)
   regression-tests:
