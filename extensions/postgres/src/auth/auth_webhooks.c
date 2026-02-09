@@ -846,7 +846,7 @@ int64 orochi_auth_create_webhook_endpoint(const char *url, const char *secret, b
 
     if (secret == NULL || strlen(secret) == 0) {
         /* Generate a random secret */
-        secret = orochi_auth_generate_token(32);
+        secret = orochi_gotrue_generate_token(32);
     }
 
     if (timeout_ms <= 0)

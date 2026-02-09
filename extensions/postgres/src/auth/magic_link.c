@@ -99,8 +99,8 @@ OrochiMagicLink *orochi_auth_send_magic_link(const char *email, const char *redi
     magic_link = palloc0(sizeof(OrochiMagicLink));
 
     /* Generate secure token */
-    token = orochi_auth_generate_token(OROCHI_AUTH_TOKEN_LENGTH);
-    token_hash = orochi_auth_hash_token(token);
+    token = orochi_gotrue_generate_token(OROCHI_AUTH_TOKEN_LENGTH);
+    token_hash = orochi_gotrue_hash_token(token);
 
     magic_link->token_type = OROCHI_TOKEN_CONFIRMATION;
     magic_link->token_hash = pstrdup(token_hash);
@@ -281,7 +281,7 @@ OrochiMagicLink *orochi_auth_send_phone_otp(const char *phone, const char *chann
 
     /* Generate 6-digit OTP */
     otp = orochi_auth_generate_otp(OROCHI_AUTH_OTP_LENGTH);
-    otp_hash = orochi_auth_hash_token(otp);
+    otp_hash = orochi_gotrue_hash_token(otp);
 
     otp_token->token_type = OROCHI_TOKEN_CONFIRMATION;
     otp_token->token_hash = pstrdup(otp_hash);
@@ -436,7 +436,7 @@ OrochiAuthResult *orochi_auth_verify_otp(const char *token, const char *token_ty
     }
 
     /* Hash the provided token */
-    token_hash = orochi_auth_hash_token(token);
+    token_hash = orochi_gotrue_hash_token(token);
 
     if (SPI_connect() != SPI_OK_CONNECT) {
         pfree(token_hash);
@@ -551,7 +551,7 @@ OrochiAuthResult *orochi_auth_verify_otp(const char *token, const char *token_ty
     }
 
     /* Create session */
-    session = orochi_auth_create_session(user_id, NULL, NULL, OROCHI_AAL_1);
+    session = orochi_gotrue_create_session(user_id, NULL, NULL, OROCHI_AAL_1);
 
     result->user = user;
     result->session = session;
@@ -616,8 +616,8 @@ OrochiMagicLink *orochi_auth_send_recovery(const char *email)
     recovery_token = palloc0(sizeof(OrochiMagicLink));
 
     /* Generate token */
-    token = orochi_auth_generate_token(OROCHI_AUTH_TOKEN_LENGTH);
-    token_hash = orochi_auth_hash_token(token);
+    token = orochi_gotrue_generate_token(OROCHI_AUTH_TOKEN_LENGTH);
+    token_hash = orochi_gotrue_hash_token(token);
 
     recovery_token->token_type = OROCHI_TOKEN_RECOVERY;
     recovery_token->token_hash = pstrdup(token_hash);
@@ -754,7 +754,7 @@ bool orochi_auth_verify_recovery(const char *token, const char *new_password)
                         errmsg("password too short (min %d characters)",
                                OROCHI_AUTH_MIN_PASSWORD_LENGTH)));
 
-    token_hash = orochi_auth_hash_token(token);
+    token_hash = orochi_gotrue_hash_token(token);
     encrypted_password = orochi_auth_hash_password(new_password);
 
     if (SPI_connect() != SPI_OK_CONNECT) {

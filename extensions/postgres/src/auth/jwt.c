@@ -36,8 +36,7 @@
 #include <string.h>
 #include <time.h>
 
-/* PostgreSQL module magic */
-PG_MODULE_MAGIC;
+/* PG_MODULE_MAGIC is defined in init.c for the shared library */
 
 /* SQL function declarations */
 PG_FUNCTION_INFO_V1(orochi_jwt_verify);

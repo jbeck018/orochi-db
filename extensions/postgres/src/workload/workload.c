@@ -35,7 +35,7 @@
 
 #include "workload.h"
 
-PG_MODULE_MAGIC;
+/* PG_MODULE_MAGIC is defined in init.c for the shared library */
 
 /* ============================================================
  * GUC Variables

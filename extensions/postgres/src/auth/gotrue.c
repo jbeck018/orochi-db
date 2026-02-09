@@ -43,8 +43,8 @@
 /* Shared memory state */
 static OrochiAuthSharedState *auth_shared_state = NULL;
 
-/* GUC variables */
-char *orochi_auth_jwt_secret = NULL;
+/* GUC variables - orochi_auth_jwt_secret is defined in auth.c */
+extern char *orochi_auth_jwt_secret;
 int orochi_auth_jwt_exp = OROCHI_AUTH_DEFAULT_JWT_EXP;
 bool orochi_auth_enable_anonymous = true;
 
@@ -55,39 +55,21 @@ static unsigned char *base64url_decode(const char *input, int *output_len);
 static Jsonb *build_jwt_payload(OrochiAuthUser *user, OrochiAuthSession *session, int exp_seconds);
 static char *sign_jwt(const char *header, const char *payload, const char *secret);
 
-/* ============================================================
- * Shared Memory Initialization
- * ============================================================ */
-
-Size orochi_auth_shmem_size(void)
-{
-    return sizeof(OrochiAuthSharedState);
-}
-
-void orochi_auth_shmem_init(void)
-{
-    bool found;
-
-    auth_shared_state = (OrochiAuthSharedState *)ShmemInitStruct(
-        "Orochi Auth State", sizeof(OrochiAuthSharedState), &found);
-
-    if (!found) {
-        memset(auth_shared_state, 0, sizeof(OrochiAuthSharedState));
-        auth_shared_state->lock = &(GetNamedLWLockTranche("orochi_auth"))->lock;
-        auth_shared_state->active_sessions = 0;
-        auth_shared_state->last_cleanup = GetCurrentTimestamp();
-    }
-}
+/*
+ * orochi_auth_shmem_size and orochi_auth_shmem_init are defined in
+ * auth_cache.c which provides the comprehensive shared memory implementation.
+ */
 
 /* ============================================================
  * Token Generation Utilities
  * ============================================================ */
 
 /*
- * orochi_auth_generate_token
+ * orochi_gotrue_generate_token
  *    Generate a cryptographically secure random token
+ *    (Renamed from orochi_auth_generate_token to avoid conflict with auth.c)
  */
-char *orochi_auth_generate_token(int length)
+char *orochi_gotrue_generate_token(int length)
 {
     unsigned char *random_bytes;
     char *token;
@@ -166,10 +148,11 @@ char *orochi_auth_generate_otp(int length)
 }
 
 /*
- * orochi_auth_hash_token
+ * orochi_gotrue_hash_token
  *    Hash a token using SHA256
+ *    (Renamed from orochi_auth_hash_token to avoid conflict with auth.c)
  */
-char *orochi_auth_hash_token(const char *token)
+char *orochi_gotrue_hash_token(const char *token)
 {
     unsigned char hash[SHA256_DIGEST_LENGTH];
     char *hex_hash;
@@ -201,7 +184,7 @@ bool orochi_auth_verify_token_hash(const char *token, const char *hash)
     if (token == NULL || hash == NULL)
         return false;
 
-    computed_hash = orochi_auth_hash_token(token);
+    computed_hash = orochi_gotrue_hash_token(token);
     if (computed_hash == NULL)
         return false;
 
@@ -814,11 +797,12 @@ void orochi_auth_free_user(OrochiAuthUser *user)
  * ============================================================ */
 
 /*
- * orochi_auth_create_session
+ * orochi_gotrue_create_session
  *    Create a new user session
+ *    (Renamed from orochi_auth_create_session to avoid conflict with auth.c)
  */
-OrochiAuthSession *orochi_auth_create_session(pg_uuid_t user_id, const char *user_agent,
-                                              const char *ip_address, OrochiAuthAAL aal)
+OrochiAuthSession *orochi_gotrue_create_session(pg_uuid_t user_id, const char *user_agent,
+                                                const char *ip_address, OrochiAuthAAL aal)
 {
     OrochiAuthSession *session;
     StringInfoData query;
@@ -920,10 +904,11 @@ OrochiAuthSession *orochi_auth_create_session(pg_uuid_t user_id, const char *use
 }
 
 /*
- * orochi_auth_revoke_session
+ * orochi_gotrue_revoke_session
  *    Revoke a session
+ *    (Renamed from orochi_auth_revoke_session to avoid conflict with auth.c)
  */
-bool orochi_auth_revoke_session(pg_uuid_t session_id)
+bool orochi_gotrue_revoke_session(pg_uuid_t session_id)
 {
     StringInfoData query;
     int ret;
@@ -1038,7 +1023,7 @@ OrochiAuthResult *orochi_auth_sign_in_password(const char *email, const char *pa
     }
 
     /* Create session */
-    result->session = orochi_auth_create_session(user->id, NULL, NULL, OROCHI_AAL_1);
+    result->session = orochi_gotrue_create_session(user->id, NULL, NULL, OROCHI_AAL_1);
     result->user = user;
     result->refresh_token = pstrdup(result->session->refresh_token);
 
@@ -1202,7 +1187,7 @@ OrochiAuthResult *orochi_auth_refresh_token(const char *refresh_token)
  */
 bool orochi_auth_sign_out(pg_uuid_t session_id)
 {
-    return orochi_auth_revoke_session(session_id);
+    return orochi_gotrue_revoke_session(session_id);
 }
 
 /* ============================================================
@@ -1634,7 +1619,7 @@ Datum orochi_auth_refresh_token_sql(PG_FUNCTION_ARGS)
 
 Datum orochi_auth_uid_sql(PG_FUNCTION_ARGS)
 {
-    pg_uuid_t uid = orochi_auth_uid();
+    pg_uuid_t uid = orochi_gotrue_uid();
 
     /* Check if UID is all zeros (not authenticated) */
     bool all_zero = true;
@@ -1653,7 +1638,7 @@ Datum orochi_auth_uid_sql(PG_FUNCTION_ARGS)
 
 Datum orochi_auth_role_sql(PG_FUNCTION_ARGS)
 {
-    char *role = orochi_auth_role();
+    char *role = orochi_gotrue_role();
 
     if (role == NULL)
         PG_RETURN_TEXT_P(cstring_to_text("anon"));
@@ -1666,10 +1651,11 @@ Datum orochi_auth_role_sql(PG_FUNCTION_ARGS)
  * ============================================================ */
 
 /*
- * orochi_auth_uid
+ * orochi_gotrue_uid
  *    Get current user ID from JWT context
+ *    (Renamed from orochi_auth_uid to avoid conflict with SQL-callable function in auth.c)
  */
-pg_uuid_t orochi_auth_uid(void)
+pg_uuid_t orochi_gotrue_uid(void)
 {
     pg_uuid_t uid;
     const char *sub;
@@ -1686,10 +1672,11 @@ pg_uuid_t orochi_auth_uid(void)
 }
 
 /*
- * orochi_auth_role
+ * orochi_gotrue_role
  *    Get current user role from JWT context
+ *    (Renamed from orochi_auth_role to avoid conflict with SQL-callable function in auth.c)
  */
-char *orochi_auth_role(void)
+char *orochi_gotrue_role(void)
 {
     const char *role;
 

@@ -444,12 +444,12 @@ extern char *orochi_auth_hash_password(const char *password);
  * Session Management Functions
  * ============================================================ */
 
-extern OrochiAuthSession *orochi_auth_create_session(pg_uuid_t user_id, const char *user_agent,
-                                                     const char *ip_address, OrochiAuthAAL aal);
+extern OrochiAuthSession *orochi_gotrue_create_session(pg_uuid_t user_id, const char *user_agent,
+                                                       const char *ip_address, OrochiAuthAAL aal);
 
 extern OrochiAuthSession *orochi_auth_get_session(pg_uuid_t session_id);
 extern List *orochi_auth_get_user_sessions(pg_uuid_t user_id);
-extern bool orochi_auth_revoke_session(pg_uuid_t session_id);
+extern bool orochi_gotrue_revoke_session(pg_uuid_t session_id);
 extern bool orochi_auth_revoke_all_sessions(pg_uuid_t user_id);
 extern void orochi_auth_cleanup_expired_sessions(void);
 extern void orochi_auth_free_session(OrochiAuthSession *session);
@@ -467,8 +467,8 @@ extern bool orochi_auth_set_jwt_context(const char *token);
 extern void orochi_auth_clear_jwt_context(void);
 
 /* JWT context accessors (from session variables) */
-extern pg_uuid_t orochi_auth_uid(void);
-extern char *orochi_auth_role(void);
+extern pg_uuid_t orochi_gotrue_uid(void);
+extern char *orochi_gotrue_role(void);
 extern char *orochi_auth_email(void);
 extern Jsonb *orochi_auth_jwt(void);
 extern OrochiAuthAAL orochi_auth_aal(void);
@@ -502,9 +502,9 @@ extern List *orochi_auth_list_identities(pg_uuid_t user_id);
  * Token Generation Utilities
  * ============================================================ */
 
-extern char *orochi_auth_generate_token(int length);
+extern char *orochi_gotrue_generate_token(int length);
 extern char *orochi_auth_generate_otp(int length);
-extern char *orochi_auth_hash_token(const char *token);
+extern char *orochi_gotrue_hash_token(const char *token);
 extern bool orochi_auth_verify_token_hash(const char *token, const char *hash);
 
 /* ============================================================

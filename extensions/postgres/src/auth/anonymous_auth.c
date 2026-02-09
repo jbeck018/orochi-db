@@ -175,7 +175,7 @@ OrochiAuthResult *orochi_auth_sign_in_anonymous(void)
     SPI_finish();
 
     /* Create session */
-    session = orochi_auth_create_session(user->id, NULL, NULL, OROCHI_AAL_1);
+    session = orochi_gotrue_create_session(user->id, NULL, NULL, OROCHI_AAL_1);
 
     result->user = user;
     result->session = session;
