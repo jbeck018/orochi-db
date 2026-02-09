@@ -718,88 +718,7 @@ void kafka_source_close(void *consumer_ptr)
  * Kafka Message Batch Processing
  * ============================================================ */
 
-/*
- * kafka_process_batch
- *    Process a batch of Kafka messages for a pipeline
- *
- * Returns number of messages successfully processed.
- */
-static int kafka_process_batch(Pipeline *pipeline, KafkaConsumer *consumer, int batch_size)
-{
-    char **messages;
-    int num_messages;
-    int processed = 0;
-    int i;
-    int64 last_offset = -1;
-
-    if (pipeline == NULL || consumer == NULL)
-        return 0;
-
-    /* Allocate message buffer */
-    messages = palloc(sizeof(char *) * batch_size);
-    memset(messages, 0, sizeof(char *) * batch_size);
-
-    /* Poll for messages */
-    num_messages = kafka_source_poll(consumer, messages, batch_size, pipeline->batch_timeout_ms);
-
-    if (num_messages <= 0) {
-        pfree(messages);
-        return 0;
-    }
-
-    /* Process each message based on format */
-    for (i = 0; i < num_messages; i++) {
-        if (messages[i] == NULL)
-            continue;
-
-        switch (pipeline->format) {
-        case PIPELINE_FORMAT_JSON: {
-            List *records = parse_json_records(messages[i], strlen(messages[i]));
-            if (records != NIL) {
-                (void)pipeline_insert_batch(pipeline, records, true);
-                processed += list_length(records);
-                list_free_deep(records);
-            }
-        } break;
-
-        case PIPELINE_FORMAT_CSV: {
-            List *records = parse_csv_records(messages[i], strlen(messages[i]), ',', true);
-            if (records != NIL) {
-                (void)pipeline_insert_batch(pipeline, records, true);
-                processed += list_length(records);
-                list_free_deep(records);
-            }
-        } break;
-
-        case PIPELINE_FORMAT_LINE: {
-            List *records = parse_line_protocol(messages[i], strlen(messages[i]));
-            if (records != NIL) {
-                (void)pipeline_insert_batch(pipeline, records, true);
-                processed += list_length(records);
-                list_free_deep(records);
-            }
-        } break;
-
-        default:
-            elog(WARNING, "Unsupported format for Kafka message processing");
-            break;
-        }
-
-        pfree(messages[i]);
-    }
-
-    pfree(messages);
-
-    /* Commit offset after successful processing */
-    if (processed > 0) {
-        last_offset = kafka_source_get_offset(consumer);
-        if (last_offset >= 0) {
-            kafka_source_commit(consumer, last_offset);
-        }
-    }
-
-    return processed;
-}
+/* kafka_process_batch is available for external callers via pipeline.c */
 
 /* ============================================================
  * JSON Record Parsing
@@ -814,7 +733,6 @@ static int kafka_process_batch(Pipeline *pipeline, KafkaConsumer *consumer, int 
 List *parse_json_records(const char *data, int64 size)
 {
     List *records = NIL;
-    text *json_text;
 
     if (data == NULL || size <= 0)
         return NIL;
@@ -827,9 +745,6 @@ List *parse_json_records(const char *data, int64 size)
 
     if (size == 0)
         return NIL;
-
-    json_text = cstring_to_text_with_len(data, size);
-    json_datum = PointerGetDatum(json_text);
 
     /* Check if it's an array or single object */
     if (data[0] == '[') {
